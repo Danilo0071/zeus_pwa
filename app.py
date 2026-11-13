@@ -5,6 +5,7 @@ import requests
 import json
 import streamlit.components.v1 as components
 
+# --- CONFIGURAÇÃO DA PÁGINA COM TEMA CYBERPUNK ---
 st.set_page_config(
     page_title="Zeus 2.0 Cyberpunk",
     page_icon="⚡",
@@ -43,6 +44,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- BANCO DE DADOS (DATABASE) ---
 DB_FILE = "zeus_chat.db"
 
 def init_db():
@@ -73,26 +75,32 @@ def add_message(session_id, role, content):
     except Exception:
         pass
 
+# --- CLIENTE LLM COM VERIFICAÇÃO DE CHAVES ---
 def get_llm_response(session_id, prompt, model_choice):
     try:
+        safe_prompt = str(prompt).encode('utf-8', errors='ignore').decode('utf-8')
+        
         if model_choice == "gemini":
-            api_key = st.secrets.get("GEMINI_API_KEY", "")
+            api_key = st.secrets.get("GEMINI_API_KEY", "").strip()
             if not api_key:
-                return "Erro: Chave GEMINI_API_KEY nao configurada nos segredos."
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+                return "⚠️ Erro: A chave GEMINI_API_KEY não está configurada nos Secrets do Streamlit Cloud."
+            
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
             headers = {"Content-Type": "application/json"}
-            payload = {"contents": [{"parts": [{"text": str(prompt)}]}]}
+            payload = {"contents": [{"parts": [{"text": safe_prompt}]}]}
+            
             response = requests.post(url, headers=headers, json=payload, timeout=30)
             if response.status_code == 200:
                 res_json = response.json()
                 return res_json["candidates"][0]["content"]["parts"][0]["text"]
             else:
-                return f"Erro API Gemini ({response.status_code}): {response.text}"
+                return f"❌ Erro API Gemini (Código {response.status_code}): Verifique se a sua chave API é válida.\nDetalhes: {response.text}"
             
         elif model_choice == "groq":
-            api_key = st.secrets.get("GROQ_API_KEY", "")
+            api_key = st.secrets.get("GROQ_API_KEY", "").strip()
             if not api_key:
-                return "Erro: Chave GROQ_API_KEY nao configurada nos segredos."
+                return "⚠️ Erro: A chave GROQ_API_KEY não está configurada nos Secrets do Streamlit Cloud."
+            
             url = "https://api.groq.com/openai/v1/chat/completions"
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -100,19 +108,21 @@ def get_llm_response(session_id, prompt, model_choice):
             }
             payload = {
                 "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": str(prompt)}]
+                "messages": [{"role": "user", "content": safe_prompt}]
             }
+            
             response = requests.post(url, headers=headers, json=payload, timeout=30)
             if response.status_code == 200:
                 res_json = response.json()
                 return res_json["choices"][0]["message"]["content"]
             else:
-                return f"Erro API Groq ({response.status_code}): {response.text}"
+                return f"❌ Erro API Groq (Código {response.status_code}): Verifique sua chave.\nDetalhes: {response.text}"
             
         elif model_choice == "claude":
-            api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+            api_key = st.secrets.get("ANTHROPIC_API_KEY", "").strip()
             if not api_key:
-                return "Erro: Chave ANTHROPIC_API_KEY nao configurada nos segredos."
+                return "⚠️ Erro: A chave ANTHROPIC_API_KEY não está configurada nos Secrets do Streamlit Cloud."
+            
             url = "https://api.anthropic.com/v1/messages"
             headers = {
                 "x-api-key": api_key,
@@ -122,34 +132,34 @@ def get_llm_response(session_id, prompt, model_choice):
             payload = {
                 "model": "claude-3-5-sonnet-20241022",
                 "max_tokens": 1024,
-                "messages": [{"role": "user", "content": str(prompt)}]
+                "messages": [{"role": "user", "content": safe_prompt}]
             }
+            
             response = requests.post(url, headers=headers, json=payload, timeout=30)
             if response.status_code == 200:
                 res_json = response.json()
                 return res_json["content"][0]["text"]
             else:
-                return f"Erro API Claude ({response.status_code}): {response.text}"
+                return f"❌ Erro API Claude (Código {response.status_code}): Verifique sua chave.\nDetalhes: {response.text}"
         else:
-            return "Modelo nao reconhecido."
+            return "Modelo não reconhecido."
     except Exception as e:
-        return f"Erro ao comunicar com a IA: {str(e)}"
+        return f"Erro de conexão com a IA: {str(e)}"
 
 def execute_prtg_action(sensor_id, action, params):
     try:
         prtg_url = st.secrets.get("PRTG_URL", "")
         if not prtg_url:
-            return False, "PRTG_URL nao configurada nos secrets."
-        return True, f"Acao '{action}' executada com sucesso no sensor {sensor_id}!"
+            return False, "PRTG_URL não configurada nos secrets."
+        return True, f"Ação '{action}' executada com sucesso no sensor {sensor_id}!"
     except Exception as e:
-        return False, f"Erro na conexao PRTG: {str(e)}"
+        return False, f"Erro na conexão PRTG: {str(e)}"
 
 def check_logs_and_act():
     st.toast("Logs verificados: Sistema operando normalmente.")
 
-# --- COMPONENTE DA ESFERA CYBERPUNK + COMANDO DE VOZ (MICROFONE) ---
+# --- COMPONENTE DA ESFERA CYBERPUNK + COMANDOS DE VOZ ---
 def render_cyber_orb_and_voice(latest_response=""):
-    # Prepara o texto para o sintetizador de voz falar caso haja resposta nova
     safe_response = json.dumps(latest_response) if latest_response else '""'
     
     orb_html = f"""
@@ -191,7 +201,6 @@ def render_cyber_orb_and_voice(latest_response=""):
             recognition.onresult = function(event) {{
                 const speechToText = event.results[0][0].transcript;
                 document.getElementById("status-voz").innerText = "Você disse: " + speechToText;
-                // Insere o texto gerado por voz no input do chat do Streamlit
                 const inputEl = window.parent.document.querySelector('input[aria-label*="comando"], input[type="text"]');
                 if (inputEl) {{
                     inputEl.value = speechToText;
@@ -228,7 +237,7 @@ with st.sidebar:
     st.subheader("🛡️ AGENTE PRTG")
     sensor_id = st.text_input("ID do Sensor PRTG")
     new_name = st.text_input("Novo Nome (Renomear)")
-    if st.button("Executar Acao"):
+    if st.button("Executar Ação"):
         if sensor_id and new_name:
             ok, msg = execute_prtg_action(sensor_id, "rename", {"new_name": new_name})
             if ok: st.success(msg)
@@ -238,18 +247,15 @@ with st.sidebar:
     if st.button("Verificar Logs de Rede"):
         check_logs_and_act()
 
-# Gerencia histórico de mensagens
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Pega a última resposta do assistente para o botão de voz falar
 last_assistant_msg = ""
 for m in reversed(st.session_state.messages):
     if m["role"] == "assistant":
         last_assistant_msg = m["content"]
         break
 
-# Renderiza a Esfera Cyberpunk com os botões de voz
 render_cyber_orb_and_voice(last_assistant_msg)
 
 for msg in st.session_state.messages:
