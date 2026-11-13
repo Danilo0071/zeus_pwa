@@ -3,3 +3,4 @@ google-genai
 groq
 anthropic
 requests
+streamlit-mic-recorder
