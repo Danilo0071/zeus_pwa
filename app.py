@@ -1,3 +1,11 @@
+import streamlit as st
+import os
+import sqlite3
+import requests
+from google import genai
+from groq import Groq
+import anthropic
+
 st.set_page_config(page_title="Zeus", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -12,7 +20,6 @@ st.markdown("""
     </script>
 """, unsafe_allow_html=True)
 
-# --- BANCO DE DADOS (DATABASE) ---
 DB_FILE = "zeus_chat.db"
 
 def init_db():
@@ -43,7 +50,6 @@ def add_message(session_id, role, content):
     except Exception:
         pass
 
-# --- CLIENTE LLM ---
 def get_llm_response(session_id, prompt, model_choice):
     try:
         if model_choice == "gemini":
@@ -84,7 +90,6 @@ def get_llm_response(session_id, prompt, model_choice):
     except Exception as e:
         return f"Erro ao comunicar com a IA: {str(e)}"
 
-# --- PRTG CLIENT ---
 def execute_prtg_action(sensor_id, action, params):
     try:
         prtg_url = st.secrets.get("PRTG_URL", "")
@@ -94,11 +99,9 @@ def execute_prtg_action(sensor_id, action, params):
     except Exception as e:
         return False, f"Erro na conexão PRTG: {str(e)}"
 
-# --- MONITOR ---
 def check_logs_and_act():
     st.toast("Logs verificados: Sistema operando normalmente.")
 
-# --- COMPONENTE DE VOZ ---
 def render_voice_component():
     st.markdown("""
         <div style="text-align: center; margin-top: 20px; color: gray; font-size: 12px;">
@@ -106,14 +109,12 @@ def render_voice_component():
         </div>
     """, unsafe_allow_html=True)
 
-# --- INICIALIZAÇÃO DO APP ---
 init_db()
 if "session_id" not in st.session_state:
     st.session_state.session_id = "zeus_master"
 
 st.title("⚡ Zeus Assistente")
 
-# Sidebar
 with st.sidebar:
     st.header("Configuração")
     model_choice = st.selectbox("Modelo LLM", ["gemini", "groq", "claude"])
@@ -132,7 +133,6 @@ with st.sidebar:
         check_logs_and_act()
         st.toast("Verificação de logs executada.")
 
-# Interface de Chat
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
