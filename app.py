@@ -163,7 +163,7 @@ def get_llm_response(session_id, prompt, model_choice):
     )
 
     try:
-        # -------- GEMINI (CORRIGIDO PARA CHAVES AQ. COM API v1) --------
+        # -------- GEMINI --------
         if model_choice == "gemini":
             api_key = _secret("GEMINI_API_KEY")
             if not api_key:
@@ -279,9 +279,10 @@ def check_logs_and_act():
 
 
 # ============================================================
-# COMPONENTE ESFERA + VOZ + WAKE WORD
+# COMPONENTE VISUAL (OLHO, ESFERA OU ROBÔ) + VOZ + WAKE WORD
 # ============================================================
 def render_orb_and_voice(
+    avatar_type="Olho Cibernético",
     theme_name="Cyberpunk",
     latest_response="",
     voice_name="",
@@ -294,43 +295,51 @@ def render_orb_and_voice(
     safe_response = json.dumps(latest_response or "")
     wake_enabled_js = "true" if wake_word_enabled else "false"
 
+    # Base HTML (contém a estrutura comum e o JS de voz)
     html = """
     <style>
+        body { margin: 0; background: transparent; overflow: hidden; }
+        .avatar-container {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 20px; background: radial-gradient(circle, PANEL 0%, BG 80%);
+            border: 1px solid BORDER; border-radius: 12px; margin-bottom: 15px;
+            box-shadow: 0 0 20px BORDER; height: 180px;
+        }
+        .btns { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top: 15px;}
+        .btn { border:none; padding:8px 16px; border-radius:20px; font-weight:bold; cursor:pointer; font-family:inherit; font-size: 13px;}
+        .btn-primary { background:linear-gradient(45deg, PRIM, SEC); color:BG; }
+        .btn-ghost { background:PANEL; color:_PRIM; border:1px solid PRIM; }
+        #status { color:PRIM; font-size:11px; margin-top:8px; font-family:monospace; text-align:center; min-height:14px; text-shadow: 0 0 5px PRIM; }
+
+        /* ---- CSS DO OLHO CIBERNÉTICO ---- */
+        .eye-box { width: 100px; height: 100px; position: relative; transition: all 0.2s ease; }
+        .eye { width: 100%; height: 100%; background: radial-gradient(circle, #0d1b2a 40%, PRIM 100%); border-radius: 50%; box-shadow: 0 0 30px PRIM; position: relative; overflow: hidden; transition: all 0.1s ease; }
+        .iris { width: 70%; height: 70%; background: radial-gradient(circle, SEC 0%, PRIM 70%, transparent 100%); border-radius: 50%; position: absolute; top: 15%; left: 15%; box-shadow: 0 0 15px PRIM; transition: all 0.3s ease; }
+        .pupil { width: 26px; height: 26px; background-color: #001a22; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: inset 0 0 10px PRIM; transition: all 0.3s ease; }
+        .blink { height: 5px !important; border-radius: 5px !important; box-shadow: 0 0 50px PRIM !important; }
+
+        /* ---- CSS DA ESFERA ---- */
         @keyframes spin { 100% { transform: rotate(360deg); } }
         @keyframes spin-rev { 100% { transform: rotate(-360deg); } }
-        @keyframes pulse {
-            0%,100% { transform: scale(0.9); opacity: .8; }
-            50% { transform: scale(1.1); opacity: 1; filter: brightness(1.3); }
-        }
-        #orb-wrap { display:flex; flex-direction:column; align-items:center;
-            padding:15px; border-radius:12px; margin-bottom:15px;
-            background: radial-gradient(circle, _PRIM22 0%, __BG_ 70%);
-            border: 1px solid _BORDER_; }
-        .orb { position:relative; width:80px; height:80px; margin-bottom:10px; }
-        .ring1 { position:absolute; inset:0; border-radius:50%;
-            border:3px dashed _PRIM_; animation:spin 8s linear infinite;
-            box-shadow:0 0 15px _PRIM_; }
-        .ring2 { position:absolute; inset:10px; border-radius:50%;
-            border:3px solid _SEC_; animation:spin-rev 5s linear infinite;
-            box-shadow:0 0 20px _SEC_; }
-        .core { position:absolute; inset:25px; border-radius:50%;
-            background: radial-gradient(circle, _PRIM_ 0%, _SEC_ 100%);
-            animation:pulse 2s ease-in-out infinite; box-shadow:0 0 25px _PRIM_; }
-        .btns { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
-        .btn { border:none; padding:8px 16px; border-radius:20px;
-            font-weight:bold; cursor:pointer; font-family:inherit; }
-        .btn-primary { background:linear-gradient(45deg, _PRIM, __SEC); color:BG_; }
-        .btn-ghost { background:_PANEL; color:PRIM; border:1px solid __PRIM_; }
-        #status { color:_PRIM_; font-size:11px; margin-top:8px;
-            font-family:monospace; text-align:center; min-height:14px; }
+        @keyframes pulse { 0%,100% { transform: scale(0.9); opacity: .8; } 50% { transform: scale(1.1); opacity: 1; filter: brightness(1.3); } }
+        .orb { position:relative; width:80px; height:80px; }
+        .ring1 { position:absolute; inset:0; border-radius:50%; border:3px dashed PRIM; animation:spin 8s linear infinite; box-shadow:0 0 15px PRIM; }
+        .ring2 { position:absolute; inset:10px; border-radius:50%; border:3px solid SEC; animation:spin-rev 5s linear infinite; box-shadow:0 0 20px SEC; }
+        .core { position:absolute; inset:25px; border-radius:50%; background: radial-gradient(circle, PRIM 0%, SEC 100%); animation:pulse 2s ease-in-out infinite; box-shadow:0 0 25px PRIM; }
+
+        /* ---- CSS DO ROBÔ ---- */
+        .robot-head { width: 90px; height: 80px; background: PANEL; border: 3px solid PRIM; border-radius: 20px; position: relative; box-shadow: 0 0 20px PRIM, inset 0 0 10px PRIM; transition: all 0.3s; }
+        .robot-antenna { width: 4px; height: 25px; background: SEC; position: absolute; top: -28px; left: 50%; transform: translateX(-50%); border-radius: 2px; }
+        .robot-antenna::after { content: ''; width: 12px; height: 12px; background: PRIM; border-radius: 50%; position: absolute; top: -12px; left: -4px; box-shadow: 0 0 10px PRIM; animation: pulse 1.5s infinite; }
+        .robot-eyes { display: flex; justify-content: space-around; padding: 20px 15px 0; }
+        .robot-eye { width: 22px; height: 22px; background: SEC; border-radius: 50%; box-shadow: 0 0 15px SEC; transition: all 0.1s; position: relative; overflow: hidden;}
+        .robot-pupil { width: 8px; height: 8px; background: #fff; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); transition: all 0.3s; }
+        .robot-mouth { width: 40px; height: 6px; background: PRIM; position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); border-radius: 3px; box-shadow: 0 0 10px PRIM; }
+        .robot-blink { height: 2px !important; margin-top: 10px; }
     </style>
 
-    <div id="orb-wrap">
-        <div class="orb">
-            <div class="ring1"></div>
-            <div class="ring2"></div>
-            <div class="core"></div>
-        </div>
+    <div class="avatar-container" id="avatar-wrapper">
+        AVATAR_HTML
         <div class="btns">
             <button class="btn btn-primary" onclick="startListening()">🎙️ Falar</button>
             <button class="btn btn-ghost" onclick="speakResponse()">🔊 Ouvir</button>
@@ -340,16 +349,17 @@ def render_orb_and_voice(
     </div>
 
     <script>
-        const TEXT = _RESPONSE_;
-        const VOICE_NAME = _VOICE_;
-        const RATE = _RATE_;
-        const PITCH = _PITCH_;
-        const WAKE_ENABLED = _WAKE_ENABLED_;
-        const WAKE_WORD = "_WAKE_WORD_".toLowerCase();
+        const TEXT = RESPONSE;
+        const VOICE_NAME = VOICE;
+        const RATE = RATE;
+        const PITCH = PITCH;
+        const WAKE_ENABLED = WAKE_ENABLED;
+        const WAKE_WORD = "WAKE_WORD".toLowerCase();
 
         const statusEl = document.getElementById("status");
         const wakeBtn = document.getElementById("wakeBtn");
 
+        // --- LÓGICA DE VOZ ---
         function pickVoice() {
             const voices = window.speechSynthesis.getVoices();
             if (!VOICE_NAME) return voices.find(v => v.lang.startsWith("pt")) || voices[0];
@@ -361,44 +371,31 @@ def render_orb_and_voice(
             const u = new SpeechSynthesisUtterance(TEXT);
             const v = pickVoice();
             if (v) u.voice = v;
-            u.lang = "pt-BR";
-            u.rate = RATE;
-            u.pitch = PITCH;
-            window.speechSynthesis.cancel();
-            window.speechSynthesis.speak(u);
+            u.lang = "pt-BR"; u.rate = RATE; u.pitch = PITCH;
+            window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
         }
 
         function injectToStreamlit(text) {
-            const el = window.parent.document.querySelector(
-                'textarea[data-testid="stChatInputTextArea"], input[type="text"]'
-            );
+            const el = window.parent.document.querySelector('textarea[data-testid="stChatInputTextArea"], input[type="text"]');
             if (el) {
-                const proto = el.tagName === 'TEXTAREA'
-                    ? HTMLTextAreaElement.prototype
-                    : HTMLInputElement.prototype;
+                const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
                 const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
                 setter.call(el, text);
                 el.dispatchEvent(new Event('input', { bubbles: true }));
                 el.focus();
                 setTimeout(() => {
-                    const send = window.parent.document.querySelector(
-                        'button[data-testid="stChatInputSubmitButton"]'
-                    );
+                    const send = window.parent.document.querySelector('button[data-testid="stChatInputSubmitButton"]');
                     if (send) send.click();
                 }, 200);
             }
         }
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            statusEl.innerText = "Navegador sem suporte a voz.";
-        }
+        if (!SpeechRecognition) statusEl.innerText = "Navegador sem suporte a voz.";
 
         function makeRecognizer(continuous) {
             const r = new SpeechRecognition();
-            r.lang = "pt-BR";
-            r.continuous = continuous;
-            r.interimResults = false;
+            r.lang = "pt-BR"; r.continuous = continuous; r.interimResults = false;
             return r;
         }
 
@@ -417,34 +414,20 @@ def render_orb_and_voice(
                     if (cmd) {
                         statusEl.innerText = "⚡ " + cmd;
                         injectToStreamlit(cmd);
-                        wakeRec.stop();
-                        wakeActive = false;
-                        wakeBtn.style.opacity = 0.5;
-                    } else {
-                        statusEl.innerText = "🛰️ Diga o comando após 'Zeus'...";
-                    }
+                        wakeRec.stop(); wakeActive = false; wakeBtn.style.opacity = 0.5;
+                    } else { statusEl.innerText = "🛰️ Diga o comando após 'Zeus'..."; }
                 }
             };
             wakeRec.onerror = () => { statusEl.innerText = "erro wake"; };
-            wakeRec.onend = () => {
-                if (wakeActive) { try { wakeRec.start(); } catch(e){} }
-            };
-            try {
-                wakeRec.start();
-                statusEl.innerText = "🛰️ Escutando wake word...";
-            } catch(e){}
+            wakeRec.onend = () => { if (wakeActive) { try { wakeRec.start(); } catch(e){} } };
+            try { wakeRec.start(); statusEl.innerText = "🛰️ Escutando wake word..."; wakeBtn.style.opacity = 1; } catch(e){}
         }
 
         function toggleWake() {
             if (wakeActive) {
-                wakeActive = false;
-                if (wakeRec) wakeRec.stop();
-                wakeBtn.style.opacity = 0.5;
-                statusEl.innerText = "wake off";
+                wakeActive = false; if (wakeRec) wakeRec.stop(); wakeBtn.style.opacity = 0.5; statusEl.innerText = "wake off";
             } else {
-                wakeActive = true;
-                wakeBtn.style.opacity = 1;
-                startWake();
+                wakeActive = true; wakeBtn.style.opacity = 1; startWake();
             }
         }
 
@@ -452,36 +435,120 @@ def render_orb_and_voice(
             if (!SpeechRecognition) return;
             const r = makeRecognizer(false);
             statusEl.innerText = "🎙️ Ouvindo...";
+            
+            // Reações visuais ao ouvir (dependendo do avatar)
+            const eye = document.getElementById("eye");
+            const iris = document.getElementById("iris");
+            if(eye) eye.style.boxShadow = "0 0 50px #00ff00";
+            if(iris) iris.style.boxShadow = "0 0 40px #00ff00";
+            const rHead = document.querySelector(".robot-head");
+            if(rHead) rHead.style.borderColor = "#00ff00";
+            
             r.onresult = (e) => {
                 const said = e.results[0][0].transcript;
                 statusEl.innerText = "🗣️ " + said;
+                
+                if(eye) eye.style.boxShadow = "0 0 30px PRIM";
+                if(iris) iris.style.boxShadow = "0 0 15px PRIM";
+                if(rHead) rHead.style.borderColor = "PRIM";
+
                 injectToStreamlit(said);
             };
-            r.onerror = () => { statusEl.innerText = "erro reconhecimento"; };
+            r.onerror = () => { 
+                statusEl.innerText = "erro reconhecimento"; 
+                if(eye) eye.style.boxShadow = "0 0 30px PRIM";
+                if(iris) iris.style.boxShadow = "0 0 15px PRIM";
+                if(rHead) rHead.style.borderColor = "PRIM";
+            };
+            r.onend = () => {
+                if(eye) eye.style.boxShadow = "0 0 30px PRIM";
+                if(iris) iris.style.boxShadow = "0 0 15px PRIM";
+                if(rHead) rHead.style.borderColor = "PRIM";
+            };
             r.start();
         }
 
         if (wakeActive) startWake();
+
+        // --- ANIMAÇÕES ESPECÍFICAS DE CADA AVATAR ---
+        // Olho
+        if (document.getElementById("eye")) {
+            setInterval(() => {
+                document.getElementById("eye").classList.add('blink');
+                setTimeout(() => document.getElementById("eye").classList.remove('blink'), 150);
+            }, Math.random() * 3000 + 4000);
+            
+            setInterval(() => {
+                const x = (Math.random() - 0.5) * 30;
+                const y = (Math.random() - 0.5) * 30;
+                document.getElementById("iris").style.transform = translate(${x}px, ${y}px);
+                document.getElementById("pupil").style.transform = translate(calc(-50% + ${x}px), calc(-50% + ${y}px));
+            }, 2000);
+        }
+
+        // Robô
+        if (document.querySelector(".robot-eye")) {
+            setInterval(() => {
+                document.querySelectorAll('.robot-eye').forEach(el => el.classList.add('robot-blink'));
+                setTimeout(() => document.querySelectorAll('.robot-eye').forEach(el => el.classList.remove('robot-blink')), 150);
+            }, Math.random() * 3000 + 4000);
+
+            setInterval(() => {
+                const x = (Math.random() - 0.5) * 10;
+                const y = (Math.random() - 0.5) * 10;
+                document.querySelectorAll(".robot-pupil").forEach(el => {
+                    el.style.transform = translate(calc(-50% + ${x}px), calc(-50% + ${y}px));
+                });
+            }, 2000);
+        }
     </script>
     """
 
+    # Injeta o HTML específico do avatar escolhido
+    if avatar_type == "Esfera":
+        avatar_html = """
+        <div class="orb">
+            <div class="ring1"></div>
+            <div class="ring2"></div>
+            <div class="core"></div>
+        </div>
+        """
+    elif avatar_type == "Robô Digital":
+        avatar_html = """
+        <div class="robot-head">
+            <div class="robot-antenna"></div>
+            <div class="robot-eyes">
+                <div class="robot-eye"><div class="robot-pupil"></div></div>
+                <div class="robot-eye"><div class="robot-pupil"></div></div>
+            </div>
+            <div class="robot-mouth"></div>
+        </div>
+        """
+    else: # Olho Cibernético (padrão)
+        avatar_html = """
+        <div class="eye-box">
+            <div class="eye" id="eye">
+                <div class="iris" id="iris">
+                    <div class="pupil" id="pupil"></div>
+                </div>
+            </div>
+        </div>
+        """
+
+    html = html.replace("AVATAR_HTML", avatar_html)
+
     replacements = {
-        "_PRIM_": t["primary"],
-        "_SEC_": t["secondary"],
-        "_BG_": t["bg"],
-        "_PANEL_": t["panel"],
-        "_BORDER_": t["border"],
-        "_RESPONSE_": safe_response,
-        "_VOICE_": json.dumps(voice_name),
-        "_RATE_": str(float(rate)),
-        "_PITCH_": str(float(pitch)),
-        "_WAKE_ENABLED_": wake_enabled_js,
-        "_WAKE_WORD_": wake_word,
+        "PRIM": t["primary"], "SEC": t["secondary"], "BG": t["bg"],
+        "PANEL": t["panel"], "BORDER": t["border"],
+        "RESPONSE": safe_response, "VOICE": json.dumps(voice_name),
+        "RATE": str(float(rate)), "PITCH": str(float(pitch)),
+        "WAKE_ENABLED": wake_enabled_js, "WAKE_WORD": wake_word,
     }
     for k, v in replacements.items():
         html = html.replace(k, v)
 
-    components.html(html, height=240)
+    # Aumentei um pouco a altura para caber os botões e o robô
+    components.html(html, height=300)
 
 
 # ============================================================
@@ -501,6 +568,14 @@ with st.sidebar:
     st.header("⚙️ Configuração")
 
     theme_name = st.selectbox("🎨 Interface", list(THEMES.keys()), index=0)
+    
+    # NOVO SELETOR DE AVATAR
+    avatar_type = st.selectbox(
+        "🤖 Avatar do Zeus", 
+        ["Olho Cibernético", "Esfera", "Robô Digital"], 
+        index=0
+    )
+    
     model_choice = st.selectbox("🧠 Modelo LLM", ["gemini", "groq", "claude"])
 
     st.divider()
@@ -545,7 +620,7 @@ st.title("⚡ ZEUS // CYBER-CORE")
 
 
 # ============================================================
-# ESFERA + VOZ
+# AVATAR + VOZ
 # ============================================================
 last_assistant = ""
 for m in reversed(st.session_state.messages):
@@ -554,6 +629,7 @@ for m in reversed(st.session_state.messages):
         break
 
 render_orb_and_voice(
+    avatar_type=avatar_type, # Passa a escolha do usuário
     theme_name=theme_name,
     latest_response=last_assistant,
     voice_name=voice_name,
