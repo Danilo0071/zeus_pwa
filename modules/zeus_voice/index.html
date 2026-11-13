@@ -23,58 +23,67 @@
     <button id="mic-btn">🎤 Falar</button>
 
     <script>
-        export default function(component) {
-            const { setStateValue, setTriggerValue, parentElement, data } = component;
+        // Função do Streamlit para conversar com o Python
+        function sendMessageToPython(message) {
+            window.parent.postMessage({
+                isStreamlitMessage: true,
+                type: "streamlit:setComponentValue",
+                value: { text: message }
+            }, "*");
+        }
 
-            const eye = parentElement.querySelector('#eye');
-            const pupil = parentElement.querySelector('#pupil');
-            const statusText = parentElement.querySelector('#status-text');
-            const micBtn = parentElement.querySelector('#mic-btn');
+        const eye = document.getElementById('eye');
+        const pupil = document.getElementById('pupil');
+        const statusText = document.getElementById('status-text');
+        const micBtn = document.getElementById('mic-btn');
 
-            setInterval(() => {
-                eye.classList.add('blink');
-                setTimeout(() => eye.classList.remove('blink'), 150);
-            }, 4000);
+        // Olho piscando
+        setInterval(() => {
+            eye.classList.add('blink');
+            setTimeout(() => eye.classList.remove('blink'), 150);
+        }, 4000);
 
-            setInterval(() => {
-                const x = (Math.random() - 0.5) * 40;
-                const y = (Math.random() - 0.5) * 40;
-                pupil.style.transform = translate(calc(-50% + ${x}px), calc(-50% + ${y}px));
-            }, 2000);
+        // Olho olhando para os lados
+        setInterval(() => {
+            const x = (Math.random() - 0.5) * 40;
+            const y = (Math.random() - 0.5) * 40;
+            pupil.style.transform = translate(calc(-50% + ${x}px), calc(-50% + ${y}px));
+        }, 2000);
 
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        // Lógica da Voz
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        
+        if (SpeechRecognition) {
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'pt-BR';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            micBtn.addEventListener('click', () => {
+                recognition.start();
+                statusText.innerText = "Ouvindo...";
+                eye.style.boxShadow = "0 0 50px #00ff00"; 
+            });
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                statusText.innerText = Você disse: ${transcript};
+                eye.style.boxShadow = "0 0 30px #00e5ff"; 
+                // Envia o texto para o Python!
+                sendMessageToPython(transcript);
+            };
+
+            recognition.onerror = (event) => {
+                statusText.innerText = "Erro: " + event.error;
+                eye.style.boxShadow = "0 0 30px #ff0000";
+            };
             
-            if (SpeechRecognition) {
-                const recognition = new SpeechRecognition();
-                recognition.lang = 'pt-BR';
-                recognition.continuous = false;
-                recognition.interimResults = false;
-
-                micBtn.addEventListener('click', () => {
-                    recognition.start();
-                    statusText.innerText = "Ouvindo...";
-                    eye.style.boxShadow = "0 0 50px #00ff00"; 
-                });
-
-                recognition.onresult = (event) => {
-                    const transcript = event.results[0][0].transcript;
-                    statusText.innerText = Você disse: ${transcript};
-                    eye.style.boxShadow = "0 0 30px #00e5ff"; 
-                    setTriggerValue("text", transcript);
-                };
-
-                recognition.onerror = (event) => {
-                    statusText.innerText = "Erro: " + event.error;
-                    eye.style.boxShadow = "0 0 30px #ff0000";
-                };
-                
-                recognition.onend = () => {
-                     eye.style.boxShadow = "0 0 30px #00e5ff";
-                };
-            } else {
-                statusText.innerText = "Navegador não suporta voz.";
-                micBtn.disabled = true;
-            }
+            recognition.onend = () => {
+                 eye.style.boxShadow = "0 0 30px #00e5ff";
+            };
+        } else {
+            statusText.innerText = "Navegador não suporta voz.";
+            micBtn.disabled = true;
         }
     </script>
 </body>
