@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-from dotenv import load_dotenv
 
 # Corrigido para os nomes exatos dos arquivos que criamos na pasta modules:
 from modules.database import init_db, add_message
@@ -8,8 +7,6 @@ from modules.llm_client import get_llm_response
 from modules.voice_component import render_voice_component
 from modules.prtg_client import execute_prtg_action
 from modules.monitor import check_logs_and_act
-
-load_dotenv() # Localmente. Na nuvem, use st.secrets.
 
 # Configuração da Página PWA
 st.set_page_config(page_title="Zeus", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
