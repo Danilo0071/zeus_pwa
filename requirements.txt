@@ -1,0 +1,5 @@
+streamlit
+google-genai
+groq
+anthropic
+requests
