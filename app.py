@@ -1,5 +1,3 @@
-[23:23, 12/11/2026] Danilo: Zeus 2.0 — Assistente DevOps Multi-LLM com PWA, Voz e Agente PRTG
-"""
 import os
 import json
 import sqlite3
@@ -24,10 +22,7 @@ THEMES = {
     "Cyberpunk": {
         "bg": "#0b0f19", "panel": "#121826", "primary": "#00ffcc",
         "secondary": "#0077ff", "text": "#00ffcc",…
-[23:29, 12/11/2026] Danilo: """
-Zeus 2.0 — Assistente DevOps Multi-LLM com PWA, Voz e Agente PRTG
-"""
-import os
+[23:38, 12/11/2026] Danilo: import os
 import json
 import sqlite3
 import requests
