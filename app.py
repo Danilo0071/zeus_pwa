@@ -21,7 +21,7 @@ st.set_page_config(
 THEMES = {
     "Cyberpunk": {
         "bg": "#0b0f19", "panel": "#121826", "primary": "#00ffcc",
-        "secondary": "#0077ff", "text": "#00ffcc",…
+        "secondary": "#0077ff", "text": "#00ffcc"
 [23:38, 12/11/2026] Danilo: import os
 import json
 import sqlite3
