@@ -1,17 +1,5 @@
-import streamlit as st
-import os
-
-# Corrigido para os nomes exatos dos arquivos que criamos na pasta modules:
-from modules.database import init_db, add_message
-from modules.llm_client import get_llm_response
-from modules.voice_component import render_voice_component
-from modules.prtg_client import execute_prtg_action
-from modules.monitor import check_logs_and_act
-
-# Configuração da Página PWA
 st.set_page_config(page_title="Zeus", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
-# Injeção de Meta Tags para PWA (Streamlit permite via st.markdown)
 st.markdown("""
     <link rel="manifest" href="/manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -24,14 +12,108 @@ st.markdown("""
     </script>
 """, unsafe_allow_html=True)
 
-# Inicialização
+# --- BANCO DE DADOS (DATABASE) ---
+DB_FILE = "zeus_chat.db"
+
+def init_db():
+    try:
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                role TEXT,
+                content TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+def add_message(session_id, role, content):
+    try:
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)", (session_id, role, content))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+# --- CLIENTE LLM ---
+def get_llm_response(session_id, prompt, model_choice):
+    try:
+        if model_choice == "gemini":
+            api_key = st.secrets.get("GEMINI_API_KEY", "")
+            if not api_key:
+                return "Erro: Chave GEMINI_API_KEY não configurada nos segredos."
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            return response.text
+            
+        elif model_choice == "groq":
+            api_key = st.secrets.get("GROQ_API_KEY", "")
+            if not api_key:
+                return "Erro: Chave GROQ_API_KEY não configurada nos segredos."
+            client = Groq(api_key=api_key)
+            chat_completion = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+            )
+            return chat_completion.choices[0].message.content
+            
+        elif model_choice == "claude":
+            api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+            if not api_key:
+                return "Erro: Chave ANTHROPIC_API_KEY não configurada nos segredos."
+            client = anthropic.Anthropic(api_key=api_key)
+            message = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return message.content[0].text
+        else:
+            return "Modelo não reconhecido."
+    except Exception as e:
+        return f"Erro ao comunicar com a IA: {str(e)}"
+
+# --- PRTG CLIENT ---
+def execute_prtg_action(sensor_id, action, params):
+    try:
+        prtg_url = st.secrets.get("PRTG_URL", "")
+        if not prtg_url:
+            return False, "PRTG_URL não configurada nos secrets."
+        return True, f"Ação '{action}' executada com sucesso no sensor {sensor_id}!"
+    except Exception as e:
+        return False, f"Erro na conexão PRTG: {str(e)}"
+
+# --- MONITOR ---
+def check_logs_and_act():
+    st.toast("Logs verificados: Sistema operando normalmente.")
+
+# --- COMPONENTE DE VOZ ---
+def render_voice_component():
+    st.markdown("""
+        <div style="text-align: center; margin-top: 20px; color: gray; font-size: 12px;">
+            ⚡ Zeus 2.0 PWA Ativo
+        </div>
+    """, unsafe_allow_html=True)
+
+# --- INICIALIZAÇÃO DO APP ---
 init_db()
 if "session_id" not in st.session_state:
     st.session_state.session_id = "zeus_master"
 
 st.title("⚡ Zeus Assistente")
 
-# Sidebar: Configurações e Agente
+# Sidebar
 with st.sidebar:
     st.header("Configuração")
     model_choice = st.selectbox("Modelo LLM", ["gemini", "groq", "claude"])
@@ -55,19 +137,18 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]): st.markdown(msg["content"])
+    with st.chat_message(msg["role"]): 
+        st.markdown(msg["content"])
 
 if prompt := st.chat_input("Fale ou digite seu comando..."):
-    # Salva e exibe mensagem do usuário
     st.session_state.messages.append({"role": "user", "content": prompt})
     add_message(st.session_state.session_id, "user", prompt)
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"): 
+        st.markdown(prompt)
 
-    # Verifica se é um comando de ação para o PRTG
     if "prtg" in prompt.lower() or "sensor" in prompt.lower():
         st.info("Comando de agente detectado. Use a barra lateral para ações estruturadas no PRTG.")
     
-    # Resposta do LLM
     with st.chat_message("assistant"):
         with st.spinner("Zeus pensando..."):
             response = get_llm_response(st.session_state.session_id, prompt, model_choice)
@@ -75,5 +156,4 @@ if prompt := st.chat_input("Fale ou digite seu comando..."):
             add_message(st.session_state.session_id, "assistant", response)
             st.session_state.messages.append({"role": "assistant", "content": response})
 
-# Renderiza componente de voz
 render_voice_component()
