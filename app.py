@@ -85,7 +85,6 @@ st.markdown(
 # ============================================================
 DB_FILE = "zeus_chat.db"
 
-
 def init_db():
     try:
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -131,7 +130,7 @@ def get_recent_context(session_id, limit=6):
 
 
 # ============================================================
-# LEITURA DE CHAVES (st.secrets + env)
+# LEITURA DE CHAVES
 # ============================================================
 def _secret(key: str, default: str = "") -> str:
     try:
@@ -163,72 +162,40 @@ def get_llm_response(session_id, prompt, model_choice):
     )
 
     try:
-        # -------- GEMINI --------
         if model_choice == "gemini":
             api_key = _secret("GEMINI_API_KEY")
             if not api_key:
                 return "⚠️ GEMINI_API_KEY ausente. Configure em Settings → Secrets."
             
             url = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent"
-            headers = {
-                "Content-Type": "application/json",
-                "x-goog-api-key": api_key
-            }
-            
-            contents = [
-                {
-                    "role": "user" if m["role"] == "user" else "model",
-                    "parts": [{"text": m["content"]}],
-                }
-                for m in msgs
-            ]
-            payload = {
-                "systemInstruction": {"parts": [{"text": sys_prompt}]},
-                "contents": contents,
-            }
+            headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+            contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in msgs]
+            payload = {"systemInstruction": {"parts": [{"text": sys_prompt}]}, "contents": contents}
             
             r = requests.post(url, headers=headers, json=payload, timeout=45)
             if r.status_code == 200:
                 return r.json()["candidates"][0]["content"]["parts"][0]["text"]
             return f"❌ Gemini {r.status_code}: {r.text[:300]}"
 
-        # -------- GROQ --------
         elif model_choice == "groq":
             api_key = _secret("GROQ_API_KEY")
             if not api_key:
                 return "⚠️ GROQ_API_KEY ausente. Configure em Settings → Secrets."
             url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "model": "openai/gpt-oss-120b",
-                "messages": [{"role": "system", "content": sys_prompt}] + msgs,
-                "temperature": 0.4,
-            }
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            payload = {"model": "openai/gpt-oss-120b", "messages": [{"role": "system", "content": sys_prompt}] + msgs, "temperature": 0.4}
             r = requests.post(url, headers=headers, json=payload, timeout=45)
             if r.status_code == 200:
                 return r.json()["choices"][0]["message"]["content"]
             return f"❌ Groq {r.status_code}: {r.text[:300]}"
 
-        # -------- CLAUDE --------
         elif model_choice == "claude":
             api_key = _secret("ANTHROPIC_API_KEY")
             if not api_key:
                 return "⚠️ ANTHROPIC_API_KEY ausente. Configure em Settings → Secrets."
             url = "https://api.anthropic.com/v1/messages"
-            headers = {
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "model": "claude-3-5-haiku-20241022",
-                "max_tokens": 1024,
-                "system": sys_prompt,
-                "messages": [m for m in msgs if m["role"] != "system"],
-            }
+            headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+            payload = {"model": "claude-3-5-haiku-20241022", "max_tokens": 1024, "system": sys_prompt, "messages": [m for m in msgs if m["role"] != "system"]}
             r = requests.post(url, headers=headers, json=payload, timeout=45)
             if r.status_code == 200:
                 return r.json()["content"][0]["text"]
@@ -242,44 +209,33 @@ def get_llm_response(session_id, prompt, model_choice):
 
 
 # ============================================================
-# PRTG — AÇÃO
+# PRTG
 # ============================================================
 def execute_prtg_action(sensor_id, action, params):
     try:
         prtg_url = _secret("PRTG_URL")
         user = _secret("PRTG_USERNAME")
         passhash = _secret("PRTG_PASSHASH")
-        if not prtg_url:
-            return False, "PRTG_URL não configurada nos secrets."
-        if not user or not passhash:
-            return False, "Credenciais PRTG ausentes (PRTG_USERNAME / PRTG_PASSHASH)."
-
+        if not prtg_url: return False, "PRTG_URL não configurada."
+        if not user or not passhash: return False, "Credenciais PRTG ausentes."
         endpoint = f"{prtg_url.rstrip('/')}/editsettings"
         query = {"id": sensor_id, "username": user, "passhash": passhash}
-
-        if action == "rename":
-            query["name_"] = params.get("new_name", "")
-        elif action == "pause":
-            query["active_"] = "0"
-        elif action == "resume":
-            query["active_"] = "1"
-        else:
-            return False, f"Ação '{action}' não suportada."
-
+        if action == "rename": query["name_"] = params.get("new_name", "")
+        elif action == "pause": query["active_"] = "0"
+        elif action == "resume": query["active_"] = "1"
+        else: return False, f"Ação '{action}' não suportada."
         r = requests.get(endpoint, params=query, timeout=15, verify=False)
-        if r.status_code == 200:
-            return True, f"Ação '{action}' aplicada ao sensor {sensor_id}."
+        if r.status_code == 200: return True, f"Ação '{action}' aplicada."
         return False, f"PRTG {r.status_code}: {r.text[:200]}"
     except Exception as e:
         return False, f"Erro PRTG: {e}"
-
 
 def check_logs_and_act():
     st.toast("Logs verificados: sistema operacional OK.")
 
 
 # ============================================================
-# COMPONENTE VISUAL (OLHO, ESFERA OU ROBÔ) + VOZ + WAKE WORD
+# COMPONENTE VISUAL COM EFEITOS DINÂMICOS
 # ============================================================
 def render_orb_and_voice(
     avatar_type="Olho Cibernético",
@@ -295,7 +251,6 @@ def render_orb_and_voice(
     safe_response = json.dumps(latest_response or "")
     wake_enabled_js = "true" if wake_word_enabled else "false"
 
-    # Base HTML (contém a estrutura comum e o JS de voz)
     html = """
     <style>
         body { margin: 0; background: transparent; overflow: hidden; }
@@ -303,49 +258,144 @@ def render_orb_and_voice(
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             padding: 20px; background: radial-gradient(circle, PANEL 0%, BG 80%);
             border: 1px solid BORDER; border-radius: 12px; margin-bottom: 15px;
-            box-shadow: 0 0 20px BORDER; height: 180px;
+            box-shadow: 0 0 20px BORDER; height: 240px; position: relative;
+            transition: all 0.3s ease;
         }
-        .btns { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top: 15px;}
+        
+        /* Efeitos de fala e escuta no container */
+        .avatar-container.listening { box-shadow: 0 0 50px #00ff00, inset 0 0 30px #00ff00; border-color: #00ff00; }
+        .avatar-container.speaking { box-shadow: 0 0 50px PRIM, inset 0 0 30px PRIM; border-color: PRIM; }
+
+        .btns { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top: 15px; z-index: 10;}
         .btn { border:none; padding:8px 16px; border-radius:20px; font-weight:bold; cursor:pointer; font-family:inherit; font-size: 13px;}
         .btn-primary { background:linear-gradient(45deg, PRIM, SEC); color:BG; }
         .btn-ghost { background:PANEL; color:_PRIM; border:1px solid PRIM; }
-        #status { color:PRIM; font-size:11px; margin-top:8px; font-family:monospace; text-align:center; min-height:14px; text-shadow: 0 0 5px PRIM; }
+        #status { color:PRIM; font-size:12px; margin-top:8px; font-family:monospace; text-align:center; min-height:14px; text-shadow: 0 0 5px PRIM; z-index:10; font-weight: bold;}
 
-        /* ---- CSS DO OLHO CIBERNÉTICO ---- */
-        .eye-box { width: 100px; height: 100px; position: relative; transition: all 0.2s ease; }
-        .eye { width: 100%; height: 100%; background: radial-gradient(circle, #0d1b2a 40%, PRIM 100%); border-radius: 50%; box-shadow: 0 0 30px PRIM; position: relative; overflow: hidden; transition: all 0.1s ease; }
-        .iris { width: 70%; height: 70%; background: radial-gradient(circle, SEC 0%, PRIM 70%, transparent 100%); border-radius: 50%; position: absolute; top: 15%; left: 15%; box-shadow: 0 0 15px PRIM; transition: all 0.3s ease; }
-        .pupil { width: 26px; height: 26px; background-color: #001a22; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: inset 0 0 10px PRIM; transition: all 0.3s ease; }
-        .blink { height: 5px !important; border-radius: 5px !important; box-shadow: 0 0 50px PRIM !important; }
-
-        /* ---- CSS DA ESFERA ---- */
+        /* ANIMAÇÕES BASE */
+        @keyframes pulse { 0%,100% { transform: scale(0.9); opacity: .8; } 50% { transform: scale(1.1); opacity: 1; } }
         @keyframes spin { 100% { transform: rotate(360deg); } }
-        @keyframes spin-rev { 100% { transform: rotate(-360deg); } }
-        @keyframes pulse { 0%,100% { transform: scale(0.9); opacity: .8; } 50% { transform: scale(1.1); opacity: 1; filter: brightness(1.3); } }
-        .orb { position:relative; width:80px; height:80px; }
-        .ring1 { position:absolute; inset:0; border-radius:50%; border:3px dashed PRIM; animation:spin 8s linear infinite; box-shadow:0 0 15px PRIM; }
-        .ring2 { position:absolute; inset:10px; border-radius:50%; border:3px solid SEC; animation:spin-rev 5s linear infinite; box-shadow:0 0 20px SEC; }
-        .core { position:absolute; inset:25px; border-radius:50%; background: radial-gradient(circle, PRIM 0%, SEC 100%); animation:pulse 2s ease-in-out infinite; box-shadow:0 0 25px PRIM; }
+        @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
 
-        /* ---- CSS DO ROBÔ ---- */
-        .robot-head { width: 90px; height: 80px; background: PANEL; border: 3px solid PRIM; border-radius: 20px; position: relative; box-shadow: 0 0 20px PRIM, inset 0 0 10px PRIM; transition: all 0.3s; }
-        .robot-antenna { width: 4px; height: 25px; background: SEC; position: absolute; top: -28px; left: 50%; transform: translateX(-50%); border-radius: 2px; }
-        .robot-antenna::after { content: ''; width: 12px; height: 12px; background: PRIM; border-radius: 50%; position: absolute; top: -12px; left: -4px; box-shadow: 0 0 10px PRIM; animation: pulse 1.5s infinite; }
-        .robot-eyes { display: flex; justify-content: space-around; padding: 20px 15px 0; }
-        .robot-eye { width: 22px; height: 22px; background: SEC; border-radius: 50%; box-shadow: 0 0 15px SEC; transition: all 0.1s; position: relative; overflow: hidden;}
-        .robot-pupil { width: 8px; height: 8px; background: #fff; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); transition: all 0.3s; }
-        .robot-mouth { width: 40px; height: 6px; background: PRIM; position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); border-radius: 3px; box-shadow: 0 0 10px PRIM; }
-        .robot-blink { height: 2px !important; margin-top: 10px; }
+        /* ------------------------------------------------ */
+        /* 1. OLHO CIBERNÉTICO */
+        /* ------------------------------------------------ */
+        .eye-wrapper {
+            width: 140px; height: 140px; position: relative;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            background: #050810; box-shadow: inset 0 0 30px SEC, 0 0 20px BORDER; transition: all 0.3s;
+        }
+        .eye-lid { position: absolute; width: 100%; height: 50%; background: #0a0f19; z-index: 5; transition: all 0.15s ease; border-radius: 50%; border-bottom: 2px solid PRIM; }
+        .eye-lid.top { top: 0; border-radius: 50% 50% 0 0; transform-origin: top; transform: scaleY(1); box-shadow: inset 0 -5px 15px PRIM; }
+        .eye-lid.bottom { bottom: 0; border-radius: 0 0 50% 50%; transform-origin: bottom; transform: scaleY(1); box-shadow: inset 0 5px 15px PRIM; }
+        
+        .eye-ball {
+            width: 110px; height: 110px; border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #1a2b4c, #050810);
+            position: relative; overflow: hidden;
+            box-shadow: inset 0 0 20px SEC, 0 0 15px PRIM; transition: all 0.3s;
+        }
+        .eye-iris {
+            width: 60px; height: 60px; border-radius: 50%;
+            background: radial-gradient(circle, SEC 0%, PRIM 60%, transparent 100%);
+            position: absolute; top: 25px; left: 25px;
+            box-shadow: 0 0 15px PRIM;
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .eye-pupil {
+            width: 25px; height: 25px; border-radius: 50%; background: #000;
+            position: absolute; top: 17.5px; left: 17.5px;
+            box-shadow: inset 0 0 10px PRIM;
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* ------------------------------------------------ */
+        /* 2. ESFERA COM PESCOÇO */
+        /* ------------------------------------------------ */
+        .orb-scene { position: relative; width: 140px; height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+        .orb-pedestal {
+            position: absolute; bottom: 0px; width: 100px; height: 40px;
+            background: linear-gradient(to top, BG, transparent);
+            border-bottom: 3px solid PRIM; border-radius: 50%;
+            box-shadow: 0 15px 30px BORDER, 0 10px 20px PRIM; transform: rotateX(70deg); z-index: 1; transition: all 0.3s;
+        }
+        .orb-neck {
+            position: absolute; bottom: 20px; width: 30px; height: 70px;
+            background: linear-gradient(to top, SEC, transparent);
+            filter: blur(5px); opacity: 0.7; z-index: 2;
+            animation: pulse-neck 2s ease-in-out infinite alternate;
+        }
+        @keyframes pulse-neck { 0% { opacity: 0.4; height: 60px; } 100% { opacity: 0.9; height: 80px; } }
+        
+        .hologram-orb {
+            position: absolute; top: 10px; width: 100px; height: 100px; border-radius: 50%;
+            background: radial-gradient(circle, PRIM 0%, transparent 60%);
+            border: 2px solid SEC; z-index: 3;
+            box-shadow: 0 0 30px PRIM, inset 0 0 20px PRIM;
+            animation: float 3s ease-in-out infinite; transition: all 0.3s;
+        }
+        .orb-ring-outer {
+            position: absolute; top: 20px; width: 120px; height: 120px; border-radius: 50%;
+            border: 1px dashed SEC; animation: spin 10s linear infinite; z-index: 2;
+            box-shadow: 0 0 15px SEC;
+        }
+        .orb-core {
+            position: absolute; top: 40px; width: 40px; height: 40px; border-radius: 50%;
+            background: #fff; box-shadow: 0 0 40px PRIM, 0 0 80px SEC; animation: pulse 1.5s infinite; z-index: 4; transition: all 0.3s;
+        }
+
+        /* ------------------------------------------------ */
+        /* 3. ROBÔ CYBERPUNK */
+        /* ------------------------------------------------ */
+        .cyber-robot {
+            width: 90px; height: 110px; position: relative;
+            background: linear-gradient(180deg, #1a1a24 0%, #050810 100%);
+            border-radius: 40px 40px 20px 20px;
+            border: 2px solid #333;
+            box-shadow: 0 0 25px BORDER, inset 0 0 15px #000;
+            display: flex; flex-direction: column; align-items: center; padding-top: 20px;
+            transition: border-color 0.3s;
+        }
+        .cyber-visor {
+            width: 70px; height: 30px; background: #000;
+            border-radius: 15px; border: 2px solid SEC;
+            box-shadow: 0 0 15px SEC, inset 0 0 10px SEC;
+            position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 10px;
+            transition: all 0.3s;
+        }
+        .cyber-eye {
+            width: 12px; height: 12px; background: PRIM; border-radius: 50%;
+            box-shadow: 0 0 10px PRIM; transition: all 0.2s;
+        }
+        .cyber-visor-blink {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #050810; transform: scaleY(0); transform-origin: top; transition: transform 0.1s;
+        }
+        .cyber-visor-blink.blink { transform: scaleY(1); }
+        
+        .cyber-neck {
+            width: 30px; height: 20px; background: #111;
+            position: absolute; bottom: -20px; border-radius: 0 0 10px 10px;
+            border: 1px solid #333; border-top: none;
+        }
+        .cyber-chest {
+            width: 110px; height: 40px; background: linear-gradient(180deg, #1a1a24, #050810);
+            position: absolute; bottom: -60px; border-radius: 20px 20px 5px 5px;
+            border: 2px solid #333; box-shadow: inset 0 0 10px #000; display: flex; justify-content: center; padding-top: 10px;
+        }
+        .cyber-core {
+            width: 15px; height: 15px; background: SEC; border-radius: 50%;
+            box-shadow: 0 0 15px SEC; animation: pulse 2s infinite; transition: all 0.3s;
+        }
     </style>
 
     <div class="avatar-container" id="avatar-wrapper">
         AVATAR_HTML
         <div class="btns">
-            <button class="btn btn-primary" onclick="startListening()">🎙️ Falar</button>
-            <button class="btn btn-ghost" onclick="speakResponse()">🔊 Ouvir</button>
-            <button class="btn btn-ghost" onclick="toggleWake()" id="wakeBtn">🛰️ Wake</button>
+            <button class="btn btn-primary" onclick="manualTalk()">🎙️ Falar Manualmente</button>
+            <button class="btn btn-ghost" onclick="speakResponse()">🔊 Ouvir Resposta</button>
         </div>
-        <p id="status">pronto</p>
+        <p id="status">Modo de voz: WAKE_MSG</p>
     </div>
 
     <script>
@@ -357,24 +407,72 @@ def render_orb_and_voice(
         const WAKE_WORD = "WAKE_WORD".toLowerCase();
 
         const statusEl = document.getElementById("status");
-        const wakeBtn = document.getElementById("wakeBtn");
+        const wrapper = document.getElementById("avatar-wrapper");
 
-        // --- LÓGICA DE VOZ ---
+        // Funções para mudar as cores dos avatares
+        function setListeningVisuals() {
+            wrapper.classList.add("listening");
+            const eyeW = document.querySelector(".eye-wrapper");
+            if(eyeW) eyeW.style.boxShadow = "inset 0 0 30px #00ff00, 0 0 20px #00ff00";
+            const hOrb = document.querySelector(".hologram-orb");
+            if(hOrb) hOrb.style.borderColor = "#00ff00";
+            const cVisor = document.querySelector(".cyber-visor");
+            if(cVisor) cVisor.style.borderColor = "#00ff00";
+        }
+        function setSpeakingVisuals() {
+            wrapper.classList.remove("listening");
+            wrapper.classList.add("speaking");
+            const eyeW = document.querySelector(".eye-wrapper");
+            if(eyeW) eyeW.style.boxShadow = "inset 0 0 30px #ffffff, 0 0 30px #ffffff";
+            const hOrb = document.querySelector(".hologram-orb");
+            if(hOrb) hOrb.style.borderColor = "#ffffff";
+            const cVisor = document.querySelector(".cyber-visor");
+            if(cVisor) cVisor.style.borderColor = "#ffffff";
+        }
+        function setNormalVisuals() {
+            wrapper.classList.remove("listening", "speaking");
+            const eyeW = document.querySelector(".eye-wrapper");
+            if(eyeW) eyeW.style.boxShadow = "inset 0 0 30px SEC, 0 0 20px BORDER";
+            const hOrb = document.querySelector(".hologram-orb");
+            if(hOrb) hOrb.style.borderColor = "SEC";
+            const cVisor = document.querySelector(".cyber-visor");
+            if(cVisor) cVisor.style.borderColor = "SEC";
+        }
+
+        // Função de Fala
         function pickVoice() {
             const voices = window.speechSynthesis.getVoices();
             if (!VOICE_NAME) return voices.find(v => v.lang.startsWith("pt")) || voices[0];
             return voices.find(v => v.name === VOICE_NAME) || voices[0];
         }
 
-        function speakResponse() {
-            if (!TEXT) return;
-            const u = new SpeechSynthesisUtterance(TEXT);
+        function speakResponse(textToSpeak) {
+            const text = textToSpeak || TEXT;
+            if (!text) return;
+            
+            const u = new SpeechSynthesisUtterance(text);
             const v = pickVoice();
             if (v) u.voice = v;
             u.lang = "pt-BR"; u.rate = RATE; u.pitch = PITCH;
-            window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+            
+            u.onstart = () => {
+                setSpeakingVisuals();
+                statusEl.innerText = "🔊 Zeus está falando...";
+            };
+            u.onend = () => {
+                setNormalVisuals();
+                statusEl.innerText = "Modo de voz: WAKE_MSG";
+                // Reinicia a escuta se o wake estiver ativado
+                if (wakeActive && wakeRec) {
+                    try { wakeRec.start(); } catch(e){}
+                }
+            };
+            
+            window.speechSynthesis.cancel(); 
+            window.speechSynthesis.speak(u);
         }
 
+        // Injeção de texto no Streamlit
         function injectToStreamlit(text) {
             const el = window.parent.document.querySelector('textarea[data-testid="stChatInputTextArea"], input[type="text"]');
             if (el) {
@@ -391,151 +489,171 @@ def render_orb_and_voice(
         }
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) statusEl.innerText = "Navegador sem suporte a voz.";
-
-        function makeRecognizer(continuous) {
-            const r = new SpeechRecognition();
-            r.lang = "pt-BR"; r.continuous = continuous; r.interimResults = false;
-            return r;
-        }
-
         let wakeActive = WAKE_ENABLED;
         let wakeRec = null;
+        let silenceTimer = null;
 
-        function startWake() {
-            if (!SpeechRecognition) return;
-            wakeRec = makeRecognizer(true);
+        if (!SpeechRecognition) {
+            statusEl.innerText = "Navegador sem suporte a voz.";
+        } else {
+            wakeRec = new SpeechRecognition();
+            wakeRec.lang = "pt-BR";
+            wakeRec.continuous = true;
+            wakeRec.interimResults = true; // Pega o que você está falando em tempo real
+
+            wakeRec.onstart = () => {
+                if (wakeActive) statusEl.innerText = "🛰️ Escutando... Diga 'Zeus'";
+            };
+
             wakeRec.onresult = (e) => {
-                const last = e.results.length - 1;
-                const said = e.results[last][0].transcript.toLowerCase();
-                statusEl.innerText = "👂 " + said;
-                if (said.includes(WAKE_WORD)) {
-                    const cmd = said.split(WAKE_WORD).slice(1).join(" ").trim();
-                    if (cmd) {
-                        statusEl.innerText = "⚡ " + cmd;
-                        injectToStreamlit(cmd);
-                        wakeRec.stop(); wakeActive = false; wakeBtn.style.opacity = 0.5;
-                    } else { statusEl.innerText = "🛰️ Diga o comando após 'Zeus'..."; }
+                if (!wakeActive) return;
+
+                let finalTranscript = '';
+                let interimTranscript = '';
+
+                for (let i = e.resultIndex; i < e.results.length; ++i) {
+                    if (e.results[i].isFinal) {
+                        finalTranscript += e.results[i][0].transcript;
+                    } else {
+                        interimTranscript += e.results[i][0].transcript;
+                    }
+                }
+
+                const currentText = (finalTranscript + interimTranscript).toLowerCase();
+
+                // Se falou a palavra "Zeus"
+                if (currentText.includes(WAKE_WORD)) {
+                    setListeningVisuals();
+                    statusEl.innerText = "👂 Ouvindo sua pergunta...";
+                    
+                    // Limpa o timer anterior e inicia contagem de 6 segundos após parar de falar
+                    clearTimeout(silenceTimer);
+                    silenceTimer = setTimeout(() => {
+                        // Se ficou 6 segundos em silêncio depois de falar "Zeus"
+                        const parts = currentText.split(WAKE_WORD);
+                        const command = parts[parts.length - 1].trim(); // Pega o que veio depois de "Zeus"
+                        
+                        setNormalVisuals();
+                        if (command.length > 2) {
+                            statusEl.innerText = "⚡ Processando...";
+                            injectToStreamlit(command);
+                            wakeRec.stop();
+                        } else {
+                            statusEl.innerText = "🛰️ Escutando... (Diga o comando após Zeus)";
+                        }
+                    }, 6000); // <--- TEMPO DE ESPERA DE 6 SEGUNDOS
                 }
             };
-            wakeRec.onerror = () => { statusEl.innerText = "erro wake"; };
-            wakeRec.onend = () => { if (wakeActive) { try { wakeRec.start(); } catch(e){} } };
-            try { wakeRec.start(); statusEl.innerText = "🛰️ Escutando wake word..."; wakeBtn.style.opacity = 1; } catch(e){}
-        }
 
-        function toggleWake() {
+            wakeRec.onend = () => {
+                if (wakeActive) {
+                    try { wakeRec.start(); } catch(e){} // Reinicia se cair
+                }
+            };
+
+            wakeRec.onerror = (e) => {
+                if (e.error === 'not-allowed') {
+                    statusEl.innerText = "⚠️ Permita o microfone no navegador.";
+                    wakeActive = false;
+                }
+            };
+
             if (wakeActive) {
-                wakeActive = false; if (wakeRec) wakeRec.stop(); wakeBtn.style.opacity = 0.5; statusEl.innerText = "wake off";
-            } else {
-                wakeActive = true; wakeBtn.style.opacity = 1; startWake();
+                try { wakeRec.start(); } catch(e){}
             }
         }
 
-        function startListening() {
-            if (!SpeechRecognition) return;
-            const r = makeRecognizer(false);
+        function manualTalk() {
+            if(!SpeechRecognition) return;
+            const r = new SpeechRecognition();
+            r.lang = "pt-BR"; r.continuous = false; r.interimResults = false;
+            setListeningVisuals();
             statusEl.innerText = "🎙️ Ouvindo...";
-            
-            // Reações visuais ao ouvir (dependendo do avatar)
-            const eye = document.getElementById("eye");
-            const iris = document.getElementById("iris");
-            if(eye) eye.style.boxShadow = "0 0 50px #00ff00";
-            if(iris) iris.style.boxShadow = "0 0 40px #00ff00";
-            const rHead = document.querySelector(".robot-head");
-            if(rHead) rHead.style.borderColor = "#00ff00";
-            
             r.onresult = (e) => {
                 const said = e.results[0][0].transcript;
-                statusEl.innerText = "🗣️ " + said;
-                
-                if(eye) eye.style.boxShadow = "0 0 30px PRIM";
-                if(iris) iris.style.boxShadow = "0 0 15px PRIM";
-                if(rHead) rHead.style.borderColor = "PRIM";
-
+                setNormalVisuals();
+                statusEl.innerText = "⚡ Processando...";
                 injectToStreamlit(said);
             };
-            r.onerror = () => { 
-                statusEl.innerText = "erro reconhecimento"; 
-                if(eye) eye.style.boxShadow = "0 0 30px PRIM";
-                if(iris) iris.style.boxShadow = "0 0 15px PRIM";
-                if(rHead) rHead.style.borderColor = "PRIM";
-            };
-            r.onend = () => {
-                if(eye) eye.style.boxShadow = "0 0 30px PRIM";
-                if(iris) iris.style.boxShadow = "0 0 15px PRIM";
-                if(rHead) rHead.style.borderColor = "PRIM";
-            };
+            r.onend = () => setNormalVisuals();
             r.start();
         }
 
-        if (wakeActive) startWake();
+        // --- ANIMAÇÕES CONTÍNUAS (Olho e Robô) ---
+        const lidTop = document.querySelector(".eye-lid.top");
+        const lidBot = document.querySelector(".eye-lid.bottom");
+        const iris = document.querySelector(".eye-iris");
+        const pupil = document.querySelector(".eye-pupil");
 
-        // --- ANIMAÇÕES ESPECÍFICAS DE CADA AVATAR ---
-        // Olho
-        if (document.getElementById("eye")) {
+        if (lidTop && lidBot) {
             setInterval(() => {
-                document.getElementById("eye").classList.add('blink');
-                setTimeout(() => document.getElementById("eye").classList.remove('blink'), 150);
-            }, Math.random() * 3000 + 4000);
+                lidTop.style.transform = "scaleY(0)"; 
+                lidBot.style.transform = "scaleY(0)"; 
+                setTimeout(() => {
+                    lidTop.style.transform = "scaleY(1)";
+                    lidBot.style.transform = "scaleY(1)";
+                }, 200);
+            }, Math.random() * 3000 + 3000);
             
             setInterval(() => {
-                const x = (Math.random() - 0.5) * 30;
-                const y = (Math.random() - 0.5) * 30;
-                document.getElementById("iris").style.transform = translate(${x}px, ${y}px);
-                document.getElementById("pupil").style.transform = translate(calc(-50% + ${x}px), calc(-50% + ${y}px));
-            }, 2000);
+                const x = (Math.random() - 0.5) * 50; 
+                const y = (Math.random() - 0.5) * 30; 
+                iris.style.transform = translate(${x}px, ${y}px);
+                pupil.style.transform = translate(${x}px, ${y}px);
+            }, 2500);
         }
 
-        // Robô
-        if (document.querySelector(".robot-eye")) {
+        const visorBlink = document.querySelector(".cyber-visor-blink");
+        if (visorBlink) {
             setInterval(() => {
-                document.querySelectorAll('.robot-eye').forEach(el => el.classList.add('robot-blink'));
-                setTimeout(() => document.querySelectorAll('.robot-eye').forEach(el => el.classList.remove('robot-blink')), 150);
-            }, Math.random() * 3000 + 4000);
-
-            setInterval(() => {
-                const x = (Math.random() - 0.5) * 10;
-                const y = (Math.random() - 0.5) * 10;
-                document.querySelectorAll(".robot-pupil").forEach(el => {
-                    el.style.transform = translate(calc(-50% + ${x}px), calc(-50% + ${y}px));
-                });
-            }, 2000);
+                visorBlink.classList.add('blink');
+                setTimeout(() => visorBlink.classList.remove('blink'), 150);
+            }, Math.random() * 4000 + 3000);
         }
     </script>
     """
 
-    # Injeta o HTML específico do avatar escolhido
     if avatar_type == "Esfera":
         avatar_html = """
-        <div class="orb">
-            <div class="ring1"></div>
-            <div class="ring2"></div>
-            <div class="core"></div>
+        <div class="orb-scene">
+            <div class="orb-pedestal"></div>
+            <div class="orb-neck"></div>
+            <div class="orb-ring-outer"></div>
+            <div class="hologram-orb"></div>
+            <div class="orb-core"></div>
         </div>
         """
     elif avatar_type == "Robô Digital":
         avatar_html = """
-        <div class="robot-head">
-            <div class="robot-antenna"></div>
-            <div class="robot-eyes">
-                <div class="robot-eye"><div class="robot-pupil"></div></div>
-                <div class="robot-eye"><div class="robot-pupil"></div></div>
+        <div class="cyber-robot">
+            <div class="cyber-visor">
+                <div class="cyber-eye"></div>
+                <div class="cyber-eye"></div>
+                <div class="cyber-visor-blink"></div>
             </div>
-            <div class="robot-mouth"></div>
+            <div class="cyber-neck"></div>
+            <div class="cyber-chest">
+                <div class="cyber-core"></div>
+            </div>
         </div>
         """
-    else: # Olho Cibernético (padrão)
+    else: # Olho Cibernético
         avatar_html = """
-        <div class="eye-box">
-            <div class="eye" id="eye">
-                <div class="iris" id="iris">
-                    <div class="pupil" id="pupil"></div>
+        <div class="eye-wrapper">
+            <div class="eye-ball">
+                <div class="eye-iris" id="iris">
+                    <div class="eye-pupil" id="pupil"></div>
                 </div>
             </div>
+            <div class="eye-lid top"></div>
+            <div class="eye-lid bottom"></div>
         </div>
         """
 
     html = html.replace("AVATAR_HTML", avatar_html)
+    
+    wake_msg = "Ligado (Diga 'Zeus')" if wake_word_enabled else "Desligado"
+    html = html.replace("WAKE_MSG", wake_msg)
 
     replacements = {
         "PRIM": t["primary"], "SEC": t["secondary"], "BG": t["bg"],
@@ -547,8 +665,7 @@ def render_orb_and_voice(
     for k, v in replacements.items():
         html = html.replace(k, v)
 
-    # Aumentei um pouco a altura para caber os botões e o robô
-    components.html(html, height=300)
+    components.html(html, height=380)
 
 
 # ============================================================
@@ -569,7 +686,6 @@ with st.sidebar:
 
     theme_name = st.selectbox("🎨 Interface", list(THEMES.keys()), index=0)
     
-    # NOVO SELETOR DE AVATAR
     avatar_type = st.selectbox(
         "🤖 Avatar do Zeus", 
         ["Olho Cibernético", "Esfera", "Robô Digital"], 
@@ -580,92 +696,4 @@ with st.sidebar:
 
     st.divider()
     st.subheader("🗣️ Voz")
-    st.caption("A voz é renderizada no navegador (Web Speech API).")
-    voice_options = [
-        "", "Luciana", "Daniel", "Google português do Brasil",
-        "Microsoft Francisca", "Microsoft Antonio",
-    ]
-    voice_name = st.selectbox("Voz preferida", voice_options, index=0)
-    voice_rate = st.slider("Velocidade", 0.5, 2.0, 1.0, 0.1)
-    voice_pitch = st.slider("Tom", 0.5, 2.0, 1.0, 0.1)
-
-    st.divider()
-    st.subheader("🛰️ Wake Word")
-    wake_enabled = st.toggle("Escuta contínua por 'Zeus'", value=False)
-    wake_word = st.text_input("Palavra-chave", value="zeus").lower() or "zeus"
-
-    st.divider()
-    st.subheader("🛡️ Agente PRTG")
-    sensor_id = st.text_input("ID do Sensor")
-    new_name = st.text_input("Novo nome")
-    if st.button("Renomear"):
-        if sensor_id and new_name:
-            ok, msg = execute_prtg_action(sensor_id, "rename", {"new_name": new_name})
-            (st.success if ok else st.error)(msg)
-
-    if st.button("🔍 Verificar Logs"):
-        check_logs_and_act()
-
-    st.divider()
-    st.caption("Chaves configuradas?")
-    for k in ["GEMINI_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY"]:
-        st.write(("✅ " if _secret(k) else "❌ ") + k)
-
-
-# ============================================================
-# APLICA TEMA + TÍTULO
-# ============================================================
-inject_theme(theme_name)
-st.title("⚡ ZEUS // CYBER-CORE")
-
-
-# ============================================================
-# AVATAR + VOZ
-# ============================================================
-last_assistant = ""
-for m in reversed(st.session_state.messages):
-    if m["role"] == "assistant":
-        last_assistant = m["content"]
-        break
-
-render_orb_and_voice(
-    avatar_type=avatar_type, # Passa a escolha do usuário
-    theme_name=theme_name,
-    latest_response=last_assistant,
-    voice_name=voice_name,
-    rate=voice_rate,
-    pitch=voice_pitch,
-    wake_word_enabled=wake_enabled,
-    wake_word=wake_word,
-)
-
-
-# ============================================================
-# HISTÓRICO
-# ============================================================
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-
-# ============================================================
-# INPUT
-# ============================================================
-if prompt := st.chat_input("Digite o comando para o Zeus..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    add_message(st.session_state.session_id, "user", prompt)
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Processando..."):
-            response = get_llm_response(
-                st.session_state.session_id, prompt, model_choice
-            )
-            st.markdown(response)
-            add_message(st.session_state.session_id, "assistant", response)
-            st.session_state.messages.append(
-                {"role": "assistant", "content": response}
-            )
-
-    st.rerun()
+    st.c
