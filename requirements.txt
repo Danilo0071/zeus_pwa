@@ -1,6 +1,6 @@
 streamlit
 google-genai
 groq
-anthropic
+anthropic.
 requests
 streamlit-mic-recorder
