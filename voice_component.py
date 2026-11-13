@@ -1,52 +1,31 @@
+import os
 import streamlit as st
 
-def render_voice_component():
-    # Componente HTML/JS leve para Web Speech API
-    voice_html = """
-    <div id="zeus-voice" style="position: fixed; bottom: 20px; right: 20px; z-index: 999;">
-        <button id="mic-btn" style="padding: 15px; border-radius: 50%; background: #FF4B4B; color: white; border: none; font-size: 20px;">🎤</button>
-        <span id="status" style="margin-left: 10px; font-size: 12px;">Aguardando...</span>
-    </div>
-    <script>
-        const btn = document.getElementById('mic-btn');
-        const status = document.getElementById('status');
-        let recognizing = false;
-        let recognition;
+# Caminho para a pasta do componente
+FRONTEND = os.path.join(os.path.dirname(os.path.abspath(file_)), "modules", "zeus_voice")
 
-        if ('webkitSpeechRecognition' in window) {
-            recognition = new webkitSpeechRecognition();
-            recognition.continuous = true;
-            recognition.interimResults = false;
-            recognition.lang = 'pt-BR';
+# Declara o componente usando a API v2 (nova)
+# Nota: Em versões muito recentes, usa-se st.components.v2.component
+zeus_voice = st.components.v2.component(
+    "zeus_voice",
+    html=os.path.join(_FRONTEND, "index.html"),
+    # Se você tiver CSS/JS separados, pode apontar aqui também:
+    # css=os.path.join(_FRONTEND, "style.css"),
+    # js=os.path.join(_FRONTEND, "zeus_voice.js"),
+)
 
-            recognition.onresult = (event) => {
-                const last = event.results.length - 1;
-                const text = event.results[last][0].transcript.toLowerCase();
-                status.innerText = "Ouvi: " + text;
-                
-                if (text.includes('zeus')) {
-                    // Comando após a palavra "Zeus"
-                    const command = text.replace('zeus', '').trim();
-                    if (command) {
-                        // Envia para o backend via Streamlit (setComponentValue é síncrono)
-                        window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: command}, "*");
-                        // Fala de confirmação
-                        const utterance = new SpeechSynthesisUtterance("Entendido. Processando " + command);
-                        window.speechSynthesis.speak(utterance);
-                    }
-                }
-            };
-            
-            btn.onclick = () => {
-                if (recognizing) { recognition.stop(); recognizing = false; btn.style.background = "#FF4B4B"; }
-                else { recognition.start(); recognizing = true; btn.style.background = "#4BFF4B"; status.innerText = "Ouvindo..."; }
-            };
-        } else {
-            status.innerText = "Navegador sem suporte a voz.";
-        }
-    </script>
+def render_voice_component(reply=None, reply_id=0, key="zeus_voice"):
     """
-    # Nota: O Streamlit Components nativo (st.components.v1.html) é isolado.
-    # Para comunicação bidirecional real, use st.components.v1.html com JS que chame a API do Streamlit.
-    # Abaixo usamos st.components.v1.html para renderizar e capturar via query params (fallback simples).
-    st.components.v1.html(voice_html, height=100)
+    Renderiza o componente e retorna o comando de voz capturado.
+    """
+    # A chamada agora retorna um objeto com os valores de estado/trigger
+    result = zeus_voice(
+        data={"reply": reply, "reply_id": reply_id}, # Dados que vão para o JS
+        default={"text": ""}, # Valor inicial
+        key=key
+    )
+    
+    # Se o componente enviou um texto (via trigger), ele estará em result.text
+    if result and hasattr(result, 'text') and result.text:
+        return result.text
+    return None
