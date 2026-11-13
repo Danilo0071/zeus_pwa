@@ -4,3 +4,4 @@ groq
 anthropic
 requests
 streamlit-mic-recorder
+streamlit-js-eval
