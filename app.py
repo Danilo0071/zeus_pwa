@@ -687,6 +687,15 @@ with st.sidebar:
     ]
     voice_name = st.selectbox("Voz preferida", voice_options, index=0)
     voice_rate = st.slider("Velocidade", 0.5, 2.0, 1.0, 0.1)
+    st.divider()
+    st.subheader("🗣️ Voz")
+    st.caption("A voz é renderizada no navegador (Web Speech API).")
+    voice_options = [
+        "", "Luciana", "Daniel", "Google português do Brasil",
+        "Microsoft Francisca", "Microsoft Antonio",
+    ]
+    voice_name = st.selectbox("Voz preferida", voice_options, index=0)
+    voice_rate = st.slider("Velocidade", 0.5, 2.0, 1.0, 0.1)
     voice_pitch = st.slider("Tom", 0.5, 2.0, 1.0, 0.1)
 
     st.divider()
@@ -695,4 +704,77 @@ with st.sidebar:
     wake_word = st.text_input("Palavra-chave", value="zeus").lower() or "zeus"
 
     st.divider()
-    st.subheader("
+    st.subheader("🛡️ Agente PRTG")
+    sensor_id = st.text_input("ID do Sensor")
+    new_name = st.text_input("Novo nome")
+    if st.button("Renomear"):
+        if sensor_id and new_name:
+            ok, msg = execute_prtg_action(sensor_id, "rename", {"new_name": new_name})
+            (st.success if ok else st.error)(msg)
+
+    if st.button("🔍 Verificar Logs"):
+        check_logs_and_act()
+
+    st.divider()
+    st.caption("Chaves configuradas?")
+    for k in ["GEMINI_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY"]:
+        st.write(("✅ " if _secret(k) else "❌ ") + k)
+
+
+# ============================================================
+# APLICA TEMA + TÍTULO
+# ============================================================
+inject_theme(theme_name)
+st.title("⚡ ZEUS // CYBER-CORE")
+
+
+# ============================================================
+# AVATAR + VOZ
+# ============================================================
+last_assistant = ""
+for m in reversed(st.session_state.messages):
+    if m["role"] == "assistant":
+        last_assistant = m["content"]
+        break
+
+render_orb_and_voice(
+    avatar_type=avatar_type,
+    theme_name=theme_name,
+    latest_response=last_assistant,
+    voice_name=voice_name,
+    rate=voice_rate,
+    pitch=voice_pitch,
+    wake_word_enabled=wake_enabled,
+    wake_word=wake_word,
+)
+
+
+# ============================================================
+# HISTÓRICO
+# ============================================================
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+
+# ============================================================
+# INPUT
+# ============================================================
+if prompt := st.chat_input("Digite o comando para o Zeus..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    add_message(st.session_state.session_id, "user", prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Processando..."):
+            response = get_llm_response(
+                st.session_state.session_id, prompt, model_choice
+            )
+            st.markdown(response)
+            add_message(st.session_state.session_id, "assistant", response)
+            st.session_state.messages.append(
+                {"role": "assistant", "content": response}
+            )
+
+    st.rerun()
