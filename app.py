@@ -1,14 +1,4 @@
-[23:16, 12/11/2026] Danilo: # -------- GEMINI --------
-        if model_choice == "gemini":
-            api_key = _secret("GEMINI_API_KEY")
-            if not api_key:
-                return "⚠️ GEMINI_API_KEY ausente. Configure em Settings → Secrets."
-            url = (
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                f"gemini-2.5-flash:generateContent?key={api_key}"
-            )
-[23:18, 12/11/2026] Danilo: """
-Zeus 2.0 — Assistente DevOps Multi-LLM com PWA, Voz e Agente PRTG
+[23:23, 12/11/2026] Danilo: Zeus 2.0 — Assistente DevOps Multi-LLM com PWA, Voz e Agente PRTG
 """
 import os
 import json
@@ -33,8 +23,8 @@ st.set_page_config(
 THEMES = {
     "Cyberpunk": {
         "bg": "#0b0f19", "panel": "#121826", "primary": "#00ffcc",
-        "secondary": "#0077ff", "text": "#00ffcc",
-[23:23, 12/11/2026] Danilo: """
+        "secondary": "#0077ff", "text": "#00ffcc",…
+[23:29, 12/11/2026] Danilo: """
 Zeus 2.0 — Assistente DevOps Multi-LLM com PWA, Voz e Agente PRTG
 """
 import os
@@ -208,7 +198,6 @@ def get_llm_response(session_id, prompt, model_choice):
             if not api_key:
                 return "⚠️ GEMINI_API_KEY ausente. Configure em Settings → Secrets."
             
-            # AQUI ESTÁ A MÁGICA: Trocamos 'v1beta' por 'v1'
             url = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent"
             headers = {
                 "Content-Type": "application/json",
