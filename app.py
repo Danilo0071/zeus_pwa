@@ -1,7 +1,5 @@
 """
 Zeus 2.0 — Assistente DevOps Multi-LLM com PWA, Voz e Agente PRTG
-Autor: (seu nome)
-Deploy: Streamlit Community Cloud / Hugging Face Spaces
 """
 import os
 import json
@@ -168,15 +166,18 @@ def get_llm_response(session_id, prompt, model_choice):
     )
 
     try:
-        # -------- GEMINI --------
+        # -------- GEMINI (CORRIGIDO PARA CHAVES AQ.) --------
         if model_choice == "gemini":
             api_key = _secret("GEMINI_API_KEY")
             if not api_key:
                 return "⚠️ GEMINI_API_KEY ausente. Configure em Settings → Secrets."
-            url = (
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                f"gemini-2.5-flash:generateContent?key={api_key}"
-            )
+            
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+            headers = {
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key
+            }
+            
             contents = [
                 {
                     "role": "user" if m["role"] == "user" else "model",
@@ -188,7 +189,8 @@ def get_llm_response(session_id, prompt, model_choice):
                 "systemInstruction": {"parts": [{"text": sys_prompt}]},
                 "contents": contents,
             }
-            r = requests.post(url, json=payload, timeout=45)
+            
+            r = requests.post(url, headers=headers, json=payload, timeout=45)
             if r.status_code == 200:
                 return r.json()["candidates"][0]["content"]["parts"][0]["text"]
             return f"❌ Gemini {r.status_code}: {r.text[:300]}"
