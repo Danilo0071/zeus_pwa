@@ -21,30 +21,6 @@ st.set_page_config(
 THEMES = {
     "Cyberpunk": {
         "bg": "#0b0f19", "panel": "#121826", "primary": "#00ffcc",
-        "secondary": "#0077ff", "text": "#00ffcc"
-[23:38, 12/11/2026] Danilo: import os
-import json
-import sqlite3
-import requests
-import streamlit as st
-import streamlit.components.v1 as components
-
-# ============================================================
-# CONFIGURAÇÃO DA PÁGINA
-# ============================================================
-st.set_page_config(
-    page_title="Zeus 2.0",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# ============================================================
-# TEMAS SELECIONÁVEIS
-# ============================================================
-THEMES = {
-    "Cyberpunk": {
-        "bg": "#0b0f19", "panel": "#121826", "primary": "#00ffcc",
         "secondary": "#0077ff", "text": "#00ffcc", "border": "#00ffcc33",
     },
     "Matrix": {
