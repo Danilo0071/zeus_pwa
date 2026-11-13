@@ -235,7 +235,7 @@ def check_logs_and_act():
 
 
 # ============================================================
-# COMPONENTE VISUAL COM EFEITOS DINÂMICOS
+# COMPONENTE VISUAL 3D / CYBERPUNK
 # ============================================================
 def render_orb_and_voice(
     avatar_type="Olho Cibernético",
@@ -262,7 +262,6 @@ def render_orb_and_voice(
             transition: all 0.3s ease;
         }
         
-        /* Efeitos de fala e escuta no container */
         .avatar-container.listening { box-shadow: 0 0 50px #00ff00, inset 0 0 30px #00ff00; border-color: #00ff00; }
         .avatar-container.speaking { box-shadow: 0 0 50px PRIM, inset 0 0 30px PRIM; border-color: PRIM; }
 
@@ -272,14 +271,11 @@ def render_orb_and_voice(
         .btn-ghost { background:PANEL; color:_PRIM; border:1px solid PRIM; }
         #status { color:PRIM; font-size:12px; margin-top:8px; font-family:monospace; text-align:center; min-height:14px; text-shadow: 0 0 5px PRIM; z-index:10; font-weight: bold;}
 
-        /* ANIMAÇÕES BASE */
         @keyframes pulse { 0%,100% { transform: scale(0.9); opacity: .8; } 50% { transform: scale(1.1); opacity: 1; } }
         @keyframes spin { 100% { transform: rotate(360deg); } }
         @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
 
-        /* ------------------------------------------------ */
         /* 1. OLHO CIBERNÉTICO */
-        /* ------------------------------------------------ */
         .eye-wrapper {
             width: 140px; height: 140px; position: relative;
             border-radius: 50%; display: flex; align-items: center; justify-content: center;
@@ -309,9 +305,7 @@ def render_orb_and_voice(
             transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        /* ------------------------------------------------ */
         /* 2. ESFERA COM PESCOÇO */
-        /* ------------------------------------------------ */
         .orb-scene { position: relative; width: 140px; height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
         .orb-pedestal {
             position: absolute; bottom: 0px; width: 100px; height: 40px;
@@ -344,9 +338,7 @@ def render_orb_and_voice(
             background: #fff; box-shadow: 0 0 40px PRIM, 0 0 80px SEC; animation: pulse 1.5s infinite; z-index: 4; transition: all 0.3s;
         }
 
-        /* ------------------------------------------------ */
         /* 3. ROBÔ CYBERPUNK */
-        /* ------------------------------------------------ */
         .cyber-robot {
             width: 90px; height: 110px; position: relative;
             background: linear-gradient(180deg, #1a1a24 0%, #050810 100%);
@@ -409,7 +401,6 @@ def render_orb_and_voice(
         const statusEl = document.getElementById("status");
         const wrapper = document.getElementById("avatar-wrapper");
 
-        // Funções para mudar as cores dos avatares
         function setListeningVisuals() {
             wrapper.classList.add("listening");
             const eyeW = document.querySelector(".eye-wrapper");
@@ -439,7 +430,6 @@ def render_orb_and_voice(
             if(cVisor) cVisor.style.borderColor = "SEC";
         }
 
-        // Função de Fala
         function pickVoice() {
             const voices = window.speechSynthesis.getVoices();
             if (!VOICE_NAME) return voices.find(v => v.lang.startsWith("pt")) || voices[0];
@@ -462,7 +452,6 @@ def render_orb_and_voice(
             u.onend = () => {
                 setNormalVisuals();
                 statusEl.innerText = "Modo de voz: WAKE_MSG";
-                // Reinicia a escuta se o wake estiver ativado
                 if (wakeActive && wakeRec) {
                     try { wakeRec.start(); } catch(e){}
                 }
@@ -472,7 +461,6 @@ def render_orb_and_voice(
             window.speechSynthesis.speak(u);
         }
 
-        // Injeção de texto no Streamlit
         function injectToStreamlit(text) {
             const el = window.parent.document.querySelector('textarea[data-testid="stChatInputTextArea"], input[type="text"]');
             if (el) {
@@ -499,7 +487,7 @@ def render_orb_and_voice(
             wakeRec = new SpeechRecognition();
             wakeRec.lang = "pt-BR";
             wakeRec.continuous = true;
-            wakeRec.interimResults = true; // Pega o que você está falando em tempo real
+            wakeRec.interimResults = true; 
 
             wakeRec.onstart = () => {
                 if (wakeActive) statusEl.innerText = "🛰️ Escutando... Diga 'Zeus'";
@@ -521,17 +509,14 @@ def render_orb_and_voice(
 
                 const currentText = (finalTranscript + interimTranscript).toLowerCase();
 
-                // Se falou a palavra "Zeus"
                 if (currentText.includes(WAKE_WORD)) {
                     setListeningVisuals();
                     statusEl.innerText = "👂 Ouvindo sua pergunta...";
                     
-                    // Limpa o timer anterior e inicia contagem de 6 segundos após parar de falar
                     clearTimeout(silenceTimer);
                     silenceTimer = setTimeout(() => {
-                        // Se ficou 6 segundos em silêncio depois de falar "Zeus"
                         const parts = currentText.split(WAKE_WORD);
-                        const command = parts[parts.length - 1].trim(); // Pega o que veio depois de "Zeus"
+                        const command = parts[parts.length - 1].trim(); 
                         
                         setNormalVisuals();
                         if (command.length > 2) {
@@ -547,7 +532,7 @@ def render_orb_and_voice(
 
             wakeRec.onend = () => {
                 if (wakeActive) {
-                    try { wakeRec.start(); } catch(e){} // Reinicia se cair
+                    try { wakeRec.start(); } catch(e){} 
                 }
             };
 
@@ -579,7 +564,6 @@ def render_orb_and_voice(
             r.start();
         }
 
-        // --- ANIMAÇÕES CONTÍNUAS (Olho e Robô) ---
         const lidTop = document.querySelector(".eye-lid.top");
         const lidBot = document.querySelector(".eye-lid.bottom");
         const iris = document.querySelector(".eye-iris");
@@ -696,4 +680,19 @@ with st.sidebar:
 
     st.divider()
     st.subheader("🗣️ Voz")
-    st.c
+    st.caption("A voz é renderizada no navegador (Web Speech API).")
+    voice_options = [
+        "", "Luciana", "Daniel", "Google português do Brasil",
+        "Microsoft Francisca", "Microsoft Antonio",
+    ]
+    voice_name = st.selectbox("Voz preferida", voice_options, index=0)
+    voice_rate = st.slider("Velocidade", 0.5, 2.0, 1.0, 0.1)
+    voice_pitch = st.slider("Tom", 0.5, 2.0, 1.0, 0.1)
+
+    st.divider()
+    st.subheader("🛰️ Wake Word")
+    wake_enabled = st.toggle("Escuta contínua por 'Zeus'", value=False)
+    wake_word = st.text_input("Palavra-chave", value="zeus").lower() or "zeus"
+
+    st.divider()
+    st.subheader("
