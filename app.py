@@ -1,5 +1,8 @@
+import asyncio
+import base64
 import hashlib
 import os
+import re
 import sqlite3
 import tempfile
 import time
@@ -131,11 +134,18 @@ def _try_models(candidates, fn):
     return False, last
 
 
+def _groq_payload(model, msgs):
+    p = {"model": model, "messages": [{"role": "system", "content": SYS_PROMPT}] + msgs, "temperature": 0.4, "max_tokens": 700}
+    if model.startswith("openai/gpt-oss"):
+        p["reasoning_effort"] = "low"  # responde bem mais rápido
+    return p
+
+
 def _call_groq(api_key, model, msgs):
     r = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": [{"role": "system", "content": SYS_PROMPT}] + msgs, "temperature": 0.4},
+        json=_groq_payload(model, msgs),
         timeout=60)
     if r.status_code == 200:
         return 200, (r.json()["choices"][0]["message"].get("content") or "").strip()
@@ -204,8 +214,8 @@ def processar_prompt(prompt):
     sid = st.session_state.session_id
     escolhido = st.session_state.get("model_sel", "groq")
     st.session_state.messages.append({"role": "user", "content": prompt})
-    add_message(sid, "user", prompt)
     ok, response, prov, erros = get_llm_response(sid, prompt, escolhido)
+    add_message(sid, "user", prompt)
     st.session_state.messages.append({"role": "assistant", "content": response})
     if ok:
         add_message(sid, "assistant", response)
@@ -213,6 +223,91 @@ def processar_prompt(prompt):
     else:
         st.session_state.last_info = "❌ " + " | ".join(erros)
     return response
+
+
+# ============================================================
+# RECONHECIMENTO (Whisper/Groq) E VOZ NEURAL (Edge TTS)
+# ============================================================
+def transcrever_audio(audio_bytes: bytes, mime: str = ""):
+    """Transcreve com Whisper (Groq). Retorna (texto, erro)."""
+    api_key = _secret("GROQ_API_KEY")
+    if not api_key:
+        return "", "GROQ_API_KEY ausente (necessária para o reconhecimento Whisper)."
+    if not audio_bytes:
+        return "", "Áudio vazio."
+    base = (mime or "audio/webm").split(";")[0]
+    ext = "mp4" if "mp4" in base else "ogg" if "ogg" in base else "webm"
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": (f"audio.{ext}", audio_bytes, base)},
+            data={"model": "whisper-large-v3-turbo", "language": "pt", "temperature": "0",
+                  "prompt": "Conversa em português do Brasil com o assistente Zeus."},
+            timeout=60)
+        if r.status_code != 200:
+            return "", f"Transcrição falhou ({r.status_code}): {r.text[:120]}"
+        texto = r.json().get("text", "").strip()
+        if len(texto) < 2 or "legendas pela comunidade" in texto.lower():
+            return "", ""
+        return texto, ""
+    except Exception as e:
+        return "", f"Erro na transcrição: {e}"
+
+
+def _limpar_para_fala(texto: str, limite: int = 700) -> str:
+    texto = re.sub(r"```.*?```", " (código omitido) ", texto, flags=re.S)
+    texto = re.sub(r"[*#`_>~|]", "", texto).strip()
+    if len(texto) > limite:
+        corte = texto[:limite]
+        fim = max(corte.rfind(". "), corte.rfind("! "), corte.rfind("? "))
+        texto = corte[: fim + 1] if fim > 200 else corte
+    return texto
+
+
+async def _edge_synth(texto, voz, rate):
+    import edge_tts
+    chunks = []
+    async for c in edge_tts.Communicate(texto, voz, rate=rate).stream():
+        if c["type"] == "audio":
+            chunks.append(c["data"])
+    return b"".join(chunks)
+
+
+def sintetizar(texto, voz, rate=1.0):
+    """Gera MP3 com voz neural. Retorna bytes ou None."""
+    texto = _limpar_para_fala(texto)
+    if not texto:
+        return None
+    pct = f"{int(round((rate - 1) * 100)):+d}%"
+    try:
+        return asyncio.run(asyncio.wait_for(_edge_synth(texto, voz, pct), timeout=25)) or None
+    except Exception as e:
+        st.session_state.tts_erro = str(e)[:150]
+        return None
+
+
+FALLBACK_VOZES = {
+    "Francisca (pt-BR ♀)": "pt-BR-FranciscaNeural",
+    "Antonio (pt-BR ♂)": "pt-BR-AntonioNeural",
+    "Raquel (pt-PT ♀)": "pt-PT-RaquelNeural",
+    "Duarte (pt-PT ♂)": "pt-PT-DuarteNeural",
+}
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def listar_vozes_edge():
+    try:
+        import edge_tts
+        todas = asyncio.run(edge_tts.list_voices())
+        pt = [v for v in todas if v["Locale"].lower().startswith("pt-")]
+        vozes = {}
+        for v in pt:
+            nome = v["ShortName"].split("-", 2)[-1].replace("Neural", "")
+            vozes[f"{nome} ({v['Locale']} {'♀' if v['Gender'] == 'Female' else '♂'})"] = v["ShortName"]
+        return vozes or FALLBACK_VOZES
+    except Exception:
+        return FALLBACK_VOZES
 
 
 # ============================================================
@@ -229,6 +324,7 @@ AVATAR_HTML = r"""
 <style>
   body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030308; font-family: 'Courier New', Courier, monospace; color: #00ffff; }
   #three-box, #c2 { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+  #voiceSel { position: absolute; top: 14px; right: 14px; z-index: 11; background: #030308; color: #00ffff; border: 1px solid #00ffff; border-radius: 4px; padding: 4px; max-width: 45%; font-family: inherit; font-size: 0.75rem; }
   .ui-overlay { position: absolute; top: 16px; left: 16px; z-index: 10; pointer-events: none; }
   h1 { font-size: 1.3rem; margin: 0; text-shadow: 0 0 10px #00ffff, 0 0 20px #ff00ff; letter-spacing: 2px; }
   p { font-size: 0.8rem; color: #ff00ff; text-shadow: 0 0 5px #ff00ff; margin: 5px 0 0 0; }
@@ -249,6 +345,7 @@ AVATAR_HTML = r"""
 <body>
 <div id="three-box"></div>
 <canvas id="c2"></canvas>
+<select id="voiceSel" style="display:none"></select>
 <div class="ui-overlay">
   <h1 id="title">[ CYBER-SPHERE v3.0 ]</h1>
   <p id="status">STATUS: ONLINE</p>
@@ -267,12 +364,15 @@ function sendMsg(type, data) { window.parent.postMessage(Object.assign({isStream
 sendMsg("streamlit:componentReady", {apiVersion: 1});
 sendMsg("streamlit:setFrameHeight", {height: 700});
 
-let avatar = "sphere", SILENCE = 5, initialized = false, lastReplyId = 0, pendingEl = null;
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+let avatar = "sphere", SILENCE = 2, STT = "whisper", TTS = "edge", TTS_RATE = 1;
+let initialized = false, lastReplyId = 0, pendingEl = null, pendingUserEl = null;
 let state = "idle", pulse = 0;
-let micOn = false, pausedForBot = false, buffer = "", silenceTimer = null, silenceDeadline = 0, thinkTimer = null;
+let micOn = false, pausedForBot = false, buffer = "", silenceTimer = null, silenceDeadline = 0, thinkTimer = null, lastAfter = 0;
+let rec = null, mediaRec = null;
 const TITLES = { sphere: "[ CYBER-SPHERE v3.0 ]", eye: "[ CYBER-EYE v3.0 ]", robot: "[ CYBER-BOT v3.0 ]" };
 const STATE_TXT = { idle: "ONLINE", listening: "OUVINDO", thinking: "PROCESSANDO", speaking: "FALANDO" };
-const statusEl = document.getElementById("status"), input = document.getElementById("userInput"), micBtn = document.getElementById("micBtn");
+const statusEl = document.getElementById("status"), input = document.getElementById("userInput"), micBtn = document.getElementById("micBtn"), voiceSel = document.getElementById("voiceSel");
 
 function setState(s) { state = s; renderStatus(); }
 function renderStatus() {
@@ -284,25 +384,31 @@ function renderStatus() {
   statusEl.textContent = txt;
 }
 setInterval(renderStatus, 300);
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
 window.addEventListener("message", function (e) {
   if (!e.data || e.data.type !== "streamlit:render") return;
   const a = e.data.args || {};
   if (a.avatar && a.avatar !== avatar) { avatar = a.avatar; applyAvatar(); }
   else if (!initialized) { applyAvatar(); }
-  SILENCE = a.silence_s || 5;
+  SILENCE = a.silence_s || 2; STT = a.stt_engine || "whisper"; TTS = a.tts_engine || "edge"; TTS_RATE = a.tts_rate || 1;
+  voiceSel.style.display = (TTS === "browser") ? "block" : "none";
   if (!initialized) {
     initialized = true;
     (a.history || []).forEach(function (m) { addMessage(m.content, m.role === "user" ? "user" : "ai"); });
     lastReplyId = a.reply_id || 0;
     return;
   }
-  if (a.reply && a.reply_id !== lastReplyId) {
+  if (a.reply_id !== lastReplyId) {
     lastReplyId = a.reply_id;
     clearTimeout(thinkTimer);
     if (pendingEl) { pendingEl.remove(); pendingEl = null; }
-    addMessage(a.reply, "ai");
-    if (/^(❌|⚠️)/.test(a.reply)) afterSpeak(); else speak(a.reply);
+    if (pendingUserEl) { if (a.transcript) pendingUserEl.textContent = a.transcript; else pendingUserEl.remove(); pendingUserEl = null; }
+    if (a.reply) {
+      addMessage(a.reply, "ai");
+      if (/^(❌|⚠️)/.test(a.reply)) afterSpeak(); else speakReply(a.reply, a.audio_b64, a.audio_mime);
+    }
   }
 });
 
@@ -314,52 +420,165 @@ function addMessage(text, sender) {
   d.textContent = text; h.appendChild(d); h.scrollTop = h.scrollHeight;
   return d;
 }
+function haltListening() {
+  try { rec && rec.stop(); } catch (e) {}
+  if (mediaRec && mediaRec.state === "recording") { mediaRec.onstop = null; try { mediaRec.stop(); } catch (e) {} }
+}
+function markThinking() {
+  setState("thinking"); pausedForBot = true; clearTimeout(thinkTimer);
+  thinkTimer = setTimeout(function () { if (state === "thinking") afterSpeak(); }, 60000);
+}
 function sendText(text) {
   text = (text || "").trim();
   if (!text) return;
   clearTimeout(silenceTimer); silenceDeadline = 0; buffer = ""; input.value = "";
   addMessage(text, "user");
   pendingEl = addMessage("⏳ processando...", "ai");
-  setState("thinking");
-  pausedForBot = true; try { rec && rec.stop(); } catch (e) {}
-  clearTimeout(thinkTimer);
-  thinkTimer = setTimeout(function () { if (state === "thinking") afterSpeak(); }, 60000);
+  haltListening(); markThinking();
   sendMsg("streamlit:setComponentValue", { value: { id: Date.now(), text: text }, dataType: "json" });
 }
-document.getElementById("sendBtn").addEventListener("click", function () { sendText(input.value); });
-input.addEventListener("keydown", function (e) { if (e.key === "Enter") sendText(input.value); });
-
-// ================= Fala (TTS) =================
-let ptVoice = null;
-function pickVoice() {
-  const v = window.speechSynthesis.getVoices();
-  ptVoice = v.find(function (x) { return /pt[-_]BR/i.test(x.lang); }) || v.find(function (x) { return /^pt/i.test(x.lang); }) || null;
+function submitAudio(b64, mime) {
+  pendingUserEl = addMessage("🎙️ transcrevendo...", "user");
+  pendingEl = addMessage("⏳ processando...", "ai");
+  markThinking();
+  sendMsg("streamlit:setComponentValue", { value: { id: Date.now(), audio: b64, mime: mime }, dataType: "json" });
 }
-if ("speechSynthesis" in window) { pickVoice(); window.speechSynthesis.onvoiceschanged = pickVoice; }
-function speak(text) {
+document.getElementById("sendBtn").addEventListener("click", function () { unlockAudio(); sendText(input.value); });
+input.addEventListener("keydown", function (e) { if (e.key === "Enter") { unlockAudio(); sendText(input.value); } });
+
+// ================= Voz de saída =================
+// Celulares só liberam áudio depois de um toque do usuário: "destrava" no primeiro toque.
+const player = new Audio(); player.setAttribute("playsinline", "");
+let unlocked = false;
+const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+function unlockAudio() {
+  if (unlocked) return; unlocked = true;
+  try { player.src = SILENT; const p = player.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+  try { if ("speechSynthesis" in window) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; window.speechSynthesis.speak(u); } } catch (e) {}
+}
+document.addEventListener("pointerdown", unlockAudio);
+document.addEventListener("touchstart", unlockAudio);
+
+function loadVoices() {
+  if (!("speechSynthesis" in window)) return;
+  let vs = window.speechSynthesis.getVoices();
+  const pt = vs.filter(function (v) { return /^pt/i.test(v.lang); });
+  if (pt.length) vs = pt;
+  const saved = lsGet("zeusVoice");
+  voiceSel.innerHTML = "";
+  vs.forEach(function (v) { const o = document.createElement("option"); o.value = v.name; o.textContent = v.name + " (" + v.lang + ")"; if (v.name === saved) o.selected = true; voiceSel.appendChild(o); });
+}
+if ("speechSynthesis" in window) { loadVoices(); window.speechSynthesis.onvoiceschanged = loadVoices; }
+voiceSel.addEventListener("change", function () { lsSet("zeusVoice", voiceSel.value); });
+
+function speakReply(text, b64, mime) {
+  if (TTS === "edge" && b64) {
+    setState("speaking");
+    player.onended = afterSpeak;
+    player.onerror = function () { speakBrowser(text); };
+    player.src = "data:" + (mime || "audio/mpeg") + ";base64," + b64;
+    const p = player.play();
+    if (p && p.catch) p.catch(function () { speakBrowser(text); });
+  } else { speakBrowser(text); }
+}
+function speakBrowser(text) {
   if (!("speechSynthesis" in window)) { afterSpeak(); return; }
-  setState("speaking");
-  window.speechSynthesis.cancel();
+  setState("speaking"); window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text.replace(/[*#`_>]/g, ""));
-  u.lang = "pt-BR"; u.pitch = 0.9; if (ptVoice) u.voice = ptVoice;
-  u.onend = afterSpeak; u.onerror = afterSpeak;
+  u.lang = "pt-BR"; u.rate = TTS_RATE; u.pitch = 0.95;
+  const vs = window.speechSynthesis.getVoices();
+  const chosen = vs.find(function (v) { return v.name === voiceSel.value; }) || vs.find(function (v) { return /pt[-_]BR/i.test(v.lang); });
+  if (chosen) u.voice = chosen;
+  let started = false;
+  u.onstart = function () { started = true; }; u.onend = afterSpeak; u.onerror = afterSpeak;
   window.speechSynthesis.speak(u);
+  // Se o celular bloquear a fala em silêncio, não deixa o Zeus travado em "FALANDO"
+  setTimeout(function () { if (!started && state === "speaking") { window.speechSynthesis.cancel(); afterSpeak(); } }, 4000);
 }
 function afterSpeak() {
+  const n = Date.now(); if (n - lastAfter < 600) return; lastAfter = n;
   setState("idle"); pausedForBot = false;
-  if (micOn) setTimeout(function () { try { rec.start(); } catch (e) {} }, 400);
+  if (!micOn) return;
+  if (STT === "whisper") setTimeout(function () { if (micOn && stream) beginRecording(); }, 300);
+  else setTimeout(function () { try { rec.start(); } catch (e) {} }, 400);
 }
 
-// ================= Voz contínua (envia após N s de silêncio) =================
+// ================= Entrada A: Whisper (grava, detecta silêncio e envia) =================
+let stream = null, ac = null, analyser = null, chunks = [], vadTimer = null, td = null;
+let speechStarted = false, speechStartTs = 0, lastVoiceTs = 0, recStart = 0, thr = 0.03, calib = [];
+function pickMime() {
+  const c = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  if (!window.MediaRecorder) return "";
+  for (let i = 0; i < c.length; i++) { if (MediaRecorder.isTypeSupported(c[i])) return c[i]; }
+  return "";
+}
+async function micStartWhisper() {
+  if (!stream) {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ac.createMediaStreamSource(stream);
+    analyser = ac.createAnalyser(); analyser.fftSize = 1024; src.connect(analyser);
+    td = new Uint8Array(analyser.fftSize);
+  }
+  if (ac.state === "suspended") await ac.resume();
+  beginRecording();
+  if (!vadTimer) vadTimer = setInterval(vadTick, 60);
+}
+function beginRecording() {
+  if (!stream || (mediaRec && mediaRec.state === "recording")) return;
+  chunks = []; speechStarted = false; calib = []; recStart = Date.now();
+  const mime = pickMime();
+  mediaRec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  mediaRec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+  mediaRec.start(250);
+}
+function resetRecorder() {
+  if (mediaRec && mediaRec.state === "recording") { mediaRec.onstop = null; try { mediaRec.stop(); } catch (e) {} }
+  beginRecording();
+}
+function vadTick() {
+  if (!micOn || pausedForBot || !analyser || !mediaRec || mediaRec.state !== "recording") return;
+  analyser.getByteTimeDomainData(td);
+  let sum = 0; for (let i = 0; i < td.length; i++) { const v = (td[i] - 128) / 128; sum += v * v; }
+  const rms = Math.sqrt(sum / td.length), now = Date.now();
+  if (calib.length < 8) { calib.push(rms); if (calib.length === 8) { const f = calib.reduce(function (a, b) { return a + b; }, 0) / 8; thr = Math.min(0.08, Math.max(0.025, f * 2.5)); } return; }
+  if (rms > thr) {
+    lastVoiceTs = now; if (!speechStarted) { speechStarted = true; speechStartTs = now; }
+    pulse = Math.min(1, rms * 10); if (state === "idle") setState("listening");
+  }
+  if (speechStarted) {
+    silenceDeadline = lastVoiceTs + SILENCE * 1000;
+    if ((now - lastVoiceTs) / 1000 >= SILENCE) finishRecording();
+  } else if (now - recStart > 25000) { resetRecorder(); }
+}
+function finishRecording() {
+  const dur = lastVoiceTs - speechStartTs, mime = mediaRec.mimeType || "audio/webm";
+  pausedForBot = true; speechStarted = false; silenceDeadline = 0;
+  mediaRec.onstop = function () {
+    if (dur < 350) { pausedForBot = false; setState("idle"); beginRecording(); return; }  // só ruído
+    const blob = new Blob(chunks, { type: mime });
+    const fr = new FileReader();
+    fr.onload = function () { submitAudio(String(fr.result).split(",")[1], mime); };
+    fr.readAsDataURL(blob);
+  };
+  try { mediaRec.stop(); } catch (e) {}
+}
+function stopWhisper() {
+  if (mediaRec && mediaRec.state === "recording") { mediaRec.onstop = null; try { mediaRec.stop(); } catch (e) {} }
+  if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+  if (ac) { try { ac.close(); } catch (e) {} ac = null; }
+  analyser = null; clearInterval(vadTimer); vadTimer = null;
+}
+
+// ================= Entrada B: reconhecimento do navegador =================
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null;
 function armSilence() {
   clearTimeout(silenceTimer);
   silenceDeadline = Date.now() + SILENCE * 1000;
   silenceTimer = setTimeout(function () { sendText(input.value); }, SILENCE * 1000);
 }
 if (SR) {
-  rec = new SR(); rec.lang = "pt-BR"; rec.continuous = true; rec.interimResults = true;
+  rec = new SR(); rec.lang = "pt-BR"; rec.continuous = !IS_MOBILE; rec.interimResults = true;
   rec.onresult = function (e) {
     if (pausedForBot) return;
     let interim = "";
@@ -372,17 +591,32 @@ if (SR) {
     if (state !== "thinking" && state !== "speaking") setState("listening");
     armSilence();
   };
-  rec.onend = function () { if (micOn && !pausedForBot) setTimeout(function () { try { rec.start(); } catch (e) {} }, 300); };
+  rec.onend = function () { if (micOn && !pausedForBot && STT === "browser") setTimeout(function () { try { rec.start(); } catch (e) {} }, 200); };
   rec.onerror = function (e) {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") { micOn = false; micBtn.classList.remove("on"); statusEl.textContent = "STATUS: MICROFONE BLOQUEADO"; }
   };
-  micBtn.addEventListener("click", function () {
-    micOn = !micOn; micBtn.classList.toggle("on", micOn);
-    if (micOn) { pausedForBot = false; buffer = ""; try { rec.start(); } catch (e) {} }
-    else { clearTimeout(silenceTimer); silenceDeadline = 0; try { rec.stop(); } catch (e) {} if (state === "listening") setState("idle"); }
-    renderStatus();
-  });
-} else { micBtn.disabled = true; micBtn.title = "Use Chrome ou Edge para voz"; }
+}
+
+// ================= Botão do microfone =================
+micBtn.addEventListener("click", async function () {
+  unlockAudio();
+  micOn = !micOn; micBtn.classList.toggle("on", micOn);
+  if (micOn) {
+    pausedForBot = false; buffer = "";
+    if (STT === "browser" && !SR) STT = "whisper";
+    try {
+      if (STT === "whisper") await micStartWhisper(); else rec.start();
+    } catch (e) {
+      micOn = false; micBtn.classList.remove("on"); statusEl.textContent = "STATUS: MICROFONE BLOQUEADO"; return;
+    }
+  } else {
+    clearTimeout(silenceTimer); silenceDeadline = 0;
+    try { rec && rec.stop(); } catch (e) {}
+    stopWhisper();
+    if (state === "listening") setState("idle");
+  }
+  renderStatus();
+});
 
 // ================= Utilidades gráficas =================
 const rnd = function (a, b) { return a + Math.random() * (b - a); };
@@ -579,7 +813,7 @@ def _avatar_component(_html_hash: str):
 AVATAR_MAP = {"Esfera 3D (Cyberpunk)": "sphere", "Olho Cibernético": "eye", "Robô Digital": "robot"}
 
 
-def render_avatar_voice(avatar_key: str, silence_s: int):
+def render_avatar_voice(avatar_key, silence_s, stt_engine, tts_engine, voz, tts_rate):
     comp = _avatar_component(hashlib.md5(AVATAR_HTML.encode("utf-8")).hexdigest()[:10])
     ev = comp(
         avatar=avatar_key,
@@ -587,14 +821,38 @@ def render_avatar_voice(avatar_key: str, silence_s: int):
         reply_id=st.session_state.get("avatar_reply_id", 0),
         history=st.session_state.messages[-10:],
         silence_s=silence_s,
+        stt_engine=stt_engine,
+        tts_engine=tts_engine,
+        tts_rate=tts_rate,
+        audio_b64=st.session_state.get("avatar_audio"),
+        audio_mime="audio/mpeg",
+        transcript=st.session_state.get("avatar_transcript"),
         key="zeus_avatar",
         default=None,
     )
     if ev and ev.get("id") != st.session_state.get("last_event_id"):
         st.session_state.last_event_id = ev["id"]
-        resposta = processar_prompt(ev["text"])
+        texto, resposta, veio_de_audio = ev.get("text"), "", bool(ev.get("audio"))
+        if veio_de_audio:
+            try:
+                raw = base64.b64decode(ev["audio"])
+            except Exception:
+                raw = b""
+            texto, erro = transcrever_audio(raw, ev.get("mime", ""))
+            if erro:
+                resposta, texto = f"⚠️ {erro}", None
+            elif not texto:
+                resposta = "⚠️ Não consegui entender. Pode repetir?"
+        if texto:
+            resposta = processar_prompt(texto)
+        audio = None
+        if texto and tts_engine == "edge" and not resposta.startswith(("❌", "⚠️")):
+            mp3 = sintetizar(resposta, voz, tts_rate)
+            audio = base64.b64encode(mp3).decode() if mp3 else None
         st.session_state.avatar_reply = resposta
         st.session_state.avatar_reply_id = ev["id"]
+        st.session_state.avatar_audio = audio
+        st.session_state.avatar_transcript = texto if veio_de_audio else ""
         st.rerun()
 
 
@@ -612,7 +870,22 @@ with st.sidebar:
     theme_name = st.selectbox("🎨 Interface", list(THEMES.keys()), index=0, key="theme_sel")
     avatar_type = st.selectbox("🤖 Avatar do Zeus", list(AVATAR_MAP.keys()), index=0, key="avatar_sel")
     model_choice = st.selectbox("🧠 Modelo LLM", PROVIDERS, index=0, key="model_sel")
-    silence_s = st.slider("⏱️ Segundos de silêncio para enviar a fala", 2, 10, 5, key="silence_sel")
+    st.subheader("🎙️ Voz")
+    stt_label = st.selectbox("👂 Reconhecimento", ["Whisper (Groq) — melhor no celular", "Navegador — mais rápido, menos preciso"], key="stt_sel")
+    tts_label = st.selectbox("🔊 Motor de voz", ["Neural (Edge) — voz natural", "Navegador — voz do aparelho"], key="tts_sel")
+    _vozes = listar_vozes_edge()
+    voz_nome = st.selectbox("🗣️ Voz do Zeus", list(_vozes.keys()), key="voz_sel")
+    tts_rate = st.slider("⚡ Velocidade da fala", 0.8, 1.5, 1.0, 0.05, key="rate_sel")
+    silence_s = st.slider("⏱️ Silêncio para enviar (s)", 1, 10, 2, key="silence_sel")
+    stt_key = "whisper" if stt_label.startswith("Whisper") else "browser"
+    tts_key = "edge" if tts_label.startswith("Neural") else "browser"
+    voz_edge = _vozes[voz_nome]
+    if st.button("🔊 Testar voz"):
+        _mp3 = sintetizar("Olá, eu sou o Zeus. Como posso ajudar?", voz_edge, tts_rate)
+        if _mp3:
+            st.audio(_mp3, format="audio/mp3")
+        else:
+            st.warning("Não consegui gerar a voz neural: " + st.session_state.get("tts_erro", "erro desconhecido"))
     if st.button("🗑️ Limpar conversa"):
         st.session_state.messages = []
         st.session_state.avatar_reply = None
@@ -627,7 +900,7 @@ with st.sidebar:
 
 inject_theme(theme_name)
 st.title("⚡ ZEUS // CYBER-CORE")
-render_avatar_voice(AVATAR_MAP[avatar_type], silence_s)
+render_avatar_voice(AVATAR_MAP[avatar_type], silence_s, stt_key, tts_key, voz_edge, tts_rate)
 
 with st.expander("📜 Histórico da conversa"):
     for msg in st.session_state.messages:
