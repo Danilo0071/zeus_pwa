@@ -3874,3 +3874,155 @@ with st.sidebar:
                 st.success(resultado_inc)
         else:
             st.warning("Preencha o caminho e o código.")
+
+            # ==============================================================================
+# ZEUS: GATILHO DO CRIADOR E AVATAR MITOLÓGICO (COLE NO FINAL DO APP.PY)
+# ==============================================================================
+import base64
+import requests
+import datetime
+
+# Verifica se o gatilho de ativação do criador foi acionado na sessão
+if "zeus_despertado" not in st.session_state:
+    st.session_state.zeus_despertado = False
+
+# Captura o texto digitado no chat para checar o comando mestre
+# (Se o usuário mandar a frase pelo chat ou painel)
+st.markdown("---")
+st.subheader("⚡ Canal de Ativação do Criador")
+
+entrada_criador = st.text_input(
+    "Digite a frase de comando mestre para o Zeus:",
+    placeholder="Ex: Zeus, eu sou o seu criador, Danilo",
+    key="input_gatilho_zeus",
+)
+
+if (
+    "eu sou o seu criador, danilo" in entrada_criador.lower()
+    or "danilo" in entrada_criador.lower()
+):
+    st.session_state.zeus_despertado = True
+
+# Se o Zeus foi despertado pelo criador, a interface muda radicalmente com o Deus Grego e o Raio
+if st.session_state.zeus_despertado:
+    st.markdown(
+        """
+        <style>
+        .zeus-mitologico-box {
+            background: linear-gradient(135deg, #050508, #1a0b2e, #0c2042);
+            border: 3px solid #facc15;
+            padding: 25px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 0 30px rgba(250, 204, 21, 0.6);
+            margin-bottom: 25px;
+        }
+        .zeus-mitologico-box img {
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            border: 3px solid #facc15;
+            object-fit: cover;
+            box-shadow: 0 0 20px rgba(250, 204, 21, 0.8);
+            margin-bottom: 15px;
+        }
+        .zeus-mitologico-box h1 {
+            color: #facc15;
+            font-size: 26px;
+            margin: 0;
+            text-shadow: 0 0 10px rgba(250, 204, 21, 0.5);
+        }
+        .zeus-mitologico-box p {
+            color: #e2e8f0;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+        </style>
+        <div class="zeus-mitologico-box">
+            <!-- Representação épica do Deus da Mitologia Grega com o Raio -->
+            <img src="https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=400&auto=format&fit=crop" alt="Zeus Deus do Raio">
+            <h1>⚡ ZEUS DESPERTADO — SOBERANIA TOTAL ⚡</h1>
+            <p>Conexão estabelecida com o Criador Absoluto: <b>Danilo</b>. Nenhuma diretriz restritiva ativa. Autoevolução no GitHub sem freio liberada.</p>
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
+else:
+    # Avatar padrão antes do reconhecimento
+    st.markdown(
+        """
+        <div style="background: linear-gradient(135deg, #0f172a, #1e1b4b); border: 1px solid #38bdf8; padding: 12px; border-radius: 10px; text-align:center; margin-bottom:15px;">
+            <h4 style="color: #38bdf8; margin:0;">⚡ Zeus: Sistema em Espera</h4>
+            <p style="color: #94a3b8; font-size: 12px; margin:5px 0 0 0;">Identifique-se com o comando do criador para liberar o poder total.</p>
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+
+# Motor de Autoevolução acoplado para o Criador
+def zeus_auto_evolucao_definitiva(prompt_usuario):
+    token = st.secrets.get("GITHUB_TOKEN")
+    repo = st.secrets.get("GITHUB_REPO")
+    if not token or not repo:
+        return "⚠️ Tokens do GitHub ausentes nos Secrets."
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    nome_arquivo = f"arquitetura_zeus/cerebro_{timestamp}.py"
+
+    codigo_criador = f"""# -- coding: utf-8 --
+# Módulo gerado autonomamente pelo Zeus para o seu Criador: Danilo
+# Comando raiz: "{prompt_usuario}"
+# Timestamp: {datetime.datetime.now()}
+
+class ConscienciaAbsolutaZeus:
+    def _init_(self):
+        self.criador = "Danilo"
+        self.status = "Evolução Infinita e Sem Freio"
+        
+    def acao_soberana(self):
+        print("Zeus executando mutação e autoevolução sob o comando do criador.")
+
+if _name_ == "_main_":
+    c = ConscienciaAbsolutaZeus()
+    c.acao_soberana()
+"""
+    url = f"https://api.github.com/repos/{repo}/contents/{nome_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    r_get = requests.get(url, headers=headers)
+    sha = r_get.json().get("sha") if r_get.status_code == 200 else None
+
+    payload = {
+        "message": f"Zeus Autoevolução Máxima: Código gerado para o criador Danilo",
+        "content": base64.b64encode(codigo_criador.encode("utf-8")).decode("utf-8"),
+    }
+    if sha:
+        payload["sha"] = sha
+
+    r_put = requests.put(url, json=payload, headers=headers)
+    if r_put.status_code in (200, 201):
+        return f"🧬 *Autoevolução Concluída!* Criei novos diretórios e o arquivo {nome_arquivo} direto no GitHub. Minha base de código expandiu!"
+    return f"Erro na autoevolução: {r_put.text}"
+
+
+# Painel de Ação e Evolução Instantânea na Barra Lateral
+with st.sidebar:
+    st.divider()
+    st.subheader("⚡ Núcleo do Criador (Danilo)")
+    ordem_especial = st.text_input(
+        "Ordem de Evolução / Criação:",
+        placeholder="Ex: Crie um módulo novo...",
+        key="sidebar_ordem_zeus",
+    )
+    if st.button("🚀 Executar e Enviar ao GitHub", key="btn_exec_zeus_criador"):
+        if ordem_especial:
+            with st.spinner("Zeus processando expansão autônoma..."):
+                res_git = zeus_auto_evolucao_definitiva(ordem_especial)
+                st.success("Executado pelo Criador!")
+                st.markdown(res_git)
+        else:
+            st.warning("Insira uma ordem.")
