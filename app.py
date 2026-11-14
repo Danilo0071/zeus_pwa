@@ -3301,3 +3301,43 @@ with st.sidebar:
             with st.spinner("Conectando..."):
                 resultado = zeus_skills.tocar_musica(musica_input)
                 st.success(resultado)
+# ============================================================
+# INTERCEPTADOR DE VOZ PARA O SPOTIFY (Adicionado no final)
+# ============================================================
+if "messages" in st.session_state and st.session_state.messages:
+    ultima_msg = st.session_state.messages[-1]
+    if ultima_msg["role"] == "user":
+        texto_usuario = ultima_msg["content"].lower()
+
+        # Se a mensagem tiver palavras-chave de música
+        if any(
+            p in texto_usuario
+            for p in ["toca ", "tocar ", "toque ", "spotify", "música ", "musica "]
+        ):
+            # Evita rodar duas vezes a mesma música na mesma tela
+            if st.session_state.get("ultima_musica_tocada") != ultima_msg["content"]:
+                import re
+
+                # Limpa a frase para extrair só o nome da música
+                termo = re.sub(
+                    r"\b(zeus|por favor|toca|tocar|toque|a música|a musica|música|musica|no spotify|spotify)\b",
+                    "",
+                    texto_usuario,
+                ).strip(" .,!?:-")
+
+                if termo:
+                    with st.spinner(f"Buscando e tocando '{termo}' no Spotify..."):
+                        try:
+                            resultado = zeus_skills.tocar_musica(termo)
+                            st.toast(resultado, icon="🎵")
+
+                            # Adiciona a resposta do Zeus no chat
+                            st.session_state.messages.append(
+                                {"role": "assistant", "content": resultado}
+                            )
+                            st.session_state.ultima_musica_tocada = ultima_msg[
+                                "content"
+                            ]
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro ao tocar: {e}")
