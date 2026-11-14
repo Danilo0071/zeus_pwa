@@ -5,6 +5,7 @@
 #   GROQ_API_KEY = "..."          GEMINI_API_KEY = "..."
 #   ANTHROPIC_API_KEY = "..."     HUGGINGFACE_API_KEY = "..."
 #   GITHUB_API_KEY = "..."        (token com acesso ao GitHub Models)
+#   DEEPINFRA_API_KEY = "..."     (deepinfra.com/dash/api_keys: Dolphin, imagem e edição de foto)
 # Opcionais (busca Google oficial): GOOGLE_API_KEY e GOOGLE_CSE_ID
 # Dependências: streamlit requests edge-tts duckduckgo-search
 # ============================================================
@@ -48,6 +49,19 @@ def inject_theme(theme_name: str):
     st.markdown(css, unsafe_allow_html=True)
 
 
+
+
+def inject_theme_classico(theme_name: str):
+    t = THEMES.get(theme_name, THEMES["Cyberpunk"])
+    st.markdown(f"""
+        <style>
+            .stApp {{ background-color: {t['bg']}; color: {t['text']}; font-family: 'Courier New', monospace; }}
+            [data-testid="stSidebar"] {{ background-color: {t['panel']}; }}
+            h1, h2, h3 {{ color: {t['primary']} !important; text-shadow: 0 0 10px {t['border']}; }}
+        </style>
+    """, unsafe_allow_html=True)
+
+
 # ============================================================
 # BANCO DE DADOS
 # ============================================================
@@ -85,14 +99,25 @@ def get_recent_context(session_id, limit=6):
 # ============================================================
 # CHAVES
 # ============================================================
+# Chave padrão: usada só se não houver Secrets/variável de ambiente. Troque quando quiser.
+CHAVES_PADRAO = {
+    "DEEPINFRA_API_KEY": "sk-di-bJioFqKGlbhVm5M0aLOkq20wIpEiZiuT",
+}
+
+
+def _limpar_chave(v: str) -> str:
+    v = re.sub(r"\s+", "", v).strip("\"'")
+    return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
+
+
 def _secret(key: str, default: str = "") -> str:
     try:
         val = st.secrets.get(key) if hasattr(st, "secrets") else None
         if val:
-            return str(val).strip()
+            return _limpar_chave(str(val))
     except Exception:
         pass
-    return os.environ.get(key, default).strip()
+    return _limpar_chave(os.environ.get(key) or default or CHAVES_PADRAO.get(key, ""))
 
 
 # ============================================================
@@ -104,15 +129,16 @@ def _secret(key: str, default: str = "") -> str:
 # ============================================================
 SYS_PROMPT = "Você é Zeus, uma IA cyberpunk futurista e assistente sênior. Responda em português, de forma objetiva e com um tom tecnológico. Respostas curtas, pois serão faladas em voz alta."
 
-PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github"]
-KEYS = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "claude": "ANTHROPIC_API_KEY", "huggingface": "HUGGINGFACE_API_KEY", "github": "GITHUB_API_KEY"}
-MODEL_SECRET = {"groq": "GROQ_MODEL", "gemini": "GEMINI_MODEL", "claude": "ANTHROPIC_MODEL", "huggingface": "HF_MODEL", "github": "GITHUB_MODEL"}
+PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra"]
+KEYS = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "claude": "ANTHROPIC_API_KEY", "huggingface": "HUGGINGFACE_API_KEY", "github": "GITHUB_API_KEY", "deepinfra": "DEEPINFRA_API_KEY"}
+MODEL_SECRET = {"groq": "GROQ_MODEL", "gemini": "GEMINI_MODEL", "claude": "ANTHROPIC_MODEL", "huggingface": "HF_MODEL", "github": "GITHUB_MODEL", "deepinfra": "DEEPINFRA_MODEL"}
 MODELS = {
     "groq": ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"],
     "gemini": ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
     "claude": ["claude-haiku-5-5", "claude-sonnet-5-5"],
     "huggingface": ["meta-llama/Llama-3.3-70B-Instruct", "Qwen/Qwen2.5-72B-Instruct"],
     "github": ["openai/gpt-4.1-mini", "openai/gpt-4o-mini"],
+    "deepinfra": ["cognitivecomputations/dolphin-2.6-mixtral-8x7b", "meta-llama/Llama-3.3-70B-Instruct", "deepseek-ai/DeepSeek-V3"],
 }
 TRANSIENT = (500, 502, 503, 504, 529)
 
@@ -217,8 +243,13 @@ def _call_github(api_key, model, msgs, system=None):
                                {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
 
 
+def _call_deepinfra(api_key, model, msgs, system=None):
+    base = (_secret("DEEPINFRA_BASE_URL") or "https://api.deepinfra.com/v1/openai").rstrip("/")
+    return _call_openai_compat(base + "/chat/completions", api_key, model, msgs, system)
+
+
 CALLERS = {"groq": _call_groq, "gemini": _call_gemini, "claude": _call_claude,
-           "huggingface": _call_huggingface, "github": _call_github}
+           "huggingface": _call_huggingface, "github": _call_github, "deepinfra": _call_deepinfra}
 
 
 def _resumo(text):
@@ -475,88 +506,210 @@ def enriquecer_com_web(prompt):
 
 
 # ============================================================
-# GERAÇÃO DE MÍDIA (imagem e vídeo) com fallback em cascata
+# GERAÇÃO DE MÍDIA (imagem, edição de foto e vídeo) com fallback em cascata
 # ============================================================
+def _mime_img(b):
+    return "image/png" if b[:4] == b"\x89PNG" else "image/webp" if b[8:12] == b"WEBP" else "image/jpeg"
+
+
+def _to_bytes(obj):
+    """Aceita bytes ou imagem PIL e devolve bytes PNG."""
+    if isinstance(obj, (bytes, bytearray)):
+        return bytes(obj)
+    import io
+    buf = io.BytesIO()
+    obj.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _hf_client(timeout=120):
+    from huggingface_hub import InferenceClient
+    return InferenceClient(api_key=_secret("HUGGINGFACE_API_KEY"), timeout=timeout)
+
+
 def _img_hf(prompt):
-    key = _secret("HUGGINGFACE_API_KEY")
-    if not key:
+    if not _secret("HUGGINGFACE_API_KEY"):
         raise RuntimeError("sem chave")
     modelos = [m for m in [_secret("HF_IMAGE_MODEL")] if m] + ["black-forest-labs/FLUX.1-schnell", "stabilityai/stable-diffusion-xl-base-1.0"]
-    ultimo = ""
-    for model in modelos:
-        r = requests.post(f"https://router.huggingface.co/hf-inference/models/{model}",
-                          headers={"Authorization": f"Bearer {key}"}, json={"inputs": prompt}, timeout=120)
-        if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
-            return r.content
-        ultimo = f"({r.status_code}) {r.text[:80]}"
-    raise RuntimeError(ultimo)
+    erros = []
+    try:
+        client = _hf_client(120)
+        for model in modelos:
+            try:
+                return _to_bytes(client.text_to_image(prompt, model=model))
+            except Exception as e:
+                erros.append(model.split("/")[-1] + ": " + str(e)[:80])
+    except ImportError:
+        erros.append("falta huggingface_hub no requirements.txt")
+    for model in modelos:  # rota REST antiga, como reserva
+        try:
+            r = requests.post(f"https://router.huggingface.co/hf-inference/models/{model}",
+                              headers={"Authorization": "Bearer " + _secret("HUGGINGFACE_API_KEY")},
+                              json={"inputs": prompt}, timeout=120)
+            if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
+                return r.content
+            erros.append(f"REST {model.split('/')[-1]} ({r.status_code})")
+        except Exception as e:
+            erros.append("REST: " + str(e)[:60])
+    raise RuntimeError(" | ".join(erros)[:300])
 
 
-def _img_gemini(prompt):
+def _gemini_image_call(parts):
     key = _secret("GEMINI_API_KEY")
     if not key:
         raise RuntimeError("sem chave")
     model = _secret("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
     r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                       headers={"Content-Type": "application/json", "x-goog-api-key": key},
-                      json={"contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}}, timeout=120)
+                      json={"contents": [{"parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}},
+                      timeout=120)
     if r.status_code != 200:
-        raise RuntimeError(f"({r.status_code}) {r.text[:80]}")
+        raise RuntimeError(f"({r.status_code}) {r.text[:100]}")
     for part in r.json()["candidates"][0]["content"]["parts"]:
         d = part.get("inlineData") or part.get("inline_data")
         if d:
             return base64.b64decode(d["data"])
-    raise RuntimeError("Gemini não devolveu imagem")
+    raise RuntimeError("Gemini não devolveu imagem (conta sem cota de imagem?)")
+
+
+def _img_gemini(prompt):
+    return _gemini_image_call([{"text": prompt}])
 
 
 def _img_pollinations(prompt):
     from urllib.parse import quote
-    r = requests.get("https://image.pollinations.ai/prompt/" + quote(prompt[:500]),
-                     params={"width": 1024, "height": 1024, "nologo": "true"}, timeout=120)
-    if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
-        return r.content
-    raise RuntimeError(f"({r.status_code})")
+    ultimo = ""
+    for tentativa in range(2):
+        r = requests.get("https://image.pollinations.ai/prompt/" + quote(prompt[:600]),
+                         params={"width": 1024, "height": 1024, "nologo": "true", "model": "flux"},
+                         headers={"User-Agent": "Mozilla/5.0 (Zeus/3.0)"}, timeout=120)
+        if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
+            return r.content
+        ultimo = f"({r.status_code})"
+        if r.status_code == 429 and tentativa == 0:
+            time.sleep(16)  # plano anônimo: 1 pedido a cada ~15 s
+            continue
+        break
+    raise RuntimeError(ultimo)
 
 
-IMAGE_CASCADE = [("Hugging Face", _img_hf), ("Gemini", _img_gemini), ("Pollinations (sem chave)", _img_pollinations)]
+def _img_deepinfra(prompt):
+    key = _secret("DEEPINFRA_API_KEY")
+    if not key:
+        raise RuntimeError("sem chave")
+    body = {"prompt": prompt, "size": "1024x1024", "n": 1}
+    if _secret("DEEPINFRA_IMAGE_MODEL"):
+        body["model"] = _secret("DEEPINFRA_IMAGE_MODEL")  # padrão da DeepInfra: FLUX Schnell
+    r = requests.post("https://api.deepinfra.com/v1/openai/images/generations",
+                      headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, json=body, timeout=120)
+    if r.status_code != 200:
+        raise RuntimeError(f"({r.status_code}) {r.text[:100]}")
+    return base64.b64decode(r.json()["data"][0]["b64_json"])
+
+
+IMAGE_CASCADE = [("DeepInfra", _img_deepinfra), ("Hugging Face", _img_hf), ("Gemini", _img_gemini),
+                 ("Pollinations (sem chave)", _img_pollinations)]
 
 
 def make_image(prompt, log):
     for nome, fn in IMAGE_CASCADE:
         try:
             data = fn(prompt)
-            log.append("✅ Imagem: " + nome)
+            log.append("✅ Imagem criada por: " + nome)
             return data
         except Exception as e:
-            log.append("❌ Imagem " + nome + ": " + str(e)[:90])
+            log.append("❌ Imagem " + nome + ": " + str(e)[:160])
     return None
 
 
-def make_video(prompt, log):
-    """Vídeo experimental via Hugging Face. Troque o modelo com o secret HF_VIDEO_MODEL."""
-    key = _secret("HUGGINGFACE_API_KEY")
+# ---- edição de foto (a IA recebe a foto de verdade) ----
+def _edit_gemini(img, prompt):
+    return _gemini_image_call([{"text": prompt}, {"inline_data": {"mime_type": _mime_img(img), "data": base64.b64encode(img).decode()}}])
+
+
+def _edit_hf(img, prompt):
+    if not _secret("HUGGINGFACE_API_KEY"):
+        raise RuntimeError("sem chave")
+    modelos = [m for m in [_secret("HF_EDIT_MODEL")] if m] + ["black-forest-labs/FLUX.1-Kontext-dev", "Qwen/Qwen-Image-Edit"]
+    client = _hf_client(180)
+    erros = []
+    for model in modelos:
+        try:
+            return _to_bytes(client.image_to_image(img, prompt=prompt, model=model))
+        except Exception as e:
+            erros.append(model.split("/")[-1] + ": " + str(e)[:80])
+    raise RuntimeError(" | ".join(erros)[:300])
+
+
+def _edit_deepinfra(img, prompt):
+    key = _secret("DEEPINFRA_API_KEY")
     if not key:
+        raise RuntimeError("sem chave")
+    model = _secret("DEEPINFRA_EDIT_MODEL") or "black-forest-labs/FLUX.1-Kontext-dev"
+    r = requests.post("https://api.deepinfra.com/v1/images/edits",
+                      headers={"Authorization": "Bearer " + key},
+                      files={"image": ("foto.jpg", img, _mime_img(img))},
+                      data={"prompt": prompt, "model": model, "n": "1", "response_format": "b64_json"}, timeout=180)
+    if r.status_code != 200:
+        raise RuntimeError(f"({r.status_code}) {r.text[:100]}")
+    d = r.json()["data"][0]
+    if d.get("b64_json"):
+        return base64.b64decode(d["b64_json"])
+    if d.get("url"):
+        return requests.get(d["url"], timeout=60).content
+    raise RuntimeError("DeepInfra não devolveu imagem")
+
+
+EDIT_CASCADE = [("DeepInfra (edita a sua foto)", _edit_deepinfra), ("Gemini (edita a sua foto)", _edit_gemini),
+                ("Hugging Face (edita a sua foto)", _edit_hf)]
+
+
+def editar_imagem(img, prompt_edicao, descricao, log):
+    """Tenta editar a foto original. Se nenhuma IA conseguir, recria a partir da descrição.
+    Retorna (bytes|None, 'editada'|'recriada'|'')."""
+    for nome, fn in EDIT_CASCADE:
+        try:
+            out = fn(img, prompt_edicao)
+            log.append("✅ Foto editada por: " + nome)
+            return out, "editada"
+        except Exception as e:
+            log.append("❌ " + nome + ": " + str(e)[:160])
+    log.append("↪️ Nenhuma IA editou a foto original; recriando a partir da descrição")
+    out = make_image((descricao + ". " + prompt_edicao)[:900], log)
+    return out, ("recriada" if out else "")
+
+
+# ---- vídeo ----
+def make_video(prompt, log, img=None):
+    """Vídeo experimental via Hugging Face (foto→vídeo se houver foto; senão texto→vídeo)."""
+    if not _secret("HUGGINGFACE_API_KEY"):
         log.append("⚪ Vídeo: sem HUGGINGFACE_API_KEY")
         return None
-    model = _secret("HF_VIDEO_MODEL") or "Wan-AI/Wan2.1-T2V-1.3B"
     try:
-        r = requests.post(f"https://router.huggingface.co/hf-inference/models/{model}",
-                          headers={"Authorization": f"Bearer {key}"}, json={"inputs": prompt}, timeout=300)
-        if r.status_code == 200 and r.headers.get("content-type", "").startswith("video"):
-            log.append("✅ Vídeo: " + model)
-            return r.content
-        log.append(f"❌ Vídeo ({r.status_code}): {r.text[:90]} — modelo pode não estar disponível no seu plano")
+        client = _hf_client(600)
+    except ImportError:
+        log.append("❌ Vídeo: falta huggingface_hub no requirements.txt")
+        return None
+    if img is not None and hasattr(client, "image_to_video"):
+        try:
+            model = _secret("HF_I2V_MODEL") or "Wan-AI/Wan2.2-I2V-A14B"
+            out = client.image_to_video(img, prompt=prompt, model=model)
+            log.append("✅ Vídeo (foto→vídeo): " + model)
+            return _to_bytes(out)
+        except Exception as e:
+            log.append("❌ Vídeo foto→vídeo: " + str(e)[:160])
+    try:
+        model = _secret("HF_VIDEO_MODEL") or "Wan-AI/Wan2.1-T2V-1.3B"
+        out = client.text_to_video(prompt, model=model)
+        log.append("✅ Vídeo (texto→vídeo): " + model)
+        return _to_bytes(out)
     except Exception as e:
-        log.append("❌ Vídeo: " + str(e)[:90])
+        log.append("❌ Vídeo texto→vídeo: " + str(e)[:160] + " (modelo pode exigir plano pago; troque com HF_VIDEO_MODEL)")
     return None
 
 
 # ============================================================
-# PIPELINE MULTI-IA ENCADEADO
-# busca web -> IA pesquisadora (resumo) -> IA engenheira de prompt
-# -> IAs de mídia (imagem/vídeo). Cada etapa de texto usa a cascata
-# Groq/Gemini/Claude/Hugging Face/GitHub com fallback automático.
+# PIPELINE MULTI-IA (só texto): busca web -> resumo -> prompt -> mídia
 # ============================================================
 def _llm(prompt, system, log, etapa):
     ok, texto, prov, erros = get_llm_response(
@@ -612,17 +765,13 @@ def render_pipeline_ui():
                 st.image(res["img"], caption="Imagem gerada")
             if res["vid"]:
                 st.video(res["vid"])
-            with st.expander("Log do pipeline e fallbacks"):
+            with st.expander("Log do pipeline e fallbacks", expanded=not (res["img"] or res["vid"])):
                 st.write("\n\n".join(res["log"]))
 
 
 # ============================================================
-# CÂMERA DIRETA: foto -> comando visual (cascata de visão)
+# VISÃO: a IA enxerga a foto (cascata entre provedores com visão)
 # ============================================================
-def _mime_img(b):
-    return "image/png" if b[:4] == b"\x89PNG" else "image/jpeg"
-
-
 def _vis_openai(url, key, model, img_b64, mime, prompt, extra=None):
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
     if extra:
@@ -646,8 +795,7 @@ def _vis_gemini(k, b, m, p):
     model = _secret("GEMINI_VISION_MODEL") or "gemini-flash-latest"
     r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                       headers={"Content-Type": "application/json", "x-goog-api-key": k},
-                      json={"systemInstruction": {"parts": [{"text": SYS_PROMPT}]},
-                            "contents": [{"role": "user", "parts": [{"text": p}, {"inline_data": {"mime_type": m, "data": b}}]}]},
+                      json={"contents": [{"role": "user", "parts": [{"text": p}, {"inline_data": {"mime_type": m, "data": b}}]}]},
                       timeout=60)
     if r.status_code != 200:
         raise RuntimeError(f"({r.status_code}) {r.text[:90]}")
@@ -658,7 +806,7 @@ def _vis_claude(k, b, m, p):
     model = _secret("ANTHROPIC_MODEL") or "claude-haiku-5-5"
     r = requests.post("https://api.anthropic.com/v1/messages",
                       headers={"x-api-key": k, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
-                      json={"model": model, "max_tokens": 900, "system": SYS_PROMPT, "messages": [{"role": "user", "content": [
+                      json={"model": model, "max_tokens": 900, "messages": [{"role": "user", "content": [
                           {"type": "image", "source": {"type": "base64", "media_type": m, "data": b}},
                           {"type": "text", "text": p}]}]}, timeout=60)
     if r.status_code != 200:
@@ -677,7 +825,18 @@ def _vis_github(k, b, m, p):
                        extra={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
 
 
-VISION_CASCADE = {"groq": _vis_groq, "gemini": _vis_gemini, "claude": _vis_claude, "huggingface": _vis_hf, "github": _vis_github}
+def _vis_deepinfra(k, b, m, p):
+    modelos = [x for x in [_secret("DEEPINFRA_VISION_MODEL")] if x] + ["Qwen/Qwen2.5-VL-32B-Instruct", "meta-llama/Llama-3.2-11B-Vision-Instruct"]
+    ultimo = None
+    for model in modelos:
+        try:
+            return _vis_openai("https://api.deepinfra.com/v1/openai/chat/completions", k, model, b, m, p)
+        except Exception as e:
+            ultimo = e
+    raise ultimo
+
+
+VISION_CASCADE = {"deepinfra": _vis_deepinfra, "groq": _vis_groq, "gemini": _vis_gemini, "claude": _vis_claude, "huggingface": _vis_hf, "github": _vis_github}
 
 
 def ask_vision(img_bytes, comando):
@@ -687,49 +846,152 @@ def ask_vision(img_bytes, comando):
     ordem = [escolhido] + [p for p in PROVIDERS if p != escolhido]
     log = []
     for prov in ordem:
+        if prov not in VISION_CASCADE:
+            continue
         key = _secret(KEYS[prov])
         if not key:
-            log.append("⚪ " + prov + ": sem chave")
+            log.append("⚪ Visão " + prov + ": sem chave")
             continue
         try:
             txt = VISION_CASCADE[prov](key, img_b64, mime, comando)
             if txt:
-                log.append("✅ " + prov + ": ok")
+                log.append("✅ Visão: " + prov + " enxergou a foto")
                 return txt, prov, log
         except Exception as e:
-            log.append("❌ " + prov + ": " + str(e)[:90])
+            log.append("❌ Visão " + prov + ": " + str(e)[:120])
     return None, None, log
+
+
+# ============================================================
+# ESTÚDIO: as IAs conversam entre si
+# foto -> (IA de visão descreve) -> (IA de texto cria o comando)
+# -> (IA de imagem edita a foto) -> (IA de vídeo anima)
+# ============================================================
+ACOES = ["Descrever", "Editar foto", "Criar vídeo", "Editar foto + vídeo"]
+
+
+def executar_estudio(img, comando, acao):
+    log = []
+    res = {"orig": img, "acao": acao, "desc": "", "prompt_edit": "", "prompt_vid": "", "img": None, "modo_img": "", "vid": None, "log": log}
+    if acao == "Descrever":
+        txt, prov, vlog = ask_vision(img, comando or "Descreva o que você vê.")
+        log.extend(vlog)
+        res["desc"] = txt or ""
+        return res
+    # 1) visão: a IA enxerga a foto
+    desc, prov, vlog = ask_vision(img, "Describe this photo in detail in English (people, clothing, pose, background, colors, lighting, framing). Max 8 lines.")
+    log.extend(vlog)
+    res["desc"] = desc or ""
+    # 2) IA de texto transforma pedido + descrição em comandos para as IAs de mídia
+    sys_p = ("You are a prompt engineer for image-editing and video AIs. Reply EXACTLY 2 lines, nothing else:\n"
+             "EDIT: <instruction to edit the ORIGINAL photo as requested, keeping the person's identity, pose and composition>\n"
+             "VIDEO: <5-second motion prompt: subtle animation and camera movement for this photo>")
+    bruto = _llm("Photo description:\n" + (desc or "(unavailable)") + "\n\nUser request (Portuguese): " + (comando or "melhore esta foto"),
+                 sys_p, log, "Comando para as IAs de imagem")
+    m_e = re.search(r"EDIT:\s*(.+)", bruto or "")
+    m_v = re.search(r"VIDEO:\s*(.+)", bruto or "")
+    res["prompt_edit"] = m_e.group(1).strip() if m_e else (comando or "enhance this photo, keep identity")
+    res["prompt_vid"] = m_v.group(1).strip() if m_v else res["prompt_edit"]
+    # 3) IA de imagem recebe a foto + comando
+    if acao in ("Editar foto", "Editar foto + vídeo"):
+        res["img"], res["modo_img"] = editar_imagem(img, res["prompt_edit"], desc or "", log)
+    # 4) IA de vídeo anima a foto (original ou editada)
+    if acao in ("Criar vídeo", "Editar foto + vídeo"):
+        res["vid"] = make_video(res["prompt_vid"], log, res["img"] or img)
+    return res
+
+
+def mostrar_estudio_res(res):
+    if res.get("desc"):
+        st.markdown("**👁️ O que a IA viu / respondeu**")
+        st.write(res["desc"])
+    if res.get("prompt_edit"):
+        st.markdown("**Comando enviado às IAs de imagem**")
+        st.code(res["prompt_edit"], language="text")
+    if res.get("img"):
+        c1, c2 = st.columns(2)
+        c1.image(res["orig"], caption="Original")
+        legenda = "Foto editada" if res["modo_img"] == "editada" else "Recriada a partir da descrição (nenhuma IA conseguiu editar a original)"
+        c2.image(res["img"], caption=legenda)
+    if res.get("vid"):
+        st.video(res["vid"])
+    pediu_midia = res.get("acao") != "Descrever"
+    falhou = pediu_midia and not (res.get("img") or res.get("vid"))
+    with st.expander("Log das IAs (erros e fallbacks)", expanded=falhou):
+        st.write("\n\n".join(res["log"]))
+
+
+def render_estudio_ui():
+    tem = bool(st.session_state.get("estudio_res"))
+    with st.expander("🎨 Estúdio Multi-IA (foto → editar → vídeo)", expanded=tem):
+        up = st.file_uploader("📁 Enviar uma foto (ou use a câmera do menu lateral)", type=["jpg", "jpeg", "png", "webp"], key="estudio_up")
+        if up is not None:
+            dados = up.getvalue()
+            h = hashlib.md5(dados).hexdigest()
+            if h != st.session_state.get("up_last"):
+                st.session_state.up_last = h
+                st.session_state.foto_bytes = dados
+        foto = st.session_state.get("foto_bytes")
+        if foto:
+            st.image(foto, caption="Foto ativa", width=220)
+        else:
+            st.info("Tire uma foto na câmera lateral ou envie uma aqui.")
+        comando = st.text_input("O que fazer com a foto?", value="Melhore esta foto deixando-a mais nítida e com visual cyberpunk", key="estudio_cmd")
+        acao = st.radio("Ação", ACOES, index=1, key="estudio_acao", horizontal=True)
+        if st.button("🚀 Executar", key="estudio_run", disabled=not foto):
+            with st.spinner("As IAs estão conversando entre si..."):
+                st.session_state.estudio_res = executar_estudio(foto, comando, acao)
+            st.rerun()
+        res = st.session_state.get("estudio_res")
+        if res:
+            mostrar_estudio_res(res)
 
 
 def render_camera_sidebar():
     st.subheader("📷 Câmera direta")
     foto = st.camera_input("Tirar foto", key="cam_foto", label_visibility="collapsed")
-    comando = st.text_input("Comando visual", value="Descreva o que você vê.", key="cam_cmd")
+    comando = st.text_input("Comando para a foto", value="Descreva o que você vê.", key="cam_cmd")
+    acao = st.selectbox("Ação", ACOES, key="cam_acao")
     if foto is not None:
         dados = foto.getvalue()
         h = hashlib.md5(dados).hexdigest()
         nova = h != st.session_state.get("cam_last")
-        if nova or st.button("▶ Rodar comando de novo", key="cam_run", use_container_width=True):
+        if nova:
+            st.session_state.foto_bytes = dados
+        if nova or st.button("▶ Rodar de novo", key="cam_run", use_container_width=True):
             st.session_state.cam_last = h
-            with st.spinner("Analisando a foto..."):
-                txt, prov, log = ask_vision(dados, comando)
-            st.session_state.cam_result = (txt, prov, log)
-            if txt:
+            with st.spinner("As IAs estão trabalhando na foto..."):
+                res = executar_estudio(dados, comando, acao)
+            st.session_state.estudio_res = res
+            if acao == "Descrever" and res.get("desc"):
                 sid = st.session_state.session_id
                 st.session_state.messages.append({"role": "user", "content": "📷 " + comando})
-                st.session_state.messages.append({"role": "assistant", "content": txt})
+                st.session_state.messages.append({"role": "assistant", "content": res["desc"]})
                 add_message(sid, "user", "📷 " + comando)
-                add_message(sid, "assistant", txt)
-    res = st.session_state.get("cam_result")
+                add_message(sid, "assistant", res["desc"])
+    res = st.session_state.get("estudio_res")
     if res:
-        txt, prov, log = res
-        if txt:
-            st.success("Respondido por: " + str(prov))
-            st.write(txt)
-        else:
-            st.error("Nenhuma IA de visão respondeu.")
-        with st.expander("Log da câmera"):
-            st.write("\n\n".join(log))
+        if res.get("desc") and res.get("acao") == "Descrever":
+            st.write(res["desc"])
+        st.caption("✅ Resultado e log no 🎨 Estúdio Multi-IA, na página principal.")
+
+
+
+def testar_chaves():
+    linhas = []
+    msgs = [{"role": "user", "content": "Responda apenas: OK"}]
+    for prov in PROVIDERS:
+        key = _secret(KEYS[prov])
+        if not key:
+            linhas.append("⚪ " + prov + ": chave ausente ou placeholder")
+            continue
+        override = _secret(MODEL_SECRET[prov])
+        try:
+            ok, texto = _try_models([override] if override else MODELS[prov], lambda m: CALLERS[prov](key, m, msgs))
+        except Exception as e:
+            ok, texto = False, "erro de conexão: " + str(e)
+        linhas.append(("✅ " + prov + ": funcionando") if ok else ("❌ " + prov + ": " + _resumo(texto)))
+    return linhas
 
 
 # ============================================================
@@ -1275,6 +1537,81 @@ function drawRobot(t) {
   ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
 }
 
+function drawEyeClassic(t) {
+  const cx = W / 2, cy = H * 0.36, R = Math.min(W * 0.26, H * 0.17), rad = Math.PI / 180;
+  const ls = state === "listening", al = (60 + (ls ? 100 : 35) * (0.5 + 0.5 * Math.sin(t * (ls ? 6 : 2)))) / 255;
+  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.9); g.addColorStop(0, "rgba(0,229,255," + al + ")"); g.addColorStop(1, "rgba(0,229,255,0)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 1.9, 0, 7); ctx.fill();
+  ctx.strokeStyle = "rgba(0,229,255,0.35)"; ctx.lineWidth = 1;
+  for (let i = 0; i < 60; i++) { const a = (i * 6 - ring * 0.3) * rad, r1 = R * 1.62, r2 = R * (i % 5 ? 1.67 : 1.72); ctx.beginPath(); ctx.moveTo(cx + r1 * Math.cos(a), cy + r1 * Math.sin(a)); ctx.lineTo(cx + r2 * Math.cos(a), cy + r2 * Math.sin(a)); ctx.stroke(); }
+  ctx.lineWidth = 2; ctx.strokeStyle = "#1e90ff"; arcs(cx, cy, R * 1.5, -ring * rad, 3, 50 * rad);
+  ctx.strokeStyle = MG; arcs(cx, cy, R * 1.82, ring * 0.6 * rad, 2, 35 * rad);
+  const oh = Math.max(0.02, open);
+  ctx.save(); ctx.beginPath(); ctx.ellipse(cx, cy, R * 1.45, R * 0.85 * oh, 0, 0, 7); ctx.clip();
+  ctx.fillStyle = "#060e1c"; ctx.fillRect(0, 0, W, H);
+  const ix = cx + look.x * R * 0.5, iy = cy + look.y * R * 0.28, ir = R * 0.72;
+  g = ctx.createRadialGradient(ix, iy, 0, ix, iy, ir); g.addColorStop(0, "#001e46"); g.addColorStop(0.6, "#006ebe"); g.addColorStop(1, CY);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ix, iy, ir, 0, 7); ctx.fill();
+  const pr = ir * 0.38 * pupil;
+  ctx.strokeStyle = "rgba(0,229,255,0.3)"; ctx.lineWidth = 1;
+  for (let i = 0; i < 36; i++) { const a = i * 10 * rad; ctx.beginPath(); ctx.moveTo(ix + pr * Math.cos(a), iy + pr * Math.sin(a)); ctx.lineTo(ix + ir * 0.95 * Math.cos(a), iy + ir * 0.95 * Math.sin(a)); ctx.stroke(); }
+  ctx.strokeStyle = "#78f0ff"; ctx.lineWidth = 2; arcs(ix, iy, ir * 0.88, ring * 1.5 * rad, 4, 40 * rad);
+  ctx.fillStyle = "#000"; ctx.strokeStyle = CY; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(ix, iy, pr, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.beginPath(); ctx.arc(ix - pr * 0.4, iy - pr * 0.4, pr * 0.18, 0, 7); ctx.fill();
+  ctx.restore();
+  glow(CY, 14); ctx.strokeStyle = CY; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.ellipse(cx, cy, R * 1.45, R * 0.85 * oh, 0, 0, 7); ctx.stroke(); noGlow();
+  ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+}
+
+function drawRobotClassic(t) {
+  const cx = W / 2, cy = H * 0.38, S = Math.min(W * 0.5, H * 0.46), hw = S * 0.5, hh = S * 0.42;
+  const ls = state === "listening", th = state === "thinking", sp = state === "speaking";
+  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, S * 0.95); g.addColorStop(0, "rgba(0,229,255," + (0.18 + (ls ? 0.12 * Math.sin(t * 6) : 0)) + ")"); g.addColorStop(1, "rgba(0,229,255,0)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, S * 0.95, 0, 7); ctx.fill();
+  // antena
+  ctx.strokeStyle = CY; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx, cy - hh - S * 0.14); ctx.stroke();
+  const ar = S * 0.035 * (1 + 0.4 * Math.sin(t * (th ? 12 : 4)));
+  glow(MG, 18); ctx.fillStyle = MG; ctx.beginPath(); ctx.arc(cx, cy - hh - S * 0.14, ar, 0, 7); ctx.fill(); noGlow();
+  if (th) { ctx.strokeStyle = MG; ctx.lineWidth = 2; arcs(cx, cy - hh - S * 0.14, S * 0.07, ring * Math.PI / 180 * 2, 3, 1.0); }
+  // orelhas
+  ctx.fillStyle = "#1a0b2e"; ctx.strokeStyle = MG; ctx.lineWidth = 2;
+  rr(cx - hw - S * 0.07, cy - S * 0.1, S * 0.07, S * 0.2, 6); ctx.fill(); ctx.stroke();
+  rr(cx + hw, cy - S * 0.1, S * 0.07, S * 0.2, 6); ctx.fill(); ctx.stroke();
+  // cabeça
+  g = ctx.createLinearGradient(0, cy - hh, 0, cy + hh); g.addColorStop(0, "#1a2240"); g.addColorStop(1, "#080b18");
+  glow(CY, 18); ctx.fillStyle = g; ctx.strokeStyle = CY; ctx.lineWidth = 3; rr(cx - hw, cy - hh, hw * 2, hh * 2, S * 0.1); ctx.fill(); ctx.stroke(); noGlow();
+  // detalhes de circuito
+  ctx.strokeStyle = "rgba(255,0,255,0.4)"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(cx - hw * 0.9, cy + hh * 0.15); ctx.lineTo(cx - hw * 0.6, cy + hh * 0.15); ctx.lineTo(cx - hw * 0.5, cy + hh * 0.3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx + hw * 0.9, cy + hh * 0.15); ctx.lineTo(cx + hw * 0.6, cy + hh * 0.15); ctx.lineTo(cx + hw * 0.5, cy + hh * 0.3); ctx.stroke();
+  // visor
+  ctx.fillStyle = "#02030a"; ctx.strokeStyle = "rgba(0,229,255,0.5)"; ctx.lineWidth = 2;
+  rr(cx - hw * 0.82, cy - hh * 0.64, hw * 1.64, hh * 0.56, 14); ctx.fill(); ctx.stroke();
+  const ey = cy - hh * 0.36, lx = look.x * hw * 0.08, ly = look.y * hh * 0.05;
+  if (th) {
+    const bx = cx + Math.sin(t * 3) * hw * 0.62;
+    glow(CY, 22); ctx.fillStyle = CY; rr(bx - hw * 0.14, ey - hh * 0.09, hw * 0.28, hh * 0.18, 6); ctx.fill(); noGlow();
+  } else {
+    [-1, 1].forEach(function (s) {
+      const rx = hw * 0.22 * (ls ? 1 + pulse * 0.25 : 1), ry = Math.max(1, hh * 0.17 * open);
+      glow(ls ? MG : CY, 22); ctx.fillStyle = ls ? MG : CY;
+      ctx.beginPath(); ctx.ellipse(cx + s * hw * 0.42 + lx, ey + ly, rx, ry, 0, 0, 7); ctx.fill(); noGlow();
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.beginPath(); ctx.arc(cx + s * hw * 0.42 + lx - rx * 0.3, ey + ly - ry * 0.3, Math.max(1, ry * 0.2), 0, 7); ctx.fill();
+    });
+  }
+  // boca (equalizador)
+  const my = cy + hh * 0.52, bars = 11, bw = hw * 0.12, gap = hw * 0.06, total = bars * bw + (bars - 1) * gap, x0 = cx - total / 2;
+  glow(ls ? MG : CY, 12); ctx.fillStyle = ls ? MG : CY;
+  for (let i = 0; i < bars; i++) {
+    let h = hh * 0.03;
+    if (sp) h = hh * 0.06 + hh * 0.16 * Math.abs(Math.sin(t * 10 + i * 1.3) * Math.cos(t * 4 + i));
+    else if (ls) h = hh * 0.03 + hh * 0.12 * pulse * Math.abs(Math.sin(t * 8 + i));
+    ctx.fillRect(x0 + i * (bw + gap), my - h, bw, h * 2);
+  }
+  noGlow();
+  ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+}
+
 // ================= Three.js (esfera) =================
 const HAS3 = typeof THREE !== "undefined";
 const box = document.getElementById("three-box");
@@ -1439,6 +1776,10 @@ with st.sidebar:
     render_camera_sidebar()
 
     st.divider()
+    if st.button("🧪 Testar chaves", key="btn_test_keys"):
+        st.session_state.teste_chaves = testar_chaves()
+    for _l in st.session_state.get("teste_chaves", []):
+        st.write(_l)
     st.subheader("🔑 Status das Chaves")
     for k in KEYS.values():
         st.write(("✅ " if _secret(k) else "❌ ") + k)
@@ -1449,6 +1790,7 @@ inject_theme(theme_name)
 st.title("⚡ ZEUS // CYBER-CORE")
 render_avatar_voice(AVATAR_MAP[avatar_type], silence_s, stt_key, tts_key, voz_edge, tts_rate)
 render_pipeline_ui()
+render_estudio_ui()
 
 with st.expander("📜 Histórico da conversa"):
     for msg in st.session_state.messages:
