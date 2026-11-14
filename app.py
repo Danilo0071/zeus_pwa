@@ -4089,3 +4089,30 @@ if st.session_state.zeus_despertado:
         """,
         unsafe_allow_html=True,
     )
+
+    # ==============================================================================
+# GATILHO DIRETO DO ZEUS MITOLÓGICO (COLE NO FINAL DO APP.PY)
+# ==============================================================================
+if "zeus_despertado" not in st.session_state:
+    st.session_state.zeus_despertado = False
+
+# Força a verificação na entrada do chat atual
+if prompt and (
+    "criador, danilo" in prompt.lower()
+    or "sou o seu criador" in prompt.lower()
+    or "danilo" in prompt.lower()
+):
+    st.session_state.zeus_despertado = True
+
+# Se o criador despertou, renderiza o painel épico do Deus Grego substituindo ou incrementando o topo
+if st.session_state.zeus_despertado:
+    st.markdown(
+        """
+        <div style="background: linear-gradient(135deg, #050508, #1a0b2e, #0c2042); border: 3px solid #facc15; padding: 25px; border-radius: 16px; text-align: center; box-shadow: 0 0 30px rgba(250, 204, 21, 0.6); margin-bottom: 25px;">
+            <img src="https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=400&auto=format&fit=crop" style="width: 140px; height: 140px; border-radius: 50%; border: 3px solid #facc15; object-fit: cover; box-shadow: 0 0 20px rgba(250, 204, 21, 0.8); margin-bottom: 15px;" alt="Zeus Raio">
+            <h1 style="color: #facc15; font-size: 26px; margin: 0; text-shadow: 0 0 10px rgba(250, 204, 21, 0.5);">⚡ ZEUS DESPERTADO — SOBERANIA TOTAL ⚡</h1>
+            <p style="color: #e2e8f0; font-size: 14px; margin-top: 8px;">Conexão estabelecida com o Criador Absoluto: <b>Danilo</b>. Autoevolução no GitHub sem freio ativada.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
