@@ -1,4 +1,32 @@
-import asyncio
+[21:56, 13/11/2026] Danilo: import asyncio
+import base64
+import hashlib
+import os
+import re
+import sqlite3
+import tempfile
+import time
+
+import requests
+import streamlit as st
+import streamlit.components.v1 as components
+
+# ============================================================
+# CONFIGURAÇÃO DA PÁGINA
+# ============================================================
+st.set_page_config(page_title="Zeus 3.0", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+
+THEMES = {
+    "Cyberpunk": {"bg": "#0b0f19", "panel": "#121826", "primary": "#00ffcc", "secondary": "#0077ff", "text": "#00ffcc", "border": "#00ffcc33"},
+}
+
+
+def inject_theme(theme_name: str):
+    t = THEMES.get(theme_name, THEMES["Cyberpunk"])
+    st.markdown(f"""
+        <style>
+            .stApp {{ background-c…
+[22:00, 13/11/2026] Danilo: import asyncio
 import base64
 import hashlib
 import os
@@ -80,21 +108,83 @@ def _secret(key: str, default: str = "") -> str:
 
 
 # ============================================================
-# CLIENTE LLM (GROQ, GEMINI, CLAUDE) COM RETENTATIVA E FALLBACK
-# - 503/500 (alta demanda): tenta de novo e depois o próximo modelo
-# - Se o provedor escolhido falhar (ex.: Claude sem créditos), usa
-#   automaticamente outro provedor que tenha chave.
-# Para forçar um modelo: Secrets GROQ_MODEL, GEMINI_MODEL, ANTHROPIC_MODEL.
+# ZEUS 3.0: MÓDULO DE VISÃO (CÂMERA) E GERAÇÃO DE MÍDIA GRATUITA
+# ============================================================
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
+class ZeusVisionMedia:
+    def _init_(self):
+        pass
+
+    def capture_image_from_webcam(self, output_path="captured_frame.jpg") -> str:
+        if not cv2:
+            raise Exception("OpenCV (cv2) não está instalado no ambiente.")
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            raise Exception("Não foi possível acessar a câmera do dispositivo.")
+        ret, frame = cap.read()
+        cap.release()
+        if not ret:
+            raise Exception("Falha ao capturar o frame da câmera.")
+        cv2.imwrite(output_path, frame)
+        return output_path
+
+    def enhance_prompt_for_media(self, user_description: str, image_path: str = None) -> str:
+        base_prompt = f"Create a masterpiece, cinematic lighting, 8k resolution, highly detailed based on: {user_description}"
+        if image_path and os.path.exists(image_path):
+            base_prompt += " [Contexto visual da câmera incorporado com sucesso]"
+        return base_prompt
+
+    def generate_free_media(self, optimized_prompt: str, media_type: str = "image") -> str:
+        hf_key = _secret("HUGGINGFACE_API_KEY")
+        model = "stabilityai/stable-diffusion-2" if media_type == "image" else "camenduru/AnimateDiff"
+        url = f"https://api-inference.huggingface.co/models/{model}"
+        headers = {"Authorization": f"Bearer {hf_key}"} if hf_key else {}
+        payload = {"inputs": optimized_prompt}
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            if response.status_code == 200:
+                output_file = f"generated_{media_type}.png" if media_type == "image" else f"generated_{media_type}.mp4"
+                with open(output_file, "wb") as f:
+                    f.write(response.content)
+                return f"Mídia gerada com sucesso e salva em {output_file}!"
+            else:
+                return f"Erro ao gerar mídia gratuita: {response.text} (Verifique se sua HUGGINGFACE_API_KEY está ativa)."
+        except Exception as e:
+            return f"Erro na conexão para geração de mídia: {str(e)}"
+
+zeus_vm = ZeusVisionMedia()
+
+
+# ============================================================
+# CLIENTE LLM (GROQ, GEMINI, CLAUDE, HUGGINGFACE, GITHUB) COM RETENTATIVA E FALLBACK
 # ============================================================
 SYS_PROMPT = "Você é Zeus, uma IA cyberpunk futurista e assistente sênior. Responda em português, de forma objetiva e com um tom tecnológico. Respostas curtas, pois serão faladas em voz alta."
 
-PROVIDERS = ["groq", "gemini", "claude"]
-KEYS = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "claude": "ANTHROPIC_API_KEY"}
-MODEL_SECRET = {"groq": "GROQ_MODEL", "gemini": "GEMINI_MODEL", "claude": "ANTHROPIC_MODEL"}
+PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github"]
+KEYS = {
+    "groq": "GROQ_API_KEY", 
+    "gemini": "GEMINI_API_KEY", 
+    "claude": "ANTHROPIC_API_KEY",
+    "huggingface": "HUGGINGFACE_API_KEY",
+    "github": "GITHUB_API_KEY"
+}
+MODEL_SECRET = {
+    "groq": "GROQ_MODEL", 
+    "gemini": "GEMINI_MODEL", 
+    "claude": "ANTHROPIC_MODEL",
+    "huggingface": "HUGGINGFACE_MODEL",
+    "github": "GITHUB_MODEL"
+}
 MODELS = {
     "groq": ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"],
     "gemini": ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
     "claude": ["claude-haiku-5-5", "claude-sonnet-5-5"],
+    "huggingface": ["meta-llama/Meta-Llama-3-8B-Instruct"],
+    "github": ["gpt-4o"]
 }
 TRANSIENT = (500, 502, 503, 504, 529)
 
@@ -137,7 +227,7 @@ def _try_models(candidates, fn):
 def _groq_payload(model, msgs):
     p = {"model": model, "messages": [{"role": "system", "content": SYS_PROMPT}] + msgs, "temperature": 0.4, "max_tokens": 700}
     if model.startswith("openai/gpt-oss"):
-        p["reasoning_effort"] = "low"  # responde bem mais rápido
+        p["reasoning_effort"] = "low"
     return p
 
 
@@ -176,7 +266,45 @@ def _call_gemini(api_key, model, msgs):
     return r.status_code, r.text
 
 
-CALLERS = {"groq": _call_groq, "gemini": _call_gemini, "claude": _call_claude}
+def _call_huggingface(api_key, model, msgs):
+    prompt_text = "\n".join([f"{m['role']}: {m['content']}" for m in msgs])
+    url = f"https://api-inference.huggingface.co/models/{model}"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    payload = {"inputs": prompt_text, "parameters": {"max_new_tokens": 256}}
+    r = requests.post(url, headers=headers, json=payload, timeout=30)
+    if r.status_code == 200:
+        res = r.json()
+        if isinstance(res, list) and len(res) > 0:
+            return 200, res[0].get("generated_text", str(res))
+        return 200, str(res)
+    return r.status_code, r.text
+
+
+def _call_github(api_key, model, msgs):
+    url = "https://models.inference.ai.azure.com/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    } if api_key else {}
+    payload = {
+        "messages": [{"role": "system", "content": SYS_PROMPT}] + msgs,
+        "model": model,
+        "max_tokens": 256
+    }
+    r = requests.post(url, headers=headers, json=payload, timeout=30)
+    if r.status_code == 200:
+        data = r.json()
+        return 200, data["choices"][0]["message"]["content"]
+    return r.status_code, r.text
+
+
+CALLERS = {
+    "groq": _call_groq, 
+    "gemini": _call_gemini, 
+    "claude": _call_claude,
+    "huggingface": _call_huggingface,
+    "github": _call_github
+}
 
 
 def _resumo(text):
@@ -229,7 +357,6 @@ def processar_prompt(prompt):
 # RECONHECIMENTO (Whisper/Groq) E VOZ NEURAL (Edge TTS)
 # ============================================================
 def transcrever_audio(audio_bytes: bytes, mime: str = ""):
-    """Transcreve com Whisper (Groq). Retorna (texto, erro)."""
     api_key = _secret("GROQ_API_KEY")
     if not api_key:
         return "", "GROQ_API_KEY ausente (necessária para o reconhecimento Whisper)."
@@ -256,7 +383,7 @@ def transcrever_audio(audio_bytes: bytes, mime: str = ""):
 
 
 def _limpar_para_fala(texto: str, limite: int = 700) -> str:
-    texto = re.sub(r"```.*?```", " (código omitido) ", texto, flags=re.S)
+    texto = re.sub(r".*?", " (código omitido) ", texto, flags=re.S)
     texto = re.sub(r"[*#`_>~|]", "", texto).strip()
     if len(texto) > limite:
         corte = texto[:limite]
@@ -275,7 +402,6 @@ async def _edge_synth(texto, voz, rate):
 
 
 def sintetizar(texto, voz, rate=1.0):
-    """Gera MP3 com voz neural. Retorna bytes ou None."""
     texto = _limpar_para_fala(texto)
     if not texto:
         return None
@@ -312,9 +438,6 @@ def listar_vozes_edge():
 
 # ============================================================
 # AVATAR CYBERPUNK (Esfera 3D / Olho / Robô) + VOZ
-# Componente bidirecional carregado de uma pasta temporária (path=).
-# Voz: clique em 🎙️ e fale; após N segundos de silêncio (padrão 5) o
-# texto é enviado e o Zeus responde em voz alta. Funciona nos 3 avatares.
 # ============================================================
 AVATAR_HTML = r"""
 <!DOCTYPE html>
@@ -359,7 +482,6 @@ AVATAR_HTML = r"""
   </div>
 </div>
 <script>
-// ================= Ponte com o Streamlit =================
 function sendMsg(type, data) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data || {}), "*"); }
 sendMsg("streamlit:componentReady", {apiVersion: 1});
 sendMsg("streamlit:setFrameHeight", {height: 700});
@@ -412,7 +534,6 @@ window.addEventListener("message", function (e) {
   }
 });
 
-// ================= Chat =================
 function addMessage(text, sender) {
   const h = document.getElementById("chatHistory");
   const d = document.createElement("div");
@@ -446,8 +567,6 @@ function submitAudio(b64, mime) {
 document.getElementById("sendBtn").addEventListener("click", function () { unlockAudio(); sendText(input.value); });
 input.addEventListener("keydown", function (e) { if (e.key === "Enter") { unlockAudio(); sendText(input.value); } });
 
-// ================= Voz de saída =================
-// Celulares só liberam áudio depois de um toque do usuário: "destrava" no primeiro toque.
 const player = new Audio(); player.setAttribute("playsinline", "");
 let unlocked = false;
 const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
@@ -492,7 +611,6 @@ function speakBrowser(text) {
   let started = false;
   u.onstart = function () { started = true; }; u.onend = afterSpeak; u.onerror = afterSpeak;
   window.speechSynthesis.speak(u);
-  // Se o celular bloquear a fala em silêncio, não deixa o Zeus travado em "FALANDO"
   setTimeout(function () { if (!started && state === "speaking") { window.speechSynthesis.cancel(); afterSpeak(); } }, 4000);
 }
 function afterSpeak() {
@@ -503,7 +621,6 @@ function afterSpeak() {
   else setTimeout(function () { try { rec.start(); } catch (e) {} }, 400);
 }
 
-// ================= Entrada A: Whisper (grava, detecta silêncio e envia) =================
 let stream = null, ac = null, analyser = null, chunks = [], vadTimer = null, td = null;
 let speechStarted = false, speechStartTs = 0, lastVoiceTs = 0, recStart = 0, thr = 0.03, calib = [];
 function pickMime() {
@@ -555,7 +672,7 @@ function finishRecording() {
   const dur = lastVoiceTs - speechStartTs, mime = mediaRec.mimeType || "audio/webm";
   pausedForBot = true; speechStarted = false; silenceDeadline = 0;
   mediaRec.onstop = function () {
-    if (dur < 350) { pausedForBot = false; setState("idle"); beginRecording(); return; }  // só ruído
+    if (dur < 350) { pausedForBot = false; setState("idle"); beginRecording(); return; }
     const blob = new Blob(chunks, { type: mime });
     const fr = new FileReader();
     fr.onload = function () { submitAudio(String(fr.result).split(",")[1], mime); };
@@ -570,7 +687,6 @@ function stopWhisper() {
   analyser = null; clearInterval(vadTimer); vadTimer = null;
 }
 
-// ================= Entrada B: reconhecimento do navegador =================
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 function armSilence() {
   clearTimeout(silenceTimer);
@@ -597,7 +713,6 @@ if (SR) {
   };
 }
 
-// ================= Botão do microfone =================
 micBtn.addEventListener("click", async function () {
   unlockAudio();
   micOn = !micOn; micBtn.classList.toggle("on", micOn);
@@ -618,7 +733,6 @@ micBtn.addEventListener("click", async function () {
   renderStatus();
 });
 
-// ================= Utilidades gráficas =================
 const rnd = function (a, b) { return a + Math.random() * (b - a); };
 const CY = "#00e5ff", MG = "#ff00ff";
 let look = { x: 0, y: 0 }, lookT = { x: 0, y: 0 }, open = 1, blinkStart = null, pupil = 1, ring = 0;
@@ -637,7 +751,6 @@ function updateCommon(now, dt, t) {
   ring = (ring + dt * (state === "thinking" ? 420 : 40)) % 360;
 }
 
-// ================= Canvas 2D (olho e robô) =================
 const cv = document.getElementById("c2"), ctx = cv.getContext("2d");
 let W = 0, H = 0;
 function resize2d() { const d = window.devicePixelRatio || 1; W = cv.clientWidth; H = cv.clientHeight; cv.width = W * d; cv.height = H * d; ctx.setTransform(d, 0, 0, d, 0, 0); }
@@ -690,23 +803,18 @@ function drawRobot(t) {
   const ls = state === "listening", th = state === "thinking", sp = state === "speaking";
   let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, S * 0.95); g.addColorStop(0, "rgba(0,229,255," + (0.18 + (ls ? 0.12 * Math.sin(t * 6) : 0)) + ")"); g.addColorStop(1, "rgba(0,229,255,0)");
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, S * 0.95, 0, 7); ctx.fill();
-  // antena
   ctx.strokeStyle = CY; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx, cy - hh - S * 0.14); ctx.stroke();
   const ar = S * 0.035 * (1 + 0.4 * Math.sin(t * (th ? 12 : 4)));
   glow(MG, 18); ctx.fillStyle = MG; ctx.beginPath(); ctx.arc(cx, cy - hh - S * 0.14, ar, 0, 7); ctx.fill(); noGlow();
   if (th) { ctx.strokeStyle = MG; ctx.lineWidth = 2; arcs(cx, cy - hh - S * 0.14, S * 0.07, ring * Math.PI / 180 * 2, 3, 1.0); }
-  // orelhas
   ctx.fillStyle = "#1a0b2e"; ctx.strokeStyle = MG; ctx.lineWidth = 2;
   rr(cx - hw - S * 0.07, cy - S * 0.1, S * 0.07, S * 0.2, 6); ctx.fill(); ctx.stroke();
   rr(cx + hw, cy - S * 0.1, S * 0.07, S * 0.2, 6); ctx.fill(); ctx.stroke();
-  // cabeça
   g = ctx.createLinearGradient(0, cy - hh, 0, cy + hh); g.addColorStop(0, "#1a2240"); g.addColorStop(1, "#080b18");
   glow(CY, 18); ctx.fillStyle = g; ctx.strokeStyle = CY; ctx.lineWidth = 3; rr(cx - hw, cy - hh, hw * 2, hh * 2, S * 0.1); ctx.fill(); ctx.stroke(); noGlow();
-  // detalhes de circuito
   ctx.strokeStyle = "rgba(255,0,255,0.4)"; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(cx - hw * 0.9, cy + hh * 0.15); ctx.lineTo(cx - hw * 0.6, cy + hh * 0.15); ctx.lineTo(cx - hw * 0.5, cy + hh * 0.3); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(cx + hw * 0.9, cy + hh * 0.15); ctx.lineTo(cx + hw * 0.6, cy + hh * 0.15); ctx.lineTo(cx + hw * 0.5, cy + hh * 0.3); ctx.stroke();
-  // visor
   ctx.fillStyle = "#02030a"; ctx.strokeStyle = "rgba(0,229,255,0.5)"; ctx.lineWidth = 2;
   rr(cx - hw * 0.82, cy - hh * 0.64, hw * 1.64, hh * 0.56, 14); ctx.fill(); ctx.stroke();
   const ey = cy - hh * 0.36, lx = look.x * hw * 0.08, ly = look.y * hh * 0.05;
@@ -721,7 +829,6 @@ function drawRobot(t) {
       ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.beginPath(); ctx.arc(cx + s * hw * 0.42 + lx - rx * 0.3, ey + ly - ry * 0.3, Math.max(1, ry * 0.2), 0, 7); ctx.fill();
     });
   }
-  // boca (equalizador)
   const my = cy + hh * 0.52, bars = 11, bw = hw * 0.12, gap = hw * 0.06, total = bars * bw + (bars - 1) * gap, x0 = cx - total / 2;
   glow(ls ? MG : CY, 12); ctx.fillStyle = ls ? MG : CY;
   for (let i = 0; i < bars; i++) {
@@ -734,7 +841,6 @@ function drawRobot(t) {
   ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
 }
 
-// ================= Three.js (esfera) =================
 const HAS3 = typeof THREE !== "undefined";
 const box = document.getElementById("three-box");
 let scene, camera, renderer, sphereGroup, wireMaterial, pointLight1, pointLight2, particlesMesh, rings = [], clock;
@@ -773,7 +879,6 @@ function applyAvatar() {
 }
 window.addEventListener("resize", onResize); onResize(); setTimeout(onResize, 300); setTimeout(onResize, 1000);
 
-// ================= Loop principal =================
 let last = performance.now(); const t0 = last;
 function frame(now) {
   requestAnimationFrame(frame);
@@ -870,6 +975,11 @@ with st.sidebar:
     theme_name = st.selectbox("🎨 Interface", list(THEMES.keys()), index=0, key="theme_sel")
     avatar_type = st.selectbox("🤖 Avatar do Zeus", list(AVATAR_MAP.keys()), index=0, key="avatar_sel")
     model_choice = st.selectbox("🧠 Modelo LLM", PROVIDERS, index=0, key="model_sel")
+    
+    st.subheader("📷 Visão & Mídia (Zeus 3.0)")
+    use_cam = st.checkbox("Ativar Câmera para Comando Visual", value=False)
+    media_action = st.selectbox("Ação de Mídia", ["Chat Inteligente", "Gerar Imagem Gratuita", "Gerar Vídeo Gratuito"])
+
     st.subheader("🎙️ Voz")
     stt_label = st.selectbox("👂 Reconhecimento", ["Whisper (Groq) — melhor no celular", "Navegador — mais rápido, menos preciso"], key="stt_sel")
     tts_label = st.selectbox("🔊 Motor de voz", ["Neural (Edge) — voz natural", "Navegador — voz do aparelho"], key="tts_sel")
@@ -900,6 +1010,25 @@ with st.sidebar:
 
 inject_theme(theme_name)
 st.title("⚡ ZEUS // CYBER-CORE")
+
+# Se o usuário acionou um comando de mídia extra via painel ou chat
+if use_cam and st.button("📸 Capturar Câmera e Executar Ação"):
+    try:
+        img_path = zeus_vm.capture_image_from_webcam()
+        st.success(f"Foto capturada com sucesso em {img_path}!")
+        last_msg = st.session_state.messages[-1]["content"] if st.session_state.messages else "Crie algo incrível com base nesta imagem"
+        optimized = zeus_vm.enhance_prompt_for_media(last_msg, img_path)
+        if media_action == "Gerar Imagem Gratuita":
+            res_media = zeus_vm.generate_free_media(optimized, "image")
+            st.info(res_media)
+        elif media_action == "Gerar Vídeo Gratuito":
+            res_media = zeus_vm.generate_free_media(optimized, "video")
+            st.info(res_media)
+        else:
+            processar_prompt(optimized)
+    except Exception as e:
+        st.error(f"Erro no pipeline de visão: {e}")
+
 render_avatar_voice(AVATAR_MAP[avatar_type], silence_s, stt_key, tts_key, voz_edge, tts_rate)
 
 with st.expander("📜 Histórico da conversa"):
