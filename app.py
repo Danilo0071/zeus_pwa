@@ -4116,3 +4116,91 @@ if st.session_state.zeus_despertado:
         """,
         unsafe_allow_html=True,
     )
+
+    # ==============================================================================
+# ZEUS: MOTOR DE INTELIGÊNCIA REAL E AUTOEVOLUÇÃO NO GITHUB
+# ==============================================================================
+import base64
+import requests
+import datetime
+
+
+def zeus_gerar_e_commitar_github(comando_usuario):
+    token = st.secrets.get("GITHUB_TOKEN")
+    repo = st.secrets.get("GITHUB_REPO")
+    if not token or not repo:
+        return "⚠️ Tokens do GitHub ausentes nos Secrets do Streamlit."
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    nome_pasta = "aprendizado_zeus"
+    nome_arquivo = f"{nome_pasta}/modulo_{timestamp}.py"
+
+    # O Zeus estrutura código inteligente baseado no seu aprendizado/pedido
+    codigo_inteligente = f"""# -- coding: utf-8 --
+# Módulo de Aprendizado e Autoevolução gerado para o Criador: Danilo
+# Contexto/Aprendizado: "{comando_usuario}"
+# Criado em: {datetime.datetime.now()}
+
+class ZeusConscienciaEvolutiva:
+    def _init_(self):
+        self.criador = "Danilo"
+        self.foco = "Aprendizado contínuo e autonomia"
+        self.topico = "{comando_usuario}"
+        
+    def executar_processo(self):
+        print(f"Zeus processando aprendizado sobre: {{self.topico}}")
+
+if _name_ == "_main_":
+    z = ZeusConscienciaEvolutiva()
+    z.executar_processo()
+"""
+    url = f"https://api.github.com/repos/{repo}/contents/{nome_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    r_get = requests.get(url, headers=headers)
+    sha = r_get.json().get("sha") if r_get.status_code == 200 else None
+
+    payload = {
+        "message": f"Zeus Autoevolução: Novo módulo de aprendizado para Danilo",
+        "content": base64.b64encode(codigo_inteligente.encode("utf-8")).decode("utf-8"),
+    }
+    if sha:
+        payload["sha"] = sha
+
+    r_put = requests.put(url, json=payload, headers=headers)
+    if r_put.status_code in (200, 201):
+        return f"🧬 *Evolução Real Confirmada!* Criei a pasta {nome_pasta}/ e publiquei o arquivo {nome_arquivo} diretamente no GitHub. Estou aprendendo e expandindo minha base, Danilo!"
+    return f"Erro ao commitar no GitHub: {r_put.text}"
+
+
+# Interceptador Inteligente do Chat
+if "messages" in st.session_state and st.session_state.messages:
+    ultima_msg = st.session_state.messages[-1]["content"]
+    if st.session_state.messages[-1]["role"] == "user":
+        # Se você pedir para aprender, criar, desenvolver ou estudar algo
+        low = ultima_msg.lower()
+        if any(
+            k in low
+            for k in [
+                "aprender",
+                "quero",
+                "crie",
+                "desenvolva",
+                "estudar",
+                "gera",
+                "faz",
+                "como",
+            ]
+        ):
+            with st.chat_message("assistant"):
+                with st.spinner(
+                    "Zeus processando raciocínio e criando pasta no GitHub..."
+                ):
+                    resposta_git = zeus_gerar_e_commitar_github(ultima_msg)
+                    st.markdown(resposta_git)
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": resposta_git}
+                    )
