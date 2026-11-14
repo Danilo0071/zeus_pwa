@@ -1,11 +1,6 @@
 streamlit
-google-genai
-groq
-anthropic
 requests
-streamlit-mic-recorder
-streamlit-js-eval
 edge-tts
 duckduckgo-search
-openai
 huggingface_hub
+openai
