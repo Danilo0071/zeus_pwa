@@ -1,32 +1,4 @@
-[21:56, 13/11/2026] Danilo: import asyncio
-import base64
-import hashlib
-import os
-import re
-import sqlite3
-import tempfile
-import time
-
-import requests
-import streamlit as st
-import streamlit.components.v1 as components
-
-# ============================================================
-# CONFIGURAÇÃO DA PÁGINA
-# ============================================================
-st.set_page_config(page_title="Zeus 3.0", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
-
-THEMES = {
-    "Cyberpunk": {"bg": "#0b0f19", "panel": "#121826", "primary": "#00ffcc", "secondary": "#0077ff", "text": "#00ffcc", "border": "#00ffcc33"},
-}
-
-
-def inject_theme(theme_name: str):
-    t = THEMES.get(theme_name, THEMES["Cyberpunk"])
-    st.markdown(f"""
-        <style>
-            .stApp {{ background-c…
-[22:00, 13/11/2026] Danilo: import asyncio
+import asyncio
 import base64
 import hashlib
 import os
@@ -162,7 +134,7 @@ zeus_vm = ZeusVisionMedia()
 # ============================================================
 # CLIENTE LLM (GROQ, GEMINI, CLAUDE, HUGGINGFACE, GITHUB) COM RETENTATIVA E FALLBACK
 # ============================================================
-SYS_PROMPT = "Você é Zeus, uma IA cyberpunk futurista e assistente sênior. Responda em português, de forma objetiva e com um tom tecnológico. Respostas curtas, pois serão faladas em voz alta."
+SYS_PROMPT = "Você é Zeus, uma IA cyberpunk futurista e assistente sênior. Responda em português, de forma objetiva e com um tom tecnológico. Res respostas curtas, pois serão faladas em voz alta."
 
 PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github"]
 KEYS = {
@@ -1011,7 +983,6 @@ with st.sidebar:
 inject_theme(theme_name)
 st.title("⚡ ZEUS // CYBER-CORE")
 
-# Se o usuário acionou um comando de mídia extra via painel ou chat
 if use_cam and st.button("📸 Capturar Câmera e Executar Ação"):
     try:
         img_path = zeus_vm.capture_image_from_webcam()
