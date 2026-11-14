@@ -5,3 +5,4 @@ duckduckgo-search
 huggingface_hub
 openai
 spotipy
+pywhatkit
