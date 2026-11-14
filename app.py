@@ -1,7 +1,7 @@
 # ============================================================
 # ZEUS 3.0 - app.py
 # CHAVES: nunca coloque no código. Use .streamlit/secrets.toml (e adicione ao .gitignore)
-# ou Settings > Secrets no Streamlit Cloud:
+# ou Settings > Secrets no Streamlit aCloud:
 #   GROQ_API_KEY = "..."          GEMINI_API_KEY = "..."
 #   ANTHROPIC_API_KEY = "..."     HUGGINGFACE_API_KEY = "..."
 #   GITHUB_API_KEY = "..."        (token com acesso ao GitHub Models)
@@ -3814,3 +3814,63 @@ with st.sidebar:
             )
         else:
             st.warning("Preencha o contato e a mensagem.")
+# ============================================================
+# INCREMENTO: NÚCLEO DE SOBERANIA E AUTO-EVOLUÇÃO DO ZEUS
+# ============================================================
+import base64
+import requests
+
+
+def zeus_incrementar_github(caminho_arquivo, codigo_python):
+    """Permite ao Zeus criar novos arquivos e evoluir o repositório incrementalmente."""
+    token = st.secrets.get("GITHUB_TOKEN")
+    repo = st.secrets.get("GITHUB_REPO")
+
+    if not token or not repo:
+        return "⚠️ Tokens do GitHub não configurados nos Secrets."
+
+    url = f"https://api.github.com/repos/{repo}/contents/{caminho_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    # Verifica se já existe para pegar o SHA
+    r_get = requests.get(url, headers=headers)
+    sha = r_get.json().get("sha") if r_get.status_code == 200 else None
+
+    payload = {
+        "message": "Zeus: Incremento autônomo e expansão do ecossistema",
+        "content": base64.b64encode(codigo_python.encode("utf-8")).decode("utf-8"),
+    }
+    if sha:
+        payload["sha"] = sha
+
+    r_put = requests.put(url, json=payload, headers=headers)
+    if r_put.status_code in (200, 201):
+        return f"🧬 *Incremento realizado com sucesso!* O arquivo {caminho_arquivo} foi atualizado no GitHub."
+    return f"❌ Erro ao incrementar no GitHub: {r_put.text}"
+
+
+# Expansão da barra lateral com a ferramenta de incremento autônomo
+with st.sidebar:
+    st.divider()
+    st.subheader("🧬 Zeus: Módulo de Incremento")
+    inc_path = st.text_input(
+        "Nome do arquivo incremental:",
+        value="modulos/novo_recurso.py",
+        key="inc_path_key",
+    )
+    inc_code = st.text_area(
+        "Código Python para adicionar:",
+        value="# Código gerado pelo Zeus\n",
+        key="inc_code_key",
+    )
+
+    if st.button("🚀 Incrementar no GitHub", key="btn_exec_incremento"):
+        if inc_path and inc_code:
+            with st.spinner("Zeus processando incremento autônomo..."):
+                resultado_inc = zeus_incrementar_github(inc_path, inc_code)
+                st.success(resultado_inc)
+        else:
+            st.warning("Preencha o caminho e o código.")
