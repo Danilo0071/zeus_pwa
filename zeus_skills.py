@@ -1,49 +1,51 @@
-import streamlit as st
-import base64
-import requests
-from urllib.parse import urlparse, parse_qs
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
 
-def autorizar_spotify():
+def tocar_musica(nome_musica):
     try:
-        auth_url = st.secrets.get("SPOTIFY_AUTH_URL")
         client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
         client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+        refresh_token = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
         redirect_uri = "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/"
 
-        if not auth_url or not client_id or not client_secret:
-            return "❌ Faltam variáveis nos Secrets."
+        if not client_id or not client_secret or not refresh_token:
+            return "❌ Faltam chaves do Spotify nos Secrets."
 
-        parsed = urlparse(auth_url)
-        query = parse_qs(parsed.query)
-        code = query.get("code")
+        # Autentica usando o refresh_token
+        auth_manager = SpotifyOAuth(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope="user-modify-playback-state user-read-playback-state",
+            cache_path=None
+        )
         
-        if not code:
-            return "❌ Código 'code' não encontrado na URL."
+        # Força o uso do token que já temos
+        token_info = auth_manager.refresh_access_token(refresh_token)
+        access_token = token_info['access_token']
+        
+        sp = spotipy.Spotify(auth=access_token)
 
-        code = code[0]
-        token_url = "https://accounts.spotify.com/api/token"
+        # Busca a música
+        results = sp.search(q=nome_musica, limit=1, type='track')
+        tracks = results['tracks']['items']
         
-        auth_bytes = f"{client_id}:{client_secret}".encode()
-        auth_header = base64.b64encode(auth_bytes).decode()
-        
-        headers = {
-            "Authorization": f"Basic {auth_header}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-        
-        data = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-        }
+        if not tracks:
+            return f"❌ Não encontrei a música '{nome_musica}'."
 
-        resp = requests.post(token_url, headers=headers, data=data)
+        track_uri = tracks[0]['uri']
+        track_name = tracks[0]['name']
+        artist_name = tracks[0]['artists'][0]['name']
 
-        if resp.status_code == 200:
-            refresh_token = resp.json().get("refresh_token")
-            return f"✅ SUCESSO! Copie este código e coloque no Secrets como SPOTIFY_REFRESH_TOKEN:\n\n{refresh_token}"
-        else:
-            return f"❌ Erro ({resp.status_code}): {resp.text}"
+        # Tenta tocar no dispositivo ativo
+        try:
+            sp.start_playback(uris=[track_uri])
+            return f"✅ Tocando agora: {track_name} - {artist_name}"
+        except spotipy.exceptions.SpotifyException as e:
+            if e.http_status == 404:
+                return "⚠️ Nenhum dispositivo ativo encontrado. Abra o Spotify no celular ou na TV primeiro e tente novamente."
+            else:
+                return f"❌ Erro do Spotify: {e.msg}"
 
     except Exception as e:
-        return f"❌ Erro: {e}"
+        return f"❌ Erro inesperado: {e}"
