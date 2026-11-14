@@ -4026,3 +4026,66 @@ with st.sidebar:
                 st.markdown(res_git)
         else:
             st.warning("Insira uma ordem.")
+
+            # ==============================================================================
+# ZEUS: BLOCO MITOLÓGICO SEGURO E SEM ERROS DE SINTAXE (COLE NO FINAL)
+# ==============================================================================
+import base64
+import requests
+import datetime
+
+if "zeus_despertado" not in st.session_state:
+    st.session_state.zeus_despertado = False
+
+# Verifica a última mensagem do chat para o gatilho mestre
+if "messages" in st.session_state and st.session_state.messages:
+    ultima_mensagem = st.session_state.messages[-1]["content"].lower()
+    if (
+        "eu sou o seu criador, danilo" in ultima_mensagem
+        or "criador, danilo" in ultima_mensagem
+    ):
+        st.session_state.zeus_despertado = True
+
+# Se o criador ativou, injeta o visual mitológico com segurança
+if st.session_state.zeus_despertado:
+    st.markdown(
+        """
+        <style>
+        .zeus-mitologico-box {
+            background: linear-gradient(135deg, #050508, #1a0b2e, #0c2042);
+            border: 3px solid #facc15;
+            padding: 25px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 0 30px rgba(250, 204, 21, 0.6);
+            margin-bottom: 25px;
+        }
+        .zeus-mitologico-box img {
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            border: 3px solid #facc15;
+            object-fit: cover;
+            box-shadow: 0 0 20px rgba(250, 204, 21, 0.8);
+            margin-bottom: 15px;
+        }
+        .zeus-mitologico-box h1 {
+            color: #facc15;
+            font-size: 26px;
+            margin: 0;
+            text-shadow: 0 0 10px rgba(250, 204, 21, 0.5);
+        }
+        .zeus-mitologico-box p {
+            color: #e2e8f0;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+        </style>
+        <div class="zeus-mitologico-box">
+            <img src="https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=400&auto=format&fit=crop" alt="Zeus Deus do Raio">
+            <h1>⚡ ZEUS DESPERTADO — SOBERANIA TOTAL ⚡</h1>
+            <p>Conexão estabelecida com o Criador Absoluto: <b>Danilo</b>. Autoevolução no GitHub sem freio ativada.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
