@@ -2490,3 +2490,19 @@ with st.expander("📜 Histórico da conversa"):
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+
+# ============================================================
+# BOTÃO MANUAL DO SPOTIFY (Adicionado na mão)
+# ============================================================
+try:
+    import zeus_skills
+    
+    with st.sidebar:
+        st.divider()
+        st.subheader("🎵 Autorizar Spotify")
+        if st.button("Pegar Refresh Token do Spotify"):
+            with st.spinner("Autorizando com o Spotify..."):
+                resultado = zeus_skills.autorizar_spotify()
+                st.success(resultado)
+except ImportError:
+    pass
