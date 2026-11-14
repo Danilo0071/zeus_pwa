@@ -2506,3 +2506,20 @@ try:
                 st.success(resultado)
 except ImportError:
     pass
+
+st.divider()
+    st.subheader("🎵 Tocar Música no Spotify")
+    musica_input = st.text_input("Nome da música:", key="input_musica_spotify")
+    if st.button("Tocar no Spotify", key="btn_tocar_spotify"):
+        if musica_input:
+            with st.spinner("Conectando ao Spotify..."):
+                try:
+                    resultado = zeus_skills.tocar_musica(musica_input)
+                    if "✅" in resultado:
+                        st.success(resultado)
+                    else:
+                        st.error(resultado)
+                except Exception as e:
+                    st.error(f"Erro ao chamar a função: {e}")
+        else:
+            st.warning("Digite o nome de uma música primeiro.")
