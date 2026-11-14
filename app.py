@@ -3723,3 +3723,94 @@ with st.sidebar:
                     st.error(res_evo)
         else:
             st.warning("Preencha o caminho do arquivo e o código.")
+
+            # ============================================================
+# BLOCO DEFINITIVO DE WHATSAPP DO ZEUS (CHAT + PAINEL + AGENDA)
+# ============================================================
+import urllib.parse
+
+# Agenda inteligente com seus contatos principais
+AGENDA_ZEUS = {
+    "elaine": "5531991432780",
+    "mari": "5531986202389",
+    "namorada": "5531991432780",
+    "adilson": "5531986421692",
+}
+
+
+def gerar_link_whatsapp(telefone, mensagem):
+    """Gera o link universal do WhatsApp para celular ou PC."""
+    num_limpo = "".join(filter(str.isdigit, str(telefone)))
+    if not num_limpo.startswith("55"):
+        num_limpo = "55" + num_limpo
+    texto_codificado = urllib.parse.quote(mensagem)
+    return f"https://api.whatsapp.com/send?phone={num_limpo}&text={texto_codificado}"
+
+
+# Função inteligente que intercepta o comando direto no chat do Zeus
+def zeus_interpretar_whatsapp(prompt):
+    low = prompt.lower()
+    # Verifica se você pediu para mandar mensagem ou WhatsApp
+    if any(
+        k in low
+        for k in ["whatsapp", "manda mensagem", "mandar mensagem", "envia", "manda"]
+    ):
+        contato_encontrado = None
+        for nome in AGENDA_ZEUS.keys():
+            if nome in low:
+                contato_encontrado = nome
+                break
+
+        if contato_encontrado:
+            numero = AGENDA_ZEUS[contato_encontrado]
+            # Extrai o texto da mensagem ou define um padrão carinhoso/útil
+            if " para " in low:
+                partes = prompt.split(" para ", 1)[1]
+                # Pega o que vem depois do nome do contato
+                msg = partes.split(" ", 1)[1] if " " in partes else "Olá!"
+            else:
+                msg = prompt.replace("manda", "").replace("whatsapp", "").strip()
+
+            link = gerar_link_whatsapp(
+                numero, msg if len(msg) > 2 else "Olá, tudo bem?"
+            )
+
+            return f"✅ *Zeus:* Entendido! Clica no botão abaixo para disparar a mensagem para *{contato_encontrado.capitalize()}* no WhatsApp:\n\n<a href='{link}' target='_blank'><button style='background-color:#25D366;color:white;border:none;padding:12px 20px;border-radius:6px;cursor:pointer;font-weight:bold;width:100%;'>📱 Enviar Mensagem Agora</button></a>"
+
+    return None
+
+
+# Painel lateral otimizado
+with st.sidebar:
+    st.divider()
+    st.subheader("📱 WhatsApp do Zeus (Agenda)")
+
+    # Seleção por contato ou número livre
+    contatos_lista = list(AGENDA_ZEUS.keys()) + ["Outro Número"]
+    escolha = st.selectbox("Contato:", contatos_lista, key="sel_zap_chat_fix")
+
+    if escolha == "Outro Número":
+        tel_input = st.text_input(
+            "Número com DDD:", value="", placeholder="5531999999999", key="in_tel_livre"
+        )
+    else:
+        tel_input = AGENDA_ZEUS[escolha]
+        st.caption(f"Número salvo: {tel_input}")
+
+    msg_input = st.text_area(
+        "Mensagem:",
+        value="",
+        placeholder="Ex: Te amo, estou chegando...",
+        key="in_msg_livre",
+    )
+
+    if st.button("🚀 Gerar Link WhatsApp", key="btn_gerar_zap_final"):
+        if tel_input and msg_input:
+            lnk = gerar_link_whatsapp(tel_input, msg_input)
+            st.success("✅ Pronto!")
+            st.markdown(
+                f'<a href="{lnk}" target="_blank"><button style="background-color:#25D366;color:white;border:none;padding:12px 20px;border-radius:6px;cursor:pointer;font-weight:bold;width:100%;">Abrir WhatsApp</button></a>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.warning("Preencha o contato e a mensagem.")
