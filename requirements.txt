@@ -8,3 +8,4 @@ streamlit-js-eval
 edge-tts
 duckduckgo-search
 openai
+huggingface_hub
