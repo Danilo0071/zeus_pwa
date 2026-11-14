@@ -1,4 +1,4 @@
-[22:11, 13/11/2026] Danilo: import asyncio
+import asyncio
 import base64
 import hashlib
 import os
@@ -23,41 +23,14 @@ THEMES = {
 
 def inject_theme(theme_name: str):
     t = THEMES.get(theme_name, THEMES["Cyberpunk"])
-    st.markdown(f"""
-        <style>
-            .stApp {{ background-c…
-[22:21, 13/11/2026] Danilo: import asyncio
-import base64
-import hashlib
-import os
-import re
-import sqlite3
-import tempfile
-import time
-
-import requests
-import streamlit as st
-import streamlit.components.v1 as components
-
-# ============================================================
-# CONFIGURAÇÃO DA PÁGINA
-# ============================================================
-st.set_page_config(page_title="Zeus 3.0", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
-
-THEMES = {
-    "Cyberpunk": {"bg": "#0b0f19", "panel": "#121826", "primary": "#00ffcc", "secondary": "#0077ff", "text": "#00ffcc", "border": "#00ffcc33"},
-}
-
-
-def inject_theme(theme_name: str):
-    t = THEMES.get(theme_name, THEMES["Cyberpunk"])
-    st.markdown(f"""
-        <style>
-            .stApp {{ background-color: {t['bg']}; color: {t['text']}; font-family: 'Courier New', monospace; }}
-            [data-testid="stSidebar"] {{ background-color: {t['panel']}; }}
-            h1, h2, h3 {{ color: {t['primary']} !important; text-shadow: 0 0 10px {t['border']}; }}
-        </style>
-    """, unsafe_allow_html=True)
+    css_code = (
+        "<style>"
+        f".stApp {{ background-color: {t['bg']}; color: {t['text']}; font-family: 'Courier New', monospace; }}"
+        f'[data-testid="stSidebar"] {{ background-color: {t['panel']}; }}'
+        f"h1, h2, h3 {{ color: {t['primary']} !important; text-shadow: 0 0 10px {t['border']}; }}"
+        "</style>"
+    )
+    st.markdown(css_code, unsafe_allow_html=True)
 
 
 # ============================================================
@@ -108,7 +81,7 @@ def _secret(key: str, default: str = "") -> str:
 
 
 # ============================================================
-# ZEUS 3.0: MÓDULO DE VISÃO (CÂMERA WEB SIMPLES) E MÍDIA
+# ZEUS 3.0: MÓDULO DE VISÃO (CÂMERA WEB) E MÍDIA
 # ============================================================
 try:
     import cv2
@@ -797,52 +770,44 @@ function drawEye(t) {
   ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
 }
 
-// ROBÔ REALISTA E DETALHADO (Texturas metálicas, placas blindadas, fibra de carbono e brilho óptico avançado)
+# ROBÔ REALISTA E DETALHADO (Texturas metálicas, placas blindadas, fibra de carbono e brilho óptico avançado)
 function drawRobot(t) {
   const cx = W / 2, cy = H * 0.38, S = Math.min(W * 0.5, H * 0.46), hw = S * 0.5, hh = S * 0.42;
   const ls = state === "listening", th = state === "thinking", sp = state === "speaking";
 
-  // Brilho de fundo atmosférico
   let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, S * 1.1); g.addColorStop(0, "rgba(0,255,204," + (0.2 + (ls ? 0.15 * Math.sin(t * 6) : 0)) + ")"); g.addColorStop(1, "rgba(0,255,204,0)");
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, S * 1.1, 0, 7); ctx.fill();
 
-  // Antena com transponder realista
   ctx.strokeStyle = "#445566"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx, cy - hh - S * 0.16); ctx.stroke();
   ctx.strokeStyle = CY; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx, cy - hh - S * 0.16); ctx.stroke();
   const ar = S * 0.04 * (1 + 0.3 * Math.sin(t * (th ? 14 : 4)));
   glow(MG, 22); ctx.fillStyle = MG; ctx.beginPath(); ctx.arc(cx, cy - hh - S * 0.16, ar, 0, 7); ctx.fill(); noGlow();
   if (th) { ctx.strokeStyle = CY; ctx.lineWidth = 2; arcs(cx, cy - hh - S * 0.16, S * 0.08, ring * Math.PI / 180 * 3, 3, 1.2); }
 
-  // Orelhas / Módulos auditivos biônicos articulados
   ctx.fillStyle = "#111622"; ctx.strokeStyle = "#334455"; ctx.lineWidth = 2;
   rr(cx - hw - S * 0.08, cy - S * 0.12, S * 0.08, S * 0.24, 6); ctx.fill(); ctx.stroke();
   rr(cx + hw, cy - S * 0.12, S * 0.08, S * 0.24, 6); ctx.fill(); ctx.stroke();
 
-  // Placas da Cabeça (Design Metálico Blindado com gradiente realista de alta definição)
   g = ctx.createLinearGradient(cx - hw, cy - hh, cx + hw, cy + hh); 
   g.addColorStop(0, "#2a3548"); g.addColorStop(0.5, "#151b28"); g.addColorStop(1, "#0a0e17");
   glow(CY, 20); ctx.fillStyle = g; ctx.strokeStyle = CY; ctx.lineWidth = 2.5; 
   rr(cx - hw, cy - hh, hw * 2, hh * 2, S * 0.12); ctx.fill(); ctx.stroke(); noGlow();
 
-  // Detalhes texturizados de blindagem e fibra de carbono lateral
   ctx.strokeStyle = "rgba(0,255,204,0.3)"; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(cx - hw * 0.9, cy - hh * 0.7); ctx.lineTo(cx - hw * 0.7, cy - hh * 0.5); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(cx + hw * 0.9, cy - hh * 0.7); ctx.lineTo(cx + hw * 0.7, cy - hh * 0.5); ctx.stroke();
 
-  // Placas frontais inferiores de ventilação mecânica
   ctx.fillStyle = "#0c101a"; ctx.strokeStyle = "#223344"; ctx.lineWidth = 1;
   rr(cx - hw * 0.6, cy + hh * 0.25, hw * 1.2, hh * 0.35, 6); ctx.fill(); ctx.stroke();
   for(let i = -3; i <= 3; i++) {
     ctx.beginPath(); ctx.moveTo(cx + i * (hw * 0.32), cy + hh * 0.3); ctx.lineTo(cx + i * (hw * 0.32), cy + hh * 0.55); ctx.stroke();
   }
 
-  // Visor Principal Óptico (Vidro Fumê Polido com Reflexo de Alta Precisão)
   g = ctx.createLinearGradient(0, cy - hh * 0.7, 0, cy + hh * 0.1);
   g.addColorStop(0, "#01040a"); g.addColorStop(1, "#0a1525");
   ctx.fillStyle = g; ctx.strokeStyle = CY; ctx.lineWidth = 2;
   rr(cx - hw * 0.82, cy - hh * 0.65, hw * 1.64, hh * 0.62, 12); ctx.fill(); ctx.stroke();
 
-  // Olhos biônicos hiper-realistas com lentes de profundidade
   const ey = cy - hh * 0.34, lx = look.x * hw * 0.08, ly = look.y * hh * 0.05;
   if (th) {
     const bx = cx + Math.sin(t * 4) * hw * 0.55;
@@ -852,12 +817,10 @@ function drawRobot(t) {
       const rx = hw * 0.2 * (ls ? 1 + pulse * 0.3 : 1), ry = Math.max(2, hh * 0.18 * open);
       glow(ls ? MG : CY, 25); ctx.fillStyle = ls ? MG : CY;
       ctx.beginPath(); ctx.ellipse(cx + s * hw * 0.42 + lx, ey + ly, rx, ry, 0, 0, 7); ctx.fill(); noGlow();
-      // Núcleo brilhante da lente
       ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(cx + s * hw * 0.42 + lx - rx * 0.25, ey + ly - ry * 0.25, Math.max(1.5, ry * 0.28), 0, 7); ctx.fill();
     });
   }
 
-  // Boca / Matriz de áudio e processamento oral (Equalizador dinâmico de alta fidelidade)
   const my = cy + hh * 0.68, bars = 13, bw = hw * 0.09, gap = hw * 0.05, total = bars * bw + (bars - 1) * gap, x0 = cx - total / 2;
   glow(ls ? MG : CY, 14); ctx.fillStyle = ls ? MG : CY;
   for (let i = 0; i < bars; i++) {
