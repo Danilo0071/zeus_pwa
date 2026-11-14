@@ -2500,26 +2500,84 @@ try:
     with st.sidebar:
         st.divider()
         st.subheader("🎵 Autorizar Spotify")
-        if st.button("Pegar Refresh Token do Spotify"):
-            with st.spinner("Autorizando com o Spotify..."):
-                resultado = zeus_skills.autorizar_spotify()
-                st.success(resultado)
+       try:
+    import zeus_skills
+    import streamlit.components.v1 as components
+
+    with st.sidebar:
+        st.divider()
+        st.subheader("🎵 Tocar Música no Spotify")
+        
+        # Campo de texto para digitar ou receber a voz
+        musica_input = st.text_input("Nome da música:", key="input_musica_spotify")
+        
+        # Componente HTML/JS para o microfone
+        voice_html = f"""
+        <div style="display: flex; justify-content: center; margin-bottom: 10px;">
+            <button id="btn-voice" style="background: linear-gradient(45deg, #ff00ff, #00ffcc); color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; width: 100%;">
+                🎙️ Falar Música
+            </button>
+        </div>
+        <script>
+            const btn = document.getElementById('btn-voice');
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognition) {{
+                const recognition = new SpeechRecognition();
+                recognition.lang = 'pt-BR';
+                recognition.interimResults = false;
+                
+                btn.onclick = () => {{
+                    btn.innerText = "👂 Ouvindo...";
+                    recognition.start();
+                }};
+                
+                recognition.onresult = (event) => {{
+                    const text = event.results[0][0].transcript;
+                    btn.innerText = "🗣️ " + text;
+                    
+                    // Injeta no input do Streamlit e clica no botão de tocar
+                    const inputEl = window.parent.document.querySelector('input[aria-label="Nome da música:"]');
+                    if (inputEl) {{
+                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                        setter.call(inputEl, text);
+                        inputEl.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        
+                        // Procura o botão de tocar e clica
+                        setTimeout(() => {{
+                            const buttons = window.parent.document.querySelectorAll('button');
+                            for (let b of buttons) {{
+                                if (b.innerText.includes('Tocar no Spotify')) {{
+                                    b.click();
+                                    break;
+                                }}
+                            }}
+                        }}, 500);
+                    }}
+                }};
+                
+                recognition.onerror = () => {{
+                    btn.innerText = "❌ Erro no Microfone";
+                }};
+            }} else {{
+                btn.innerText = "Navegador sem suporte a voz";
+                btn.style.background = "#333";
+            }}
+        </script>
+        """
+        components.html(voice_html, height=60)
+
+        if st.button("Tocar no Spotify", key="btn_tocar_spotify"):
+            if musica_input:
+                with st.spinner("Conectando ao Spotify..."):
+                    try:
+                        resultado = zeus_skills.tocar_musica(musica_input)
+                        if "✅" in resultado:
+                            st.success(resultado)
+                        else:
+                            st.error(resultado)
+                    except Exception as e:
+                        st.error(f"Erro ao chamar a função: {e}")
+            else:
+                st.warning("Digite o nome de uma música primeiro.")
 except ImportError:
     pass
-
-st.divider()
-st.subheader("🎵 Tocar Música no Spotify")
-musica_input = st.text_input("Nome da música:", key="input_musica_spotify")
-    if st.button("Tocar no Spotify", key="btn_tocar_spotify"):
-        if musica_input:
-            with st.spinner("Conectando ao Spotify..."):
-                try:
-                    resultado = zeus_skills.tocar_musica(musica_input)
-                    if "✅" in resultado:
-                        st.success(resultado)
-                    else:
-                        st.error(resultado)
-                except Exception as e:
-                    st.error(f"Erro ao chamar a função: {e}")
-        else:
-            st.warning("Digite o nome de uma música primeiro.")
