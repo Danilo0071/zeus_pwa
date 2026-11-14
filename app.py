@@ -3495,3 +3495,45 @@ with st.sidebar:
                     st.error(res_spotify)
         else:
             st.warning("Digite o nome da música.")
+
+            # ============================================================
+# BLOCO DE INTEGRAÇÃO WHATSAPP DIRETO PARA O ZEUS (app.py)
+# ============================================================
+import urllib.parse
+
+
+def gerar_link_whatsapp(telefone_destino, mensagem):
+    """Gera um link direto do WhatsApp Web para disparar a mensagem instantaneamente."""
+    texto_codificado = urllib.parse.quote(mensagem)
+    # Formata o número (garantindo apenas números)
+    num_limpo = "".join(filter(str.isdigit, str(telefone_destino)))
+    return f"https://api.whatsapp.com/send?phone={num_limpo}&text={texto_codificado}"
+
+
+# Painel lateral unificado para enviar ou abrir o WhatsApp direto
+with st.sidebar:
+    st.divider()
+    st.subheader("📱 WhatsApp do Zeus")
+    zap_numero = st.text_input(
+        "Seu Número (com DDD):",
+        value="",
+        placeholder="5531999999999",
+        key="input_zap_num_direto",
+    )
+    zap_msg = st.text_area(
+        "Mensagem:",
+        value="",
+        placeholder="Ex: Zeus, lembre do compromisso...",
+        key="input_zap_msg_direto",
+    )
+
+    if st.button("🚀 Gerar Link / Enviar WhatsApp", key="btn_enviar_zap_direto"):
+        if zap_numero and zap_msg:
+            link_zap = gerar_link_whatsapp(zap_numero, zap_msg)
+            st.success("✅ Link do WhatsApp gerado com sucesso!")
+            st.markdown(
+                f'<a href="{link_zap}" target="_blank"><button style="background-color:#25D366;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-weight:bold;">Abrir WhatsApp com a Mensagem</button></a>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.warning("Preencha o número e a mensagem.")
