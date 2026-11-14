@@ -2509,7 +2509,7 @@ except ImportError:
 
 st.divider()
 st.subheader("🎵 Tocar Música no Spotify")
-    musica_input = st.text_input("Nome da música:", key="input_musica_spotify")
+musica_input = st.text_input("Nome da música:", key="input_musica_spotify")
     if st.button("Tocar no Spotify", key="btn_tocar_spotify"):
         if musica_input:
             with st.spinner("Conectando ao Spotify..."):
