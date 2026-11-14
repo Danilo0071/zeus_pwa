@@ -1,3 +1,13 @@
+# ============================================================
+# ZEUS 3.0 - app.py
+# CHAVES: nunca coloque no código. Use .streamlit/secrets.toml (e adicione ao .gitignore)
+# ou Settings > Secrets no Streamlit Cloud:
+#   GROQ_API_KEY = "..."          GEMINI_API_KEY = "..."
+#   ANTHROPIC_API_KEY = "..."     HUGGINGFACE_API_KEY = "..."
+#   GITHUB_API_KEY = "..."        (token com acesso ao GitHub Models)
+# Opcionais (busca Google oficial): GOOGLE_API_KEY e GOOGLE_CSE_ID
+# Dependências: streamlit requests edge-tts duckduckgo-search
+# ============================================================
 import asyncio
 import base64
 import hashlib
@@ -21,15 +31,21 @@ THEMES = {
 }
 
 
+THEME_CSS = """
+<style>
+    .stApp { background-color: __BG__; color: __TEXT__; font-family: 'Courier New', monospace; }
+    [data-testid="stSidebar"] { background-color: __PANEL__; }
+    h1, h2, h3 { color: __PRIMARY__ !important; text-shadow: 0 0 10px __BORDER__; }
+</style>
+"""
+
+
 def inject_theme(theme_name: str):
     t = THEMES.get(theme_name, THEMES["Cyberpunk"])
-    st.markdown(f"""
-        <style>
-            .stApp {{ background-color: {t['bg']}; color: {t['text']}; font-family: 'Courier New', monospace; }}
-            [data-testid="stSidebar"] {{ background-color: {t['panel']}; }}
-            h1, h2, h3 {{ color: {t['primary']} !important; text-shadow: 0 0 10px {t['border']}; }}
-        </style>
-    """, unsafe_allow_html=True)
+    css = THEME_CSS
+    for token, chave in (("__BG__", "bg"), ("__TEXT__", "text"), ("__PANEL__", "panel"), ("__PRIMARY__", "primary"), ("__BORDER__", "border")):
+        css = css.replace(token, t[chave])
+    st.markdown(css, unsafe_allow_html=True)
 
 
 # ============================================================
@@ -88,13 +104,15 @@ def _secret(key: str, default: str = "") -> str:
 # ============================================================
 SYS_PROMPT = "Você é Zeus, uma IA cyberpunk futurista e assistente sênior. Responda em português, de forma objetiva e com um tom tecnológico. Respostas curtas, pois serão faladas em voz alta."
 
-PROVIDERS = ["groq", "gemini", "claude"]
-KEYS = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "claude": "ANTHROPIC_API_KEY"}
-MODEL_SECRET = {"groq": "GROQ_MODEL", "gemini": "GEMINI_MODEL", "claude": "ANTHROPIC_MODEL"}
+PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github"]
+KEYS = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "claude": "ANTHROPIC_API_KEY", "huggingface": "HUGGINGFACE_API_KEY", "github": "GITHUB_API_KEY"}
+MODEL_SECRET = {"groq": "GROQ_MODEL", "gemini": "GEMINI_MODEL", "claude": "ANTHROPIC_MODEL", "huggingface": "HF_MODEL", "github": "GITHUB_MODEL"}
 MODELS = {
     "groq": ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"],
     "gemini": ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
     "claude": ["claude-haiku-5-5", "claude-sonnet-5-5"],
+    "huggingface": ["meta-llama/Llama-3.3-70B-Instruct", "Qwen/Qwen2.5-72B-Instruct"],
+    "github": ["openai/gpt-4.1-mini", "openai/gpt-4o-mini"],
 }
 TRANSIENT = (500, 502, 503, 504, 529)
 
@@ -134,41 +152,41 @@ def _try_models(candidates, fn):
     return False, last
 
 
-def _groq_payload(model, msgs):
-    p = {"model": model, "messages": [{"role": "system", "content": SYS_PROMPT}] + msgs, "temperature": 0.4, "max_tokens": 700}
+def _groq_payload(model, msgs, system=None):
+    p = {"model": model, "messages": [{"role": "system", "content": system or SYS_PROMPT}] + msgs, "temperature": 0.4, "max_tokens": 700}
     if model.startswith("openai/gpt-oss"):
         p["reasoning_effort"] = "low"  # responde bem mais rápido
     return p
 
 
-def _call_groq(api_key, model, msgs):
+def _call_groq(api_key, model, msgs, system=None):
     r = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json=_groq_payload(model, msgs),
+        json=_groq_payload(model, msgs, system),
         timeout=60)
     if r.status_code == 200:
         return 200, (r.json()["choices"][0]["message"].get("content") or "").strip()
     return r.status_code, r.text
 
 
-def _call_claude(api_key, model, msgs):
+def _call_claude(api_key, model, msgs, system=None):
     r = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
-        json={"model": model, "max_tokens": 1024, "system": SYS_PROMPT, "messages": msgs},
+        json={"model": model, "max_tokens": 1024, "system": system or SYS_PROMPT, "messages": msgs},
         timeout=60)
     if r.status_code == 200:
         return 200, "".join(b.get("text", "") for b in r.json()["content"])
     return r.status_code, r.text
 
 
-def _call_gemini(api_key, model, msgs):
+def _call_gemini(api_key, model, msgs, system=None):
     contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in msgs]
     r = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        json={"systemInstruction": {"parts": [{"text": SYS_PROMPT}]}, "contents": contents},
+        json={"systemInstruction": {"parts": [{"text": system or SYS_PROMPT}]}, "contents": contents},
         timeout=60)
     if r.status_code == 200:
         parts = r.json()["candidates"][0]["content"]["parts"]
@@ -176,7 +194,31 @@ def _call_gemini(api_key, model, msgs):
     return r.status_code, r.text
 
 
-CALLERS = {"groq": _call_groq, "gemini": _call_gemini, "claude": _call_claude}
+def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=None):
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
+    r = requests.post(
+        url, headers=headers,
+        json={"model": model, "messages": [{"role": "system", "content": system or SYS_PROMPT}] + msgs,
+              "temperature": 0.4, "max_tokens": 700},
+        timeout=60)
+    if r.status_code == 200:
+        return 200, (r.json()["choices"][0]["message"].get("content") or "").strip()
+    return r.status_code, r.text
+
+
+def _call_huggingface(api_key, model, msgs, system=None):
+    return _call_openai_compat("https://router.huggingface.co/v1/chat/completions", api_key, model, msgs, system)
+
+
+def _call_github(api_key, model, msgs, system=None):
+    return _call_openai_compat("https://models.github.ai/inference/chat/completions", api_key, model, msgs, system,
+                               {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+
+
+CALLERS = {"groq": _call_groq, "gemini": _call_gemini, "claude": _call_claude,
+           "huggingface": _call_huggingface, "github": _call_github}
 
 
 def _resumo(text):
@@ -188,9 +230,9 @@ def _resumo(text):
     return text[:120]
 
 
-def get_llm_response(session_id, prompt, model_choice):
+def get_llm_response(session_id, prompt, model_choice, system=None, use_history=True):
     """Retorna (ok, texto, provedor_usado, lista_de_erros)."""
-    msgs = _normalize(get_recent_context(session_id) + [{"role": "user", "content": prompt}])
+    msgs = _normalize((get_recent_context(session_id) if use_history else []) + [{"role": "user", "content": prompt}])
     order = [model_choice] + [p for p in PROVIDERS if p != model_choice]
     erros = []
     for prov in order:
@@ -201,7 +243,7 @@ def get_llm_response(session_id, prompt, model_choice):
         override = _secret(MODEL_SECRET[prov])
         candidates = [override] if override else MODELS[prov]
         try:
-            ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs))
+            ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
         except Exception as e:
             ok, text = False, f"erro de conexão: {e}"
         if ok:
@@ -214,12 +256,13 @@ def processar_prompt(prompt):
     sid = st.session_state.session_id
     escolhido = st.session_state.get("model_sel", "groq")
     st.session_state.messages.append({"role": "user", "content": prompt})
-    ok, response, prov, erros = get_llm_response(sid, prompt, escolhido)
+    prompt_llm, fonte_web = enriquecer_com_web(prompt)
+    ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
     add_message(sid, "user", prompt)
     st.session_state.messages.append({"role": "assistant", "content": response})
     if ok:
         add_message(sid, "assistant", response)
-        st.session_state.last_info = f"✅ Respondeu: {prov}" + (f" (falhou: {'; '.join(erros)})" if erros else "")
+        st.session_state.last_info = f"✅ Respondeu: {prov}" + (f" (falhou: {'; '.join(erros)})" if erros else "") + (" · 🌐 web: " + fonte_web if fonte_web else "")
     else:
         st.session_state.last_info = "❌ " + " | ".join(erros)
     return response
@@ -308,6 +351,385 @@ def listar_vozes_edge():
         return vozes or FALLBACK_VOZES
     except Exception:
         return FALLBACK_VOZES
+
+
+# ============================================================
+# BUSCA NA INTERNET (tempo real)
+# Ordem: Google Custom Search (se configurado) -> Google Search via Gemini
+# (grounding) -> DuckDuckGo -> Wikipédia.
+# Secrets opcionais: GOOGLE_API_KEY + GOOGLE_CSE_ID (Programmable Search).
+# ============================================================
+WEB_TRIGGERS = (
+    "hoje", "agora", "atual", "atualmente", "últimas", "ultimas", "notícia", "noticia", "recente",
+    "pesquise", "pesquisa", "busque", "procure", "google", "internet", "na web", "cotação", "cotacao",
+    "dólar", "dolar", "preço", "preco", "clima", "previsão", "previsao", "resultado", "placar",
+    "quem ganhou", "quem é o atual", "lançamento", "lancamento", "versão mais nova", "ao vivo",
+)
+
+
+def _search_google_cse(q, n=5):
+    key, cx = _secret("GOOGLE_API_KEY"), _secret("GOOGLE_CSE_ID")
+    if not (key and cx):
+        return ""
+    r = requests.get("https://www.googleapis.com/customsearch/v1",
+                     params={"key": key, "cx": cx, "q": q, "num": n, "hl": "pt"}, timeout=20)
+    if r.status_code != 200:
+        return ""
+    linhas = []
+    for i in r.json().get("items", []):
+        linhas.append("- " + i.get("title", "") + ": " + i.get("snippet", "") + " (" + i.get("link", "") + ")")
+    return "\n".join(linhas)
+
+
+def _search_gemini_google(q):
+    api_key = _secret("GEMINI_API_KEY")
+    if not api_key:
+        return ""
+    modelos = [m for m in [_secret("GEMINI_SEARCH_MODEL")] if m] + ["gemini-2.5-flash", "gemini-flash-latest"]
+    for model in modelos:
+        try:
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": "Pesquise no Google e responda em português com fatos atuais, datas e números: " + q}]}],
+                    "tools": [{"google_search": {}}],
+                },
+                timeout=45)
+            if r.status_code != 200:
+                continue
+            cand = r.json()["candidates"][0]
+            texto = "".join(p.get("text", "") for p in cand["content"]["parts"]).strip()
+            fontes = []
+            for c in cand.get("groundingMetadata", {}).get("groundingChunks", []):
+                w = c.get("web", {})
+                if w.get("title"):
+                    fontes.append(w["title"])
+            if texto:
+                return texto + ("\nFontes: " + "; ".join(fontes[:5]) if fontes else "")
+        except Exception:
+            continue
+    return ""
+
+
+def _search_ddg(q, n=5):
+    try:
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
+        with DDGS() as d:
+            res = list(d.text(q, max_results=n))
+        linhas = []
+        for x in res:
+            linhas.append("- " + x.get("title", "") + ": " + x.get("body", "") + " (" + x.get("href", "") + ")")
+        return "\n".join(linhas)
+    except Exception:
+        return ""
+
+
+def _search_wiki(q, n=4):
+    try:
+        r = requests.get("https://pt.wikipedia.org/w/api.php", params={
+            "action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": n}, timeout=20)
+        itens = r.json()["query"]["search"]
+        return "\n".join("- " + i["title"] + ": " + re.sub(r"<[^>]+>", "", i["snippet"]) for i in itens)
+    except Exception:
+        return ""
+
+
+def web_search(q, n=5):
+    """Retorna (texto, fonte_usada). Texto vazio se nada funcionar."""
+    for nome, fn in (("Google CSE", _search_google_cse), ("Google (Gemini)", _search_gemini_google),
+                     ("DuckDuckGo", _search_ddg), ("Wikipédia", _search_wiki)):
+        try:
+            txt = fn(q)
+        except Exception:
+            txt = ""
+        if txt and txt.strip():
+            return txt.strip(), nome
+    return "", ""
+
+
+def precisa_web(prompt):
+    modo = st.session_state.get("web_mode", "Automática")
+    if modo == "Desligada":
+        return False
+    if modo == "Sempre":
+        return True
+    low = prompt.lower()
+    return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low))
+
+
+def enriquecer_com_web(prompt):
+    """Retorna (prompt_para_o_LLM, fonte). Se não precisar/der, devolve o prompt original."""
+    if not precisa_web(prompt):
+        return prompt, ""
+    ctx_web, fonte = web_search(prompt[:300])
+    if not ctx_web:
+        return prompt, ""
+    hoje = time.strftime("%d/%m/%Y")
+    novo = ("[DADOS DA INTERNET em " + hoje + ", via " + fonte + "]\n" + ctx_web[:3500] + "\n[FIM DOS DADOS]\n\n"
+            "Use os dados acima se forem úteis e diga que vieram da internet. Pergunta do usuário: " + prompt)
+    return novo, fonte
+
+
+# ============================================================
+# GERAÇÃO DE MÍDIA (imagem e vídeo) com fallback em cascata
+# ============================================================
+def _img_hf(prompt):
+    key = _secret("HUGGINGFACE_API_KEY")
+    if not key:
+        raise RuntimeError("sem chave")
+    modelos = [m for m in [_secret("HF_IMAGE_MODEL")] if m] + ["black-forest-labs/FLUX.1-schnell", "stabilityai/stable-diffusion-xl-base-1.0"]
+    ultimo = ""
+    for model in modelos:
+        r = requests.post(f"https://router.huggingface.co/hf-inference/models/{model}",
+                          headers={"Authorization": f"Bearer {key}"}, json={"inputs": prompt}, timeout=120)
+        if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
+            return r.content
+        ultimo = f"({r.status_code}) {r.text[:80]}"
+    raise RuntimeError(ultimo)
+
+
+def _img_gemini(prompt):
+    key = _secret("GEMINI_API_KEY")
+    if not key:
+        raise RuntimeError("sem chave")
+    model = _secret("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
+    r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                      headers={"Content-Type": "application/json", "x-goog-api-key": key},
+                      json={"contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}}, timeout=120)
+    if r.status_code != 200:
+        raise RuntimeError(f"({r.status_code}) {r.text[:80]}")
+    for part in r.json()["candidates"][0]["content"]["parts"]:
+        d = part.get("inlineData") or part.get("inline_data")
+        if d:
+            return base64.b64decode(d["data"])
+    raise RuntimeError("Gemini não devolveu imagem")
+
+
+def _img_pollinations(prompt):
+    from urllib.parse import quote
+    r = requests.get("https://image.pollinations.ai/prompt/" + quote(prompt[:500]),
+                     params={"width": 1024, "height": 1024, "nologo": "true"}, timeout=120)
+    if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
+        return r.content
+    raise RuntimeError(f"({r.status_code})")
+
+
+IMAGE_CASCADE = [("Hugging Face", _img_hf), ("Gemini", _img_gemini), ("Pollinations (sem chave)", _img_pollinations)]
+
+
+def make_image(prompt, log):
+    for nome, fn in IMAGE_CASCADE:
+        try:
+            data = fn(prompt)
+            log.append("✅ Imagem: " + nome)
+            return data
+        except Exception as e:
+            log.append("❌ Imagem " + nome + ": " + str(e)[:90])
+    return None
+
+
+def make_video(prompt, log):
+    """Vídeo experimental via Hugging Face. Troque o modelo com o secret HF_VIDEO_MODEL."""
+    key = _secret("HUGGINGFACE_API_KEY")
+    if not key:
+        log.append("⚪ Vídeo: sem HUGGINGFACE_API_KEY")
+        return None
+    model = _secret("HF_VIDEO_MODEL") or "Wan-AI/Wan2.1-T2V-1.3B"
+    try:
+        r = requests.post(f"https://router.huggingface.co/hf-inference/models/{model}",
+                          headers={"Authorization": f"Bearer {key}"}, json={"inputs": prompt}, timeout=300)
+        if r.status_code == 200 and r.headers.get("content-type", "").startswith("video"):
+            log.append("✅ Vídeo: " + model)
+            return r.content
+        log.append(f"❌ Vídeo ({r.status_code}): {r.text[:90]} — modelo pode não estar disponível no seu plano")
+    except Exception as e:
+        log.append("❌ Vídeo: " + str(e)[:90])
+    return None
+
+
+# ============================================================
+# PIPELINE MULTI-IA ENCADEADO
+# busca web -> IA pesquisadora (resumo) -> IA engenheira de prompt
+# -> IAs de mídia (imagem/vídeo). Cada etapa de texto usa a cascata
+# Groq/Gemini/Claude/Hugging Face/GitHub com fallback automático.
+# ============================================================
+def _llm(prompt, system, log, etapa):
+    ok, texto, prov, erros = get_llm_response(
+        st.session_state.session_id, prompt, st.session_state.get("model_sel", "groq"),
+        system=system, use_history=False)
+    if ok:
+        extra = " (fallback: " + "; ".join(erros) + ")" if erros else ""
+        log.append("✅ " + etapa + ": " + str(prov) + extra)
+        return texto
+    log.append("❌ " + etapa + ": " + texto[:150])
+    return ""
+
+
+def run_pipeline(pedido, quer_img, quer_vid):
+    log = []
+    contexto, fonte = web_search(pedido)
+    log.append("🔎 Busca (" + fonte + "): ok" if contexto else "⚪ Busca: sem resultados, seguindo sem dados da web")
+    resumo = ""
+    if contexto:
+        resumo = _llm("Pedido: " + pedido + "\n\nContexto da web:\n" + contexto[:4000],
+                      "Você é um pesquisador. Resuma em português, em até 8 linhas objetivas, os fatos úteis do contexto para atender ao pedido. Não invente nada.",
+                      log, "Resumo da pesquisa")
+    sys_b = ("Você é engenheiro de prompts para IAs de mídia. Responda EXATAMENTE em 2 linhas, sem mais nada:\n"
+             "IMAGEM: <prompt detalhado em inglês: sujeito, estilo, iluminação, composição, cores, câmera>\n"
+             "VIDEO: <prompt em inglês descrevendo ação e movimento de câmera em 5 segundos>")
+    bruto = _llm("Pedido: " + pedido + "\n\nFatos:\n" + resumo, sys_b, log, "Prompt otimizado")
+    m_img = re.search(r"IMAGEM:\s*(.+)", bruto or "")
+    m_vid = re.search(r"VIDEO:\s*(.+)", bruto or "")
+    prompt_img = m_img.group(1).strip() if m_img else pedido
+    prompt_vid = m_vid.group(1).strip() if m_vid else prompt_img
+    img = make_image(prompt_img, log) if quer_img else None
+    vid = make_video(prompt_vid, log) if quer_vid else None
+    return {"log": log, "resumo": resumo, "prompt_img": prompt_img, "prompt_vid": prompt_vid, "img": img, "vid": vid}
+
+
+def render_pipeline_ui():
+    with st.expander("🔗 Pipeline Multi-IA (busca → prompt otimizado → imagem/vídeo)", expanded=False):
+        pedido = st.text_area("O que você quer criar?", key="pipe_req", placeholder="Ex.: um dragão de cristal sobre uma cidade futurista em 2026")
+        c1, c2 = st.columns(2)
+        quer_img = c1.checkbox("🖼️ Gerar imagem", value=True, key="pipe_img")
+        quer_vid = c2.checkbox("🎬 Gerar vídeo (experimental)", value=False, key="pipe_vid")
+        if st.button("🚀 Executar pipeline", key="pipe_run") and pedido.strip():
+            with st.spinner("Encadeando IAs..."):
+                st.session_state.pipe_res = run_pipeline(pedido.strip(), quer_img, quer_vid)
+        res = st.session_state.get("pipe_res")
+        if res:
+            if res["resumo"]:
+                st.markdown("**Resumo da pesquisa**")
+                st.write(res["resumo"])
+            st.markdown("**Prompt otimizado (imagem)**")
+            st.code(res["prompt_img"], language="text")
+            if res["img"]:
+                st.image(res["img"], caption="Imagem gerada")
+            if res["vid"]:
+                st.video(res["vid"])
+            with st.expander("Log do pipeline e fallbacks"):
+                st.write("\n\n".join(res["log"]))
+
+
+# ============================================================
+# CÂMERA DIRETA: foto -> comando visual (cascata de visão)
+# ============================================================
+def _mime_img(b):
+    return "image/png" if b[:4] == b"\x89PNG" else "image/jpeg"
+
+
+def _vis_openai(url, key, model, img_b64, mime, prompt, extra=None):
+    headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
+    if extra:
+        headers.update(extra)
+    r = requests.post(url, headers=headers, json={
+        "model": model, "max_tokens": 700,
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": "data:" + mime + ";base64," + img_b64}}]}]}, timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"({r.status_code}) {r.text[:90]}")
+    return (r.json()["choices"][0]["message"].get("content") or "").strip()
+
+
+def _vis_groq(k, b, m, p):
+    return _vis_openai("https://api.groq.com/openai/v1/chat/completions", k,
+                       _secret("GROQ_VISION_MODEL") or "meta-llama/llama-4-scout-17b-16e-instruct", b, m, p)
+
+
+def _vis_gemini(k, b, m, p):
+    model = _secret("GEMINI_VISION_MODEL") or "gemini-flash-latest"
+    r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                      headers={"Content-Type": "application/json", "x-goog-api-key": k},
+                      json={"systemInstruction": {"parts": [{"text": SYS_PROMPT}]},
+                            "contents": [{"role": "user", "parts": [{"text": p}, {"inline_data": {"mime_type": m, "data": b}}]}]},
+                      timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"({r.status_code}) {r.text[:90]}")
+    return "".join(x.get("text", "") for x in r.json()["candidates"][0]["content"]["parts"]).strip()
+
+
+def _vis_claude(k, b, m, p):
+    model = _secret("ANTHROPIC_MODEL") or "claude-haiku-5-5"
+    r = requests.post("https://api.anthropic.com/v1/messages",
+                      headers={"x-api-key": k, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
+                      json={"model": model, "max_tokens": 900, "system": SYS_PROMPT, "messages": [{"role": "user", "content": [
+                          {"type": "image", "source": {"type": "base64", "media_type": m, "data": b}},
+                          {"type": "text", "text": p}]}]}, timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"({r.status_code}) {r.text[:90]}")
+    return "".join(x.get("text", "") for x in r.json()["content"]).strip()
+
+
+def _vis_hf(k, b, m, p):
+    return _vis_openai("https://router.huggingface.co/v1/chat/completions", k,
+                       _secret("HF_VISION_MODEL") or "Qwen/Qwen2.5-VL-7B-Instruct", b, m, p)
+
+
+def _vis_github(k, b, m, p):
+    return _vis_openai("https://models.github.ai/inference/chat/completions", k,
+                       _secret("GITHUB_VISION_MODEL") or "openai/gpt-4.1-mini", b, m, p,
+                       extra={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+
+
+VISION_CASCADE = {"groq": _vis_groq, "gemini": _vis_gemini, "claude": _vis_claude, "huggingface": _vis_hf, "github": _vis_github}
+
+
+def ask_vision(img_bytes, comando):
+    """Retorna (texto, provedor, log). Começa pelo modelo escolhido e cai em cascata."""
+    img_b64, mime = base64.b64encode(img_bytes).decode(), _mime_img(img_bytes)
+    escolhido = st.session_state.get("model_sel", "groq")
+    ordem = [escolhido] + [p for p in PROVIDERS if p != escolhido]
+    log = []
+    for prov in ordem:
+        key = _secret(KEYS[prov])
+        if not key:
+            log.append("⚪ " + prov + ": sem chave")
+            continue
+        try:
+            txt = VISION_CASCADE[prov](key, img_b64, mime, comando)
+            if txt:
+                log.append("✅ " + prov + ": ok")
+                return txt, prov, log
+        except Exception as e:
+            log.append("❌ " + prov + ": " + str(e)[:90])
+    return None, None, log
+
+
+def render_camera_sidebar():
+    st.subheader("📷 Câmera direta")
+    foto = st.camera_input("Tirar foto", key="cam_foto", label_visibility="collapsed")
+    comando = st.text_input("Comando visual", value="Descreva o que você vê.", key="cam_cmd")
+    if foto is not None:
+        dados = foto.getvalue()
+        h = hashlib.md5(dados).hexdigest()
+        nova = h != st.session_state.get("cam_last")
+        if nova or st.button("▶ Rodar comando de novo", key="cam_run", use_container_width=True):
+            st.session_state.cam_last = h
+            with st.spinner("Analisando a foto..."):
+                txt, prov, log = ask_vision(dados, comando)
+            st.session_state.cam_result = (txt, prov, log)
+            if txt:
+                sid = st.session_state.session_id
+                st.session_state.messages.append({"role": "user", "content": "📷 " + comando})
+                st.session_state.messages.append({"role": "assistant", "content": txt})
+                add_message(sid, "user", "📷 " + comando)
+                add_message(sid, "assistant", txt)
+    res = st.session_state.get("cam_result")
+    if res:
+        txt, prov, log = res
+        if txt:
+            st.success("Respondido por: " + str(prov))
+            st.write(txt)
+        else:
+            st.error("Nenhuma IA de visão respondeu.")
+        with st.expander("Log da câmera"):
+            st.write("\n\n".join(log))
 
 
 # ============================================================
@@ -659,78 +1081,197 @@ function drawBg(t, dt) {
   });
 }
 
+// ---- helpers de render realista ----
+function lg(x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0, x1, y1); stops.forEach(function (s) { g.addColorStop(s[0], s[1]); }); return g; }
+function rg(x, y, r0, r1, stops) { const g = ctx.createRadialGradient(x, y, r0, x, y, r1); stops.forEach(function (s) { g.addColorStop(s[0], s[1]); }); return g; }
+function bolt(x, y, r) {
+  ctx.fillStyle = rg(x - r * 0.3, y - r * 0.3, 0, r * 1.2, [[0, "#f6faff"], [0.6, "#8d9bb4"], [1, "#2b3347"]]);
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.65)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x - r * 0.6, y - r * 0.2); ctx.lineTo(x + r * 0.6, y + r * 0.2); ctx.stroke();
+}
+function accent() { return state === "listening" ? "#ff2bd6" : state === "thinking" ? "#ffb02e" : state === "speaking" ? "#3dffb0" : "#00e5ff"; }
+
+// ---- OLHO CIBERNÉTICO (carcaça metálica, íris com fibras, diafragma, pálpebras mecânicas) ----
 function drawEye(t) {
-  const cx = W / 2, cy = H * 0.36, R = Math.min(W * 0.26, H * 0.17), rad = Math.PI / 180;
-  const ls = state === "listening", al = (60 + (ls ? 100 : 35) * (0.5 + 0.5 * Math.sin(t * (ls ? 6 : 2)))) / 255;
-  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.9); g.addColorStop(0, "rgba(0,229,255," + al + ")"); g.addColorStop(1, "rgba(0,229,255,0)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 1.9, 0, 7); ctx.fill();
-  ctx.strokeStyle = "rgba(0,229,255,0.35)"; ctx.lineWidth = 1;
-  for (let i = 0; i < 60; i++) { const a = (i * 6 - ring * 0.3) * rad, r1 = R * 1.62, r2 = R * (i % 5 ? 1.67 : 1.72); ctx.beginPath(); ctx.moveTo(cx + r1 * Math.cos(a), cy + r1 * Math.sin(a)); ctx.lineTo(cx + r2 * Math.cos(a), cy + r2 * Math.sin(a)); ctx.stroke(); }
-  ctx.lineWidth = 2; ctx.strokeStyle = "#1e90ff"; arcs(cx, cy, R * 1.5, -ring * rad, 3, 50 * rad);
-  ctx.strokeStyle = MG; arcs(cx, cy, R * 1.82, ring * 0.6 * rad, 2, 35 * rad);
-  const oh = Math.max(0.02, open);
-  ctx.save(); ctx.beginPath(); ctx.ellipse(cx, cy, R * 1.45, R * 0.85 * oh, 0, 0, 7); ctx.clip();
-  ctx.fillStyle = "#060e1c"; ctx.fillRect(0, 0, W, H);
-  const ix = cx + look.x * R * 0.5, iy = cy + look.y * R * 0.28, ir = R * 0.72;
-  g = ctx.createRadialGradient(ix, iy, 0, ix, iy, ir); g.addColorStop(0, "#001e46"); g.addColorStop(0.6, "#006ebe"); g.addColorStop(1, CY);
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ix, iy, ir, 0, 7); ctx.fill();
-  const pr = ir * 0.38 * pupil;
-  ctx.strokeStyle = "rgba(0,229,255,0.3)"; ctx.lineWidth = 1;
-  for (let i = 0; i < 36; i++) { const a = i * 10 * rad; ctx.beginPath(); ctx.moveTo(ix + pr * Math.cos(a), iy + pr * Math.sin(a)); ctx.lineTo(ix + ir * 0.95 * Math.cos(a), iy + ir * 0.95 * Math.sin(a)); ctx.stroke(); }
-  ctx.strokeStyle = "#78f0ff"; ctx.lineWidth = 2; arcs(ix, iy, ir * 0.88, ring * 1.5 * rad, 4, 40 * rad);
-  ctx.fillStyle = "#000"; ctx.strokeStyle = CY; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(ix, iy, pr, 0, 7); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.beginPath(); ctx.arc(ix - pr * 0.4, iy - pr * 0.4, pr * 0.18, 0, 7); ctx.fill();
+  const cx = W / 2, cy = H * 0.36, R = Math.min(W * 0.26, H * 0.17), rad = Math.PI / 180, ac = accent();
+  const ls = state === "listening", th = state === "thinking";
+  ctx.fillStyle = rg(cx, cy, R * 0.9, R * 2.4, [[0, "rgba(0,229,255,0.28)"], [0.5, "rgba(140,50,255,0.12)"], [1, "rgba(0,0,0,0)"]]);
+  ctx.beginPath(); ctx.arc(cx, cy, R * 2.4, 0, 7); ctx.fill();
+  // carcaça metálica
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.85)"; ctx.shadowBlur = 26; ctx.shadowOffsetY = 10;
+  ctx.fillStyle = lg(cx - R * 1.7, cy - R * 1.7, cx + R * 1.7, cy + R * 1.7, [[0, "#f2f7ff"], [0.22, "#93a4bf"], [0.5, "#2b354b"], [0.78, "#0e1321"], [1, "#6a7894"]]);
+  ctx.beginPath(); ctx.arc(cx, cy, R * 1.72, 0, 7); ctx.fill(); ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, R * 1.69, Math.PI * 0.95, Math.PI * 1.7); ctx.stroke();
+  for (let i = 0; i < 8; i++) { const a = (i * 45 + 22.5) * rad; bolt(cx + Math.cos(a) * R * 1.6, cy + Math.sin(a) * R * 1.6, R * 0.05); }
+  // moldura escura + anel de LEDs segmentado
+  ctx.fillStyle = lg(cx, cy - R * 1.5, cx, cy + R * 1.5, [[0, "#03050a"], [1, "#182034"]]);
+  ctx.beginPath(); ctx.arc(cx, cy, R * 1.5, 0, 7); ctx.fill();
+  const span = th ? 130 : ls ? 220 : 90;
+  for (let i = 0; i < 48; i++) {
+    const a0 = i * 7.5, lit = (((a0 - ring) % 360) + 360) % 360 < span;
+    ctx.strokeStyle = lit ? ac : "rgba(255,255,255,0.07)"; ctx.lineWidth = R * 0.07;
+    if (lit) glow(ac, 9);
+    ctx.beginPath(); ctx.arc(cx, cy, R * 1.38, a0 * rad, (a0 + 5) * rad); ctx.stroke(); noGlow();
+  }
+  // lente + íris
+  const LR = R * 1.2;
+  ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, LR, 0, 7); ctx.clip();
+  ctx.fillStyle = rg(cx, cy, 0, LR, [[0, "#0a1a2e"], [1, "#010308"]]); ctx.fillRect(cx - LR, cy - LR, LR * 2, LR * 2);
+  const ix = cx + look.x * R * 0.32, iy = cy + look.y * R * 0.22, ir = R * 0.88, pr = ir * 0.34 * pupil;
+  ctx.fillStyle = rg(ix, iy, 0, ir, [[0, "#02121f"], [0.3, "#0aa8d8"], [0.62, "#3a52ff"], [0.88, "#9a2cff"], [1, "#07101f"]]);
+  ctx.beginPath(); ctx.arc(ix, iy, ir, 0, 7); ctx.fill();
+  for (let i = 0; i < 150; i++) {
+    const a = i * 2.399963, r0 = pr * 1.05, r1 = ir * (0.72 + ((i * 53) % 28) / 100);
+    ctx.strokeStyle = "hsla(" + (175 + (i * 37) % 110) + ",100%," + (45 + (i * 13) % 25) + "%,0.38)"; ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.moveTo(ix + r0 * Math.cos(a), iy + r0 * Math.sin(a)); ctx.lineTo(ix + r1 * Math.cos(a), iy + r1 * Math.sin(a)); ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(0,0,12,0.85)"; ctx.lineWidth = R * 0.09; ctx.beginPath(); ctx.arc(ix, iy, ir, 0, 7); ctx.stroke();
+  ctx.setLineDash([R * 0.1, R * 0.12]); ctx.lineDashOffset = -ring; ctx.strokeStyle = ac; ctx.lineWidth = 2; glow(ac, 8);
+  ctx.beginPath(); ctx.arc(ix, iy, ir * 0.58, 0, 7); ctx.stroke(); noGlow(); ctx.setLineDash([]);
+  // pupila com diafragma hexagonal
+  ctx.fillStyle = "#000"; ctx.beginPath();
+  for (let k = 0; k < 6; k++) { const a = ring * 0.25 * rad + k * 60 * rad, px = ix + pr * Math.cos(a), py = iy + pr * Math.sin(a); if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); }
+  ctx.closePath(); ctx.fill(); ctx.strokeStyle = "rgba(0,229,255,0.7)"; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.globalAlpha = 0.5 + 0.3 * Math.sin(t * 4); ctx.fillStyle = rg(ix, iy, 0, pr * 0.6, [[0, ac], [1, "rgba(0,0,0,0)"]]);
+  ctx.beginPath(); ctx.arc(ix, iy, pr * 0.6, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+  // reflexos de vidro
+  ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.beginPath(); ctx.ellipse(ix - ir * 0.38, iy - ir * 0.42, ir * 0.16, ir * 0.1, -0.6, 0, 7); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.beginPath(); ctx.arc(ix + ir * 0.4, iy + ir * 0.45, ir * 0.05, 0, 7); ctx.fill();
+  ctx.fillStyle = lg(cx - LR, cy - LR, cx + LR * 0.3, cy + LR * 0.3, [[0, "rgba(255,255,255,0.26)"], [0.5, "rgba(255,255,255,0.03)"], [1, "rgba(255,255,255,0)"]]);
+  ctx.beginPath(); ctx.arc(cx, cy, LR, 0, 7); ctx.fill();
+  // pálpebras mecânicas (piscar)
+  const cov = (1 - open) * LR, top = cy - LR + cov, bot = cy + LR - cov;
+  ctx.fillStyle = lg(0, cy - LR * 1.1, 0, top + 0.01, [[0, "#232c42"], [1, "#8a9ab5"]]); ctx.fillRect(cx - LR * 1.1, cy - LR * 1.1, LR * 2.2, top - (cy - LR * 1.1));
+  ctx.fillStyle = lg(0, bot, 0, cy + LR * 1.1, [[0, "#8a9ab5"], [1, "#232c42"]]); ctx.fillRect(cx - LR * 1.1, bot, LR * 2.2, cy + LR * 1.1 - bot);
+  if (cov > 1) { ctx.strokeStyle = ac; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - LR, top); ctx.lineTo(cx + LR, top); ctx.moveTo(cx - LR, bot); ctx.lineTo(cx + LR, bot); ctx.stroke(); }
   ctx.restore();
-  glow(CY, 14); ctx.strokeStyle = CY; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.ellipse(cx, cy, R * 1.45, R * 0.85 * oh, 0, 0, 7); ctx.stroke(); noGlow();
+  // aro da lente
+  ctx.strokeStyle = lg(cx - LR, cy - LR, cx + LR, cy + LR, [[0, "#e6eefc"], [0.5, "#4a5876"], [1, "#12192b"]]); ctx.lineWidth = R * 0.07;
+  ctx.beginPath(); ctx.arc(cx, cy, LR, 0, 7); ctx.stroke();
+  glow(ac, 10); ctx.strokeStyle = ac; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, LR - R * 0.05, 0, 7); ctx.stroke(); noGlow();
+  // HUD
+  ctx.strokeStyle = "rgba(0,229,255,0.6)"; ctx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) { const a = i * 90 * rad; ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * R * 1.78, cy + Math.sin(a) * R * 1.78); ctx.lineTo(cx + Math.cos(a) * R * 1.95, cy + Math.sin(a) * R * 1.95); ctx.stroke(); }
+  ctx.lineWidth = 2; ctx.strokeStyle = MG; arcs(cx, cy, R * 1.88, ring * 0.6 * rad, 2, 35 * rad);
+  ctx.strokeStyle = "#1e90ff"; arcs(cx, cy, R * 1.98, -ring * 0.4 * rad, 3, 28 * rad);
+  ctx.font = "10px 'Courier New', monospace"; ctx.fillStyle = ac;
+  ctx.fillText("IRIS " + Math.round(pupil * 100) + "%", cx + R * 0.5, cy + R * 2.15);
+  ctx.fillText(state.toUpperCase(), cx - R * 1.4, cy + R * 2.15);
   ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
 }
 
+// ---- ROBÔ DIGITAL (casco metálico chanfrado, visor de vidro, olhos-lente, fones, reator no peito) ----
 function drawRobot(t) {
-  const cx = W / 2, cy = H * 0.38, S = Math.min(W * 0.5, H * 0.46), hw = S * 0.5, hh = S * 0.42;
-  const ls = state === "listening", th = state === "thinking", sp = state === "speaking";
-  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, S * 0.95); g.addColorStop(0, "rgba(0,229,255," + (0.18 + (ls ? 0.12 * Math.sin(t * 6) : 0)) + ")"); g.addColorStop(1, "rgba(0,229,255,0)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, S * 0.95, 0, 7); ctx.fill();
+  const cx = W / 2, cy = H * 0.34, S = Math.min(W * 0.5, H * 0.46), hw = S * 0.5, hh = S * 0.42, rad = Math.PI / 180;
+  const ls = state === "listening", th = state === "thinking", sp = state === "speaking", ac = accent();
+  ctx.fillStyle = rg(cx, cy, 0, S * 1.15, [[0, "rgba(0,229,255," + (0.16 + (ls ? 0.1 * Math.sin(t * 6) : 0)) + ")"], [0.6, "rgba(140,50,255,0.07)"], [1, "rgba(0,0,0,0)"]]);
+  ctx.beginPath(); ctx.arc(cx, cy, S * 1.15, 0, 7); ctx.fill();
+
+  // torso e ombros
+  const ty = cy + hh * 1.3;
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.7)"; ctx.shadowBlur = 20;
+  ctx.fillStyle = lg(0, ty, 0, H, [[0, "#a7b7d1"], [0.2, "#56647f"], [1, "#0b0f1a"]]);
+  ctx.beginPath(); ctx.moveTo(cx - hw * 1.75, H); ctx.lineTo(cx - hw * 1.65, ty + hh * 0.35);
+  ctx.quadraticCurveTo(cx - hw * 1.3, ty - hh * 0.05, cx - hw * 0.55, ty - hh * 0.05); ctx.lineTo(cx + hw * 0.55, ty - hh * 0.05);
+  ctx.quadraticCurveTo(cx + hw * 1.3, ty - hh * 0.05, cx + hw * 1.65, ty + hh * 0.35); ctx.lineTo(cx + hw * 1.75, H); ctx.closePath(); ctx.fill(); ctx.restore();
+  ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = lg(0, ty, 0, ty + hh * 1.4, [[0, "#0d1220"], [1, "#05070d"]]); rr(cx - hw * 0.8, ty + hh * 0.05, hw * 1.6, hh * 1.4, 14); ctx.fill();
+  ctx.strokeStyle = "rgba(0,229,255,0.35)"; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) { const vy = ty + hh * (0.22 + i * 0.07); ctx.beginPath(); ctx.moveTo(cx - hw * 0.72, vy); ctx.lineTo(cx - hw * 0.48, vy); ctx.moveTo(cx + hw * 0.48, vy); ctx.lineTo(cx + hw * 0.72, vy); ctx.stroke(); }
+  // reator do peito
+  const rx = cx, ry = ty + hh * 0.62, r0 = hh * 0.26, cp = 0.8 + 0.2 * Math.sin(t * (sp ? 10 : 3)) + pulse * 0.2;
+  ctx.fillStyle = "#070a12"; ctx.beginPath(); ctx.arc(rx, ry, r0 * 1.4, 0, 7); ctx.fill();
+  ctx.strokeStyle = lg(rx - r0, ry - r0, rx + r0, ry + r0, [[0, "#e4ecf9"], [1, "#2b354b"]]); ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(rx, ry, r0 * 1.4, 0, 7); ctx.stroke();
+  glow("#ff9a1f", 22); ctx.fillStyle = rg(rx, ry, 0, r0 * cp, [[0, "#fffbe0"], [0.4, "#ffb02e"], [1, "#b83a00"]]); ctx.beginPath(); ctx.arc(rx, ry, r0 * cp, 0, 7); ctx.fill(); noGlow();
+  ctx.strokeStyle = "rgba(255,200,80,0.85)"; ctx.lineWidth = 2; arcs(rx, ry, r0 * 1.15, ring * rad * 1.5, 3, 0.9);
+  // juntas dos ombros
+  [-1, 1].forEach(function (s) {
+    const jx = cx + s * hw * 1.5, jy = ty + hh * 0.5, jr = hh * 0.28;
+    ctx.fillStyle = rg(jx - jr * 0.3, jy - jr * 0.3, 0, jr * 1.2, [[0, "#f1f6ff"], [0.5, "#7b8aa5"], [1, "#1c2438"]]); ctx.beginPath(); ctx.arc(jx, jy, jr, 0, 7); ctx.fill();
+    ctx.strokeStyle = MG; ctx.lineWidth = 2; glow(MG, 10); ctx.beginPath(); ctx.arc(jx, jy, jr * 0.7, 0, 7); ctx.stroke(); noGlow();
+    ctx.fillStyle = CY; glow(CY, 12); ctx.beginPath(); ctx.arc(jx, jy, jr * 0.22, 0, 7); ctx.fill(); noGlow();
+  });
+
+  // pescoço com anéis e cabos
+  ctx.fillStyle = lg(cx - hw * 0.32, 0, cx + hw * 0.32, 0, [[0, "#10151f"], [0.5, "#7d8ca7"], [1, "#10151f"]]);
+  ctx.fillRect(cx - hw * 0.32, cy + hh * 0.8, hw * 0.64, hh * 0.55);
+  ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) { const y = cy + hh * (0.95 + i * 0.1); ctx.beginPath(); ctx.moveTo(cx - hw * 0.32, y); ctx.lineTo(cx + hw * 0.32, y); ctx.stroke(); }
+  ctx.lineWidth = 3; ctx.strokeStyle = MG; ctx.beginPath(); ctx.moveTo(cx - hw * 0.2, cy + hh * 0.9); ctx.bezierCurveTo(cx - hw * 0.55, cy + hh * 1.25, cx - hw * 0.6, cy + hh * 1.1, cx - hw * 0.7, ty + hh * 0.2); ctx.stroke();
+  ctx.strokeStyle = CY; ctx.beginPath(); ctx.moveTo(cx + hw * 0.2, cy + hh * 0.9); ctx.bezierCurveTo(cx + hw * 0.55, cy + hh * 1.25, cx + hw * 0.6, cy + hh * 1.1, cx + hw * 0.7, ty + hh * 0.2); ctx.stroke();
+
   // antena
-  ctx.strokeStyle = CY; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx, cy - hh - S * 0.14); ctx.stroke();
+  ctx.strokeStyle = "#8d9bb4"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(cx, cy - hh); ctx.lineTo(cx, cy - hh - S * 0.14); ctx.stroke();
   const ar = S * 0.035 * (1 + 0.4 * Math.sin(t * (th ? 12 : 4)));
-  glow(MG, 18); ctx.fillStyle = MG; ctx.beginPath(); ctx.arc(cx, cy - hh - S * 0.14, ar, 0, 7); ctx.fill(); noGlow();
-  if (th) { ctx.strokeStyle = MG; ctx.lineWidth = 2; arcs(cx, cy - hh - S * 0.14, S * 0.07, ring * Math.PI / 180 * 2, 3, 1.0); }
-  // orelhas
-  ctx.fillStyle = "#1a0b2e"; ctx.strokeStyle = MG; ctx.lineWidth = 2;
-  rr(cx - hw - S * 0.07, cy - S * 0.1, S * 0.07, S * 0.2, 6); ctx.fill(); ctx.stroke();
-  rr(cx + hw, cy - S * 0.1, S * 0.07, S * 0.2, 6); ctx.fill(); ctx.stroke();
-  // cabeça
-  g = ctx.createLinearGradient(0, cy - hh, 0, cy + hh); g.addColorStop(0, "#1a2240"); g.addColorStop(1, "#080b18");
-  glow(CY, 18); ctx.fillStyle = g; ctx.strokeStyle = CY; ctx.lineWidth = 3; rr(cx - hw, cy - hh, hw * 2, hh * 2, S * 0.1); ctx.fill(); ctx.stroke(); noGlow();
-  // detalhes de circuito
-  ctx.strokeStyle = "rgba(255,0,255,0.4)"; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(cx - hw * 0.9, cy + hh * 0.15); ctx.lineTo(cx - hw * 0.6, cy + hh * 0.15); ctx.lineTo(cx - hw * 0.5, cy + hh * 0.3); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx + hw * 0.9, cy + hh * 0.15); ctx.lineTo(cx + hw * 0.6, cy + hh * 0.15); ctx.lineTo(cx + hw * 0.5, cy + hh * 0.3); ctx.stroke();
-  // visor
-  ctx.fillStyle = "#02030a"; ctx.strokeStyle = "rgba(0,229,255,0.5)"; ctx.lineWidth = 2;
-  rr(cx - hw * 0.82, cy - hh * 0.64, hw * 1.64, hh * 0.56, 14); ctx.fill(); ctx.stroke();
-  const ey = cy - hh * 0.36, lx = look.x * hw * 0.08, ly = look.y * hh * 0.05;
-  if (th) {
-    const bx = cx + Math.sin(t * 3) * hw * 0.62;
-    glow(CY, 22); ctx.fillStyle = CY; rr(bx - hw * 0.14, ey - hh * 0.09, hw * 0.28, hh * 0.18, 6); ctx.fill(); noGlow();
-  } else {
-    [-1, 1].forEach(function (s) {
-      const rx = hw * 0.22 * (ls ? 1 + pulse * 0.25 : 1), ry = Math.max(1, hh * 0.17 * open);
-      glow(ls ? MG : CY, 22); ctx.fillStyle = ls ? MG : CY;
-      ctx.beginPath(); ctx.ellipse(cx + s * hw * 0.42 + lx, ey + ly, rx, ry, 0, 0, 7); ctx.fill(); noGlow();
-      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.beginPath(); ctx.arc(cx + s * hw * 0.42 + lx - rx * 0.3, ey + ly - ry * 0.3, Math.max(1, ry * 0.2), 0, 7); ctx.fill();
-    });
-  }
-  // boca (equalizador)
-  const my = cy + hh * 0.52, bars = 11, bw = hw * 0.12, gap = hw * 0.06, total = bars * bw + (bars - 1) * gap, x0 = cx - total / 2;
-  glow(ls ? MG : CY, 12); ctx.fillStyle = ls ? MG : CY;
+  glow(MG, 18); ctx.fillStyle = rg(cx, cy - hh - S * 0.14, 0, ar, [[0, "#ffd0f5"], [1, MG]]); ctx.beginPath(); ctx.arc(cx, cy - hh - S * 0.14, ar, 0, 7); ctx.fill(); noGlow();
+  if (th) { ctx.strokeStyle = MG; ctx.lineWidth = 2; arcs(cx, cy - hh - S * 0.14, S * 0.07, ring * rad * 2, 3, 1.0); }
+
+  // fones laterais (orelhas)
+  [-1, 1].forEach(function (s) {
+    const ex = cx + s * (hw + S * 0.03), er = hh * 0.3;
+    ctx.fillStyle = rg(ex - er * 0.3, cy - er * 0.3, 0, er * 1.3, [[0, "#eef4ff"], [0.5, "#6f7e9a"], [1, "#161d30"]]); ctx.beginPath(); ctx.arc(ex, cy, er, 0, 7); ctx.fill();
+    ctx.strokeStyle = MG; ctx.lineWidth = 3; glow(MG, 12); ctx.beginPath(); ctx.arc(ex, cy, er * 0.7, 0, 7); ctx.stroke(); noGlow();
+    ctx.fillStyle = rg(ex, cy, 0, er * 0.45, [[0, "#ffffff"], [0.4, ac], [1, "#001018"]]); ctx.beginPath(); ctx.arc(ex, cy, er * 0.45, 0, 7); ctx.fill();
+  });
+
+  // casco da cabeça (metal chanfrado)
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.75)"; ctx.shadowBlur = 26; ctx.shadowOffsetY = 10;
+  ctx.fillStyle = lg(cx - hw, cy - hh, cx + hw, cy + hh, [[0, "#eef4ff"], [0.18, "#a9b8d1"], [0.5, "#4d5b78"], [0.85, "#1a2133"], [1, "#2c3652"]]);
+  rr(cx - hw, cy - hh, hw * 2, hh * 2, S * 0.12); ctx.fill(); ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 2; rr(cx - hw + 3, cy - hh + 3, hw * 2 - 6, hh * 2 - 6, S * 0.115); ctx.stroke();
+  ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 3; rr(cx - hw, cy - hh, hw * 2, hh * 2, S * 0.12); ctx.stroke();
+  ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(cx - hw * 0.9, cy - hh * 0.8); ctx.lineTo(cx + hw * 0.9, cy - hh * 0.8); ctx.moveTo(cx - hw * 0.93, cy - hh * 0.6); ctx.lineTo(cx - hw * 0.93, cy + hh * 0.6); ctx.moveTo(cx + hw * 0.93, cy - hh * 0.6); ctx.lineTo(cx + hw * 0.93, cy + hh * 0.6); ctx.stroke();
+  [[-0.86, -0.86], [0.86, -0.86], [-0.86, 0.86], [0.86, 0.86]].forEach(function (p) { bolt(cx + p[0] * hw, cy + p[1] * hh, S * 0.017); });
+  const leds = ["#3dffb0", "#ffb02e", "#ff2bd6"];
+  for (let i = 0; i < 3; i++) { const on = Math.sin(t * (2 + i * 1.3)) > -0.2; glow(leds[i], on ? 10 : 0); ctx.fillStyle = on ? leds[i] : "#1b2236"; ctx.beginPath(); ctx.arc(cx - S * 0.05 + i * S * 0.05, cy - hh * 0.9, S * 0.012, 0, 7); ctx.fill(); noGlow(); }
+
+  // visor de vidro
+  const vx = cx - hw * 0.84, vy = cy - hh * 0.68, vw = hw * 1.68, vh = hh * 0.62;
+  ctx.fillStyle = lg(0, vy, 0, vy + vh, [[0, "#04101e"], [0.5, "#020812"], [1, "#07182c"]]); rr(vx, vy, vw, vh, 16); ctx.fill();
+  glow(ac, 8); ctx.strokeStyle = ac; ctx.globalAlpha = 0.65; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1; noGlow();
+  ctx.save(); rr(vx, vy, vw, vh, 16); ctx.clip();
+  ctx.strokeStyle = "rgba(0,229,255,0.07)"; ctx.lineWidth = 1;
+  for (let gx = vx; gx < vx + vw; gx += 14) { ctx.beginPath(); ctx.moveTo(gx, vy); ctx.lineTo(gx, vy + vh); ctx.stroke(); }
+  for (let gy = vy; gy < vy + vh; gy += 14) { ctx.beginPath(); ctx.moveTo(vx, gy); ctx.lineTo(vx + vw, gy); ctx.stroke(); }
+  if (th) { const sx = vx + (0.5 + 0.5 * Math.sin(t * 3)) * vw; ctx.fillStyle = lg(sx - 18, 0, sx + 18, 0, [[0, "rgba(255,176,46,0)"], [0.5, "rgba(255,176,46,0.35)"], [1, "rgba(255,176,46,0)"]]); ctx.fillRect(sx - 18, vy, 36, vh); }
+  const er = hw * 0.2, ey = cy - hh * 0.37 + look.y * hh * 0.05, lx = look.x * hw * 0.07;
+  [-1, 1].forEach(function (s) {
+    const ex = cx + s * hw * 0.42 + lx, k = ls ? 1 + pulse * 0.2 : 1;
+    ctx.save(); ctx.translate(ex, ey); ctx.scale(1, Math.max(0.06, open));
+    ctx.fillStyle = lg(-er, -er, er, er, [[0, "#cfd9ea"], [0.5, "#4b5a76"], [1, "#0e1424"]]); ctx.beginPath(); ctx.arc(0, 0, er * 1.28, 0, 7); ctx.fill();
+    glow(ac, 22); ctx.fillStyle = rg(0, 0, 0, er * k, [[0, "#ffffff"], [0.22, ac], [0.7, "#0a3a66"], [1, "#00060e"]]); ctx.beginPath(); ctx.arc(0, 0, er * k, 0, 7); ctx.fill(); noGlow();
+    ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(0, 0, er * 0.3 * pupil, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(0, 0, er * 0.62, 0, 7); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.beginPath(); ctx.arc(-er * 0.35, -er * 0.38, er * 0.14, 0, 7); ctx.fill();
+    ctx.restore();
+    ctx.save(); ctx.translate(ex, ey - er * 1.7); ctx.rotate(s * (th ? -0.25 : ls ? 0.15 : 0.08));
+    glow(ac, 8); ctx.fillStyle = ac; rr(-er * 0.9, -3, er * 1.8, 6, 3); ctx.fill(); noGlow(); ctx.restore();
+  });
+  ctx.fillStyle = lg(vx, vy, vx + vw * 0.5, vy + vh, [[0, "rgba(255,255,255,0.16)"], [1, "rgba(255,255,255,0)"]]);
+  ctx.beginPath(); ctx.moveTo(vx, vy); ctx.lineTo(vx + vw * 0.55, vy); ctx.lineTo(vx + vw * 0.25, vy + vh); ctx.lineTo(vx, vy + vh); ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // traços de circuito coloridos nas bochechas
+  ctx.lineWidth = 1.5;
+  [-1, 1].forEach(function (s) {
+    ctx.strokeStyle = s < 0 ? "rgba(255,43,214,0.6)" : "rgba(0,229,255,0.6)";
+    ctx.beginPath(); ctx.moveTo(cx + s * hw * 0.92, cy + hh * 0.12); ctx.lineTo(cx + s * hw * 0.66, cy + hh * 0.12); ctx.lineTo(cx + s * hw * 0.55, cy + hh * 0.3); ctx.lineTo(cx + s * hw * 0.55, cy + hh * 0.42); ctx.stroke();
+    ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.arc(cx + s * hw * 0.55, cy + hh * 0.42, 3, 0, 7); ctx.fill();
+  });
+
+  // boca: grade com equalizador colorido
+  const gw = hw * 1.1, gh = hh * 0.34, gy = cy + hh * 0.42;
+  ctx.fillStyle = "#04060c"; rr(cx - gw / 2, gy, gw, gh, 8); ctx.fill(); ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 1.5; ctx.stroke();
+  const bars = 11, bw = gw * 0.058, gap = gw * 0.03, total = bars * bw + (bars - 1) * gap, x0 = cx - total / 2, my = gy + gh / 2;
   for (let i = 0; i < bars; i++) {
-    let h = hh * 0.03;
-    if (sp) h = hh * 0.06 + hh * 0.16 * Math.abs(Math.sin(t * 10 + i * 1.3) * Math.cos(t * 4 + i));
-    else if (ls) h = hh * 0.03 + hh * 0.12 * pulse * Math.abs(Math.sin(t * 8 + i));
-    ctx.fillRect(x0 + i * (bw + gap), my - h, bw, h * 2);
+    let h = gh * 0.05;
+    if (sp) h = gh * 0.1 + gh * 0.36 * Math.abs(Math.sin(t * 10 + i * 1.3) * Math.cos(t * 4 + i));
+    else if (ls) h = gh * 0.05 + gh * 0.22 * pulse * Math.abs(Math.sin(t * 8 + i));
+    const c = ls ? MG : "hsl(" + (150 + i * 14) + ",100%,60%)";
+    glow(c, 8); ctx.fillStyle = c; ctx.fillRect(x0 + i * (bw + gap), my - h, bw, h * 2); noGlow();
   }
-  noGlow();
   ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
 }
 
@@ -892,6 +1433,12 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
+    st.subheader("🌐 Internet")
+    st.selectbox("Busca na web", ["Automática", "Sempre", "Desligada"], key="web_mode")
+    st.divider()
+    render_camera_sidebar()
+
+    st.divider()
     st.subheader("🔑 Status das Chaves")
     for k in KEYS.values():
         st.write(("✅ " if _secret(k) else "❌ ") + k)
@@ -901,6 +1448,7 @@ with st.sidebar:
 inject_theme(theme_name)
 st.title("⚡ ZEUS // CYBER-CORE")
 render_avatar_voice(AVATAR_MAP[avatar_type], silence_s, stt_key, tts_key, voz_edge, tts_rate)
+render_pipeline_ui()
 
 with st.expander("📜 Histórico da conversa"):
     for msg in st.session_state.messages:
