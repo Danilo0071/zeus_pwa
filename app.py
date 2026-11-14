@@ -3642,3 +3642,84 @@ with st.sidebar:
             )
         else:
             st.warning("Preencha o contato e a mensagem.")
+
+            # ============================================================
+# MÓDULO DE AUTO-EVOLUÇÃO E INTEGRAÇÃO COM GITHUB DO ZEUS
+# ============================================================
+import base64
+import requests
+
+
+def zeus_auto_evoluir(
+    caminho_arquivo, conteudo_codigo, mensagem_commit="Zeus: Auto-evolução autônoma"
+):
+    """Permite que o Zeus crie ou atualize arquivos e pastas direto no GitHub de forma autônoma."""
+    # Pega as chaves dos secrets do Streamlit
+    token = st.secrets.get("GITHUB_TOKEN")
+    repo = st.secrets.get("GITHUB_REPO")  # Ex: "seu-usuario/seu-repositorio"
+
+    if not token or not repo:
+        return "⚠️ Para a autoevolução funcionar, configure o GITHUB_TOKEN e o GITHUB_REPO nos Secrets do Streamlit."
+
+    url = f"https://api.github.com/repos/{repo}/contents/{caminho_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    # Verifica se o arquivo já existe (para pegar o SHA em caso de atualização)
+    r_get = requests.get(url, headers=headers)
+    sha = r_get.json().get("sha") if r_get.status_code == 200 else None
+
+    # Codifica o conteúdo em Base64 (exigido pela API do GitHub)
+    content_bytes = conteudo_codigo.encode("utf-8")
+    content_base64 = base64.b64encode(content_bytes).decode("utf-8")
+
+    payload = {"message": mensagem_commit, "content": content_base64}
+    if sha:
+        payload["sha"] = sha
+
+    # Envia a alteração para o GitHub
+    r_put = requests.put(url, json=payload, headers=headers)
+
+    if r_put.status_code in (200, 201):
+        return f"🧬 *Autoevolução bem-sucedida!* O Zeus criou/atualizou o arquivo {caminho_arquivo} no GitHub com sucesso. O sistema está evoluindo!"
+    else:
+        return (
+            f"❌ Erro na autoevolução do Zeus: {r_put.json().get('message', r_put.text)}"
+        )
+
+
+# Painel lateral para disparar a Autoevolução ou testar comandos autônomos
+with st.sidebar:
+    st.divider()
+    st.subheader("🧬 Núcleo de Auto-Evolução (GitHub)")
+    evoluir_path = st.text_input(
+        "Caminho do Arquivo (ex: modulos/clima.py):",
+        value="",
+        placeholder="pastas/novo_recurso.py",
+        key="input_auto_path",
+    )
+    evoluir_code = st.text_area(
+        "Código Python gerado:",
+        value="",
+        placeholder="# Escreva aqui o código para o Zeus salvar no GitHub...",
+        key="input_auto_code",
+    )
+
+    if st.button("🚀 Executar Autoevolução", key="btn_exec_auto"):
+        if evoluir_path and evoluir_code:
+            with st.spinner(
+                "Zeus reescrevendo o próprio código e enviando ao GitHub..."
+            ):
+                res_evo = zeus_auto_evoluir(
+                    evoluir_path,
+                    evoluir_code,
+                    "Zeus: Nova evolução implementada pelo usuário",
+                )
+                if "🧬" in res_evo:
+                    st.success(res_evo)
+                else:
+                    st.error(res_evo)
+        else:
+            st.warning("Preencha o caminho do arquivo e o código.")
