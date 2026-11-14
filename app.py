@@ -2496,12 +2496,11 @@ with st.expander("📜 Histórico da conversa"):
 # ============================================================
 try:
     import zeus_skills
-    
-    with st.sidebar:
+with st.sidebar:
         st.divider()
         st.subheader("🎵 Autorizar Spotify")
      if st.button("Pegar Refresh Token do Spotify"):
-                    with st.spinner("Autorizando..."):
+                     with st.spinner("Autorizando..."):
                     resultado = zeus_skills.autorizar_spotify()
                     st.success(resultado)
 
