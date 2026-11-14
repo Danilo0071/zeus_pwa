@@ -7,3 +7,4 @@ streamlit-mic-recorder
 streamlit-js-eval
 edge-tts
 duckduckgo-search
+openai
