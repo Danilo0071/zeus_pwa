@@ -3537,3 +3537,108 @@ with st.sidebar:
             )
         else:
             st.warning("Preencha o número e a mensagem.")
+
+            # ============================================================
+# BLOCO UNIFICADO WHATSAPP + COMANDO INTELIGENTE NO CHAT (ZELUS)
+# ============================================================
+import urllib.parse
+
+
+def gerar_link_whatsapp(telefone_destino, mensagem):
+    """Gera o link universal do WhatsApp para celular ou PC."""
+    texto_codificado = urllib.parse.quote(mensagem)
+    num_limpo = "".join(filter(str.isdigit, str(telefone_destino)))
+    if not num_limpo.startswith("55"):
+        num_limpo = "55" + num_limpo
+    return f"https://api.whatsapp.com/send?phone={num_limpo}&text={texto_codificado}"
+
+
+# Função para o Zeus interpretar o comando direto no chat/voz
+def processar_comando_whatsapp_chat(prompt):
+    low = prompt.lower()
+    if (
+        "whatsapp" in low
+        or "manda mensagem" in low
+        or "mandar mensagem" in low
+        or "envia mensagem" in low
+    ):
+        # Tenta extrair quem é o destinatário procurando por palavras comuns
+        # Ex: "Manda mensagem para a Mari dizendo olá"
+        destinatario = ""
+        for nome_teste in [
+            "mari",
+            "namorada",
+            "mãe",
+            "joao grilo",
+            "adilson",
+            "adriana",
+        ]:
+            if nome_teste in low:
+                destinatario = nome_teste.capitalize()
+                break
+
+        # Agenda fixa de segurança combinada com os principais contatos
+        agenda_rapida = {
+            "Mari": "+5531986202389",
+            "Namorada": "+5531991432780",
+            "Adilson": "+5531986421692",
+        }
+
+        if destinatario and destinatario in agenda_rapida:
+            num = agenda_rapida[destinatario]
+            # Pega o resto do texto como mensagem
+            msg = prompt.split(" para ")[-1] if " para " in prompt else "Olá!"
+            link = gerar_link_whatsapp(num, msg)
+            return f"✅ Entendido! Clique no botão abaixo para enviar a mensagem para *{destinatario}*:\n\n[Abrir WhatsApp com a Mensagem]({link})"
+        else:
+            return "🤖 Entendi que quer mandar uma mensagem, mas não achei o nome exato na agenda rápida. Use o painel na barra lateral para selecionar o contato com facilidade!"
+    return None
+
+
+# Painel lateral integrado na barra lateral
+with st.sidebar:
+    st.divider()
+    st.subheader("📱 WhatsApp do Zeus (Integrado)")
+
+    # Contatos principais e lista rápida
+    contatos_painel = {
+        "Mari": "+5531986202389",
+        "Namorada": "+5531991432780",
+        "Adilson": "+5531986421692",
+        "Outro Número (Digitar)": "custom",
+    }
+
+    escolha_contato = st.selectbox(
+        "Selecione o Contato:",
+        list(contatos_painel.keys()),
+        key="select_zap_painel_unificado",
+    )
+
+    if escolha_contato == "Outro Número (Digitar)":
+        zap_tel = st.text_input(
+            "Número (com DDD):",
+            value="",
+            placeholder="5531999999999",
+            key="input_zap_custom_tel_unif",
+        )
+    else:
+        zap_tel = contatos_painel[escolha_contato]
+        st.caption(f"Número salvo: {zap_tel}")
+
+    zap_txt = st.text_area(
+        "Mensagem:",
+        value="",
+        placeholder="Ex: Zeus, avisa que estou chegando...",
+        key="input_zap_txt_unif",
+    )
+
+    if st.button("🚀 Gerar e Enviar no WhatsApp", key="btn_zap_exec_unif"):
+        if zap_tel and zap_txt:
+            link_w = gerar_link_whatsapp(zap_tel, zap_txt)
+            st.success("✅ Mensagem pronta!")
+            st.markdown(
+                f'<a href="{link_w}" target="_blank"><button style="background-color:#25D366;color:white;border:none;padding:12px 20px;border-radius:6px;cursor:pointer;font-weight:bold;width:100%;">Abrir WhatsApp Agora</button></a>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.warning("Preencha o contato e a mensagem.")
