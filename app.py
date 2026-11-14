@@ -2500,24 +2500,24 @@ try:
     with st.sidebar:
         st.divider()
         st.subheader("🎵 Autorizar Spotify")
-    if st.button("Pegar Refresh Token do Spotify"):
-                with st.spinner("Autorizando..."):
+     if st.button("Pegar Refresh Token do Spotify"):
+                    with st.spinner("Autorizando..."):
                     resultado = zeus_skills.autorizar_spotify()
                     st.success(resultado)
 
-            st.divider()
-            st.subheader("🎵 Tocar Música no Spotify")
+        st.divider()
+        st.subheader("🎵 Tocar Música no Spotify")
             musica_input = st.text_input("Nome da música:", key="input_musica_spotify")
             if st.button("Tocar no Spotify", key="btn_tocar_spotify"):
-                if musica_input:
-                    with st.spinner("Conectando ao Spotify..."):
+             if musica_input:
+                   with st.spinner("Conectando ao Spotify..."):
                         try:
                             resultado = zeus_skills.tocar_musica(musica_input)
                             if "✅" in resultado:
                                 st.success(resultado)
                             else:
                                 st.error(resultado)
-                        except Exception as e:
+                           except Exception as e:
                             st.error(f"Erro: {e}")
                 else:
                     st.warning("Digite o nome da música primeiro.")
