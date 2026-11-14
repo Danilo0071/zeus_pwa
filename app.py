@@ -2500,15 +2500,26 @@ try:
     with st.sidebar:
         st.divider()
         st.subheader("🎵 Autorizar Spotify")
-       try:
-    import zeus_skills
-    import streamlit.components.v1 as components
+    if st.button("Pegar Refresh Token do Spotify"):
+                with st.spinner("Autorizando..."):
+                    resultado = zeus_skills.autorizar_spotify()
+                    st.success(resultado)
 
-    with st.sidebar:
-        st.divider()
-        st.subheader("🎵 Tocar Música no Spotify")
-        
-        # Campo de texto para digitar ou receber a voz
-        musica_input = st.text_input("Nome da música:", key="input_musica_spotify")
-        
-       
+            st.divider()
+            st.subheader("🎵 Tocar Música no Spotify")
+            musica_input = st.text_input("Nome da música:", key="input_musica_spotify")
+            if st.button("Tocar no Spotify", key="btn_tocar_spotify"):
+                if musica_input:
+                    with st.spinner("Conectando ao Spotify..."):
+                        try:
+                            resultado = zeus_skills.tocar_musica(musica_input)
+                            if "✅" in resultado:
+                                st.success(resultado)
+                            else:
+                                st.error(resultado)
+                        except Exception as e:
+                            st.error(f"Erro: {e}")
+                else:
+                    st.warning("Digite o nome da música primeiro.")
+except ImportError:
+    pass
