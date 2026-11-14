@@ -3404,3 +3404,94 @@ with st.sidebar:
                     st.success(resultado_teste)
                 else:
                     st.error(resultado_teste)
+
+                    # ============================================================
+# BLOCO ÚNICO SPOTIFY - ADICIONAR NO FINAL DO SEU app.py
+# ============================================================
+try:
+    import spotipy
+    from spotipy.oauth2 import SpotifyOAuth
+except ImportError:
+    spotipy = None
+    SpotifyOAuth = None
+
+
+def executar_comando_spotify(nome_musica):
+    """Lê as chaves direto do st.secrets e comanda o Spotify (TV ou Celular)."""
+    if not spotipy or not SpotifyOAuth:
+        return "❌ A biblioteca 'spotipy' não está instalada."
+    try:
+        client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
+        client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+        refresh_token = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
+        redirect_uri = "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/"
+
+        if not client_id or not client_secret or not refresh_token:
+            return "⚠️ As chaves do Spotify não foram encontradas nos Secrets."
+
+        auth_manager = SpotifyOAuth(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope="user-modify-playback-state user-read-playback-state",
+            cache_path=None,
+        )
+
+        token_info = auth_manager.refresh_access_token(refresh_token)
+        sp = spotipy.Spotify(auth=token_info["access_token"])
+
+        results = sp.search(q=nome_musica, limit=1, type="track")
+        tracks = results["tracks"]["items"]
+
+        if not tracks:
+            return f"❌ Não encontrei a música '{nome_musica}' no Spotify."
+
+        track_uri = tracks[0]["uri"]
+        track_name = tracks[0]["name"]
+        artist_name = tracks[0]["artists"][0]["name"]
+
+        try:
+            sp.start_playback(uris=[track_uri])
+            return f"✅ Tocando agora: {track_name} - {artist_name}"
+        except spotipy.exceptions.SpotifyException as e:
+            if e.http_status == 404:
+                return "⚠️ Nenhum aparelho ativo encontrado. Abra o Spotify na sua TV ou celular e dê play."
+            else:
+                return f"❌ Erro do Spotify: {e.msg}"
+    except Exception as e:
+        return f"❌ Erro ao conectar ao Spotify: {e}"
+
+
+# Processamento automático caso o Zeus receba o comando por voz ou chat
+def verificar_comando_spotify_chat(prompt):
+    low = prompt.lower()
+    if "tocar" in low or "musica" in low or "música" in low or "spotify" in low:
+        musica_alvo = (
+            low.replace("tocar", "")
+            .replace("música", "")
+            .replace("musica", "")
+            .replace("no spotify", "")
+            .strip()
+        )
+        if len(musica_alvo) > 2:
+            return executar_comando_spotify(musica_alvo)
+    return None
+
+
+# Painel lateral unificado para o botão e input já existentes
+with st.sidebar:
+    st.divider()
+    st.subheader("🎵 Controle do Spotify")
+    input_musica_sidebar = st.text_input(
+        "Digite a música:", key="input_spotify_unico_sidebar"
+    )
+    if st.button("Tocar no Spotify", key="btn_spotify_unico_sidebar"):
+        if input_musica_sidebar:
+            with st.spinner("Conectando ao Spotify..."):
+                res_spotify = executar_comando_spotify(input_musica_sidebar)
+                if "✅" in res_spotify:
+                    st.success(res_spotify)
+                else:
+                    st.error(res_spotify)
+        else:
+            st.warning("Digite o nome da música.")
