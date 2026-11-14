@@ -4,3 +4,4 @@ edge-tts
 duckduckgo-search
 huggingface_hub
 openai
+spotipy
