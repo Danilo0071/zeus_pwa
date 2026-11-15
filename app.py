@@ -106,20 +106,20 @@ def get_recent_context(session_id, limit=6):
 # CHAVES
 # Chave padrão: usada só se não houver Secrets/variável de ambiente. Troque quando quiser.
 CHAVES_PADRAO = {
-    "DEEPINFRA_API_KEY": "sk-di-bJioFqKGlbhVm5M0aLOkq20wIpEiZiuT",
+    "DEEPINFRA_API_KEY": "sk-di-bJioFqKG1bhVM5M8alOkq20wiPEiziuT",
+}
 
+import re
 
 def _limpar_chave(v: str) -> str:
-    v = re.sub(r"\s+", "", v).strip("\"'")
+    v = re.sub(r"\s+", "", v.strip("\"'"))
     return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
 
-
 def _secret(key: str, default: str = "") -> str:
-        val = st.secrets.get(key) if hasattr(st, "secrets") else None
-        if val:
-            return _limpar_chave(str(val))
+    val = st.secrets.get(key) if hasattr(st, "secrets") else None
+    if val:
+        return _limpar_chave(str(val))
     return _limpar_chave(os.environ.get(key) or default or CHAVES_PADRAO.get(key, ""))
-
 
 # CLIENTE LLM (GROQ, GEMINI, CLAUDE) COM RETENTATIVA E FALLBACK
 # - 503/500 (alta demanda): tenta de novo e depois o próximo modelo
