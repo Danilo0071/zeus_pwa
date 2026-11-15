@@ -9135,3 +9135,68 @@ animate();
 </body>
 </html>
 """
+
+# ============================================================
+# EXTENSÃO ZEUS OLIMPO // PUXADO DA PASTA DE MÓDULOS NO GITHUB
+# ============================================================
+try:
+    from nucleo_zeus.modulos.zeus_olimpico import ZEUS_OLIMPICO_HTML
+except ImportError:
+    try:
+        from modulos.zeus_olimpico import ZEUS_OLIMPICO_HTML
+    except ImportError:
+        ZEUS_OLIMPICO_HTML = "<!-- ZEUS_OLIMPICO_HTML não carregado -->"
+
+# Adiciona o Zeus na caixinha de seleção de avatares junto com os demais
+if "AVATAR_MAP" in globals():
+    AVATAR_MAP["⚡ Zeus // Olimpo Cibernético (Deuses & Raios)"] = "zeus_olimpico"
+else:
+    AVATAR_MAP = {
+        "⚡ Zeus // Olimpo Cibernético (Deuses & Raios)": "zeus_olimpico",
+        "Esfera 3D (Cyberpunk)": "sphere",
+        "Olho Cibernético": "eye",
+        "Robô Digital": "robot",
+    }
+
+# Função de renderização acoplada ao final para exibir o Zeus Olímpico 3D
+if "renderizar_avatar" not in globals():
+
+    def renderizar_avatar(avatar_key):
+        if avatar_key == "zeus_olimpico":
+            import streamlit.components.v1 as components
+            import tempfile, os, hashlib, streamlit as st
+
+            @st.cache_resource
+            def _render_zeus_olimpo(html_content: str, _hash: str):
+                pasta = os.path.join(tempfile.gettempdir(), f"zeus_olimpo_{_hash}")
+                os.makedirs(pasta, exist_ok=True)
+                with open(
+                    os.path.join(pasta, "index.html"), "w", encoding="utf-8"
+                ) as f:
+                    f.write(html_content)
+                return components.declare_component(f"zeus_olimpo_{_hash}", path=pasta)
+
+            comp = _render_zeus_olimpo(
+                ZEUS_OLIMPICO_HTML,
+                hashlib.md5(ZEUS_OLIMPICO_HTML.encode()).hexdigest()[:8],
+            )
+            ev = comp(
+                avatar="zeus_olimpico",
+                reply=st.session_state.get("avatar_reply"),
+                reply_id=st.session_state.get("avatar_reply_id", 0),
+                key="zeus_olimpo_widget",
+                default=None,
+            )
+
+            if (
+                ev
+                and isinstance(ev, dict)
+                and ev.get("id") != st.session_state.get("last_event_id")
+            ):
+                st.session_state.last_event_id = ev["id"]
+                texto = ev.get("text")
+                if texto and "processar_prompt" in globals():
+                    resp = processar_prompt(texto)
+                    st.session_state.avatar_reply = resp
+                    st.session_state.avatar_reply_id = ev["id"]
+                    st.rerun()
