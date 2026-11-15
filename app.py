@@ -2834,7 +2834,7 @@ def executar_ciclo_evolucao():
         
     print("Iniciando ciclo de auto-evolução do Zeus...")
     logs = _coletar_logs_recentes()
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-S")
     nome_arquivo_relatorio = f"evolucao/relatorio_{timestamp}.md"
     
     conteudo_relatorio = f"""# Relatório de Auto-Evolução - Zeus
@@ -2853,5 +2853,4 @@ Data/Hora: {timestamp}
         sha=sha
     )
     print(f"Sucesso! Relatório gravado em {nome_arquivo_relatorio}")
-
 
