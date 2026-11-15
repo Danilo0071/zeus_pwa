@@ -2753,155 +2753,6 @@ def zf_tocar_musica(nome_musica: str) -> str:
     except Exception as e:
         return f"Erro no Spotify: {str(e)[:150]}"
 
-
-# ------------------------------------------------------------
-# 5. INTERFACE (tela principal, nao escondida na sidebar)
-# ------------------------------------------------------------
-def zf_render_painel():
-    with st.container(border=True):
-        col_av, col_cfg = st.columns([1, 2])
-        with col_av:
-            nome_avatar = st.session_state.get("zf_avatar_nome", list(ZF_AVATARES.keys())[-1])
-            st.image(ZF_AVATARES.get(nome_avatar, ZF_AVATAR_SUPREMO), width=160)
-        with col_cfg:
-            nome_avatar = st.selectbox("Avatar do Zeus", list(ZF_AVATARES.keys()), key="zf_avatar_nome")
-            st.session_state.zeus_avatar_ativo = ZF_AVATARES[nome_avatar]
-
-            fn_vozes = globals().get("listar_todas_vozes_edge") or globals().get("listar_vozes_edge")
-            vozes_disp = fn_vozes() if fn_vozes else globals().get("FALLBACK_VOZES", {"Francisca (pt-BR)": "pt-BR-FranciscaNeural"})
-
-            filtro_voz = st.text_input("Filtrar vozes (ex: pt-BR, en-US)", key="zf_filtro_voz")
-            vozes_filtradas = {k: v for k, v in vozes_disp.items() if filtro_voz.lower() in k.lower()} if filtro_voz else vozes_disp
-            if not vozes_filtradas:
-                vozes_filtradas = vozes_disp
-
-            nome_voz = st.selectbox("Voz do Zeus", list(vozes_filtradas.keys()), key="zf_voz_nome")
-            st.session_state.zf_voz_ativa = vozes_filtradas[nome_voz]
-
-            if st.button("Ouvir previa", key="zf_btn_previa"):
-                with st.spinner("Gerando previa..."):
-                    audio_prev = zf_falar("Ola, Danilo. Eu sou Zeus.", vozes_filtradas[nome_voz])
-                st.audio(audio_prev, format="audio/mp3") if audio_prev else st.error("Nao consegui gerar o audio.")
-
-    with st.sidebar:
-        st.divider()
-        st.subheader("Controle de Musica")
-        musica_input = st.text_input("Digite a musica:", key="zf_input_musica")
-        if st.button("Tocar no Spotify", key="zf_btn_tocar"):
-            if musica_input.strip():
-                with st.spinner("Sintonizando..."):
-                    resultado = zf_tocar_musica(musica_input)
-                st.success(resultado) if resultado.startswith("Tocando") else st.error(resultado)
-            else:
-                st.warning("Digite o nome da musica primeiro.")
-
-    with st.expander("Zeus - Nucleo de Aprendizado, Database (zilsy/) e Midia", expanded=False):
-        aba_criar, aba_memoria, aba_midia = st.tabs(["Aprender (Ensemble)", "Memoria GitHub", "Midia Aprimorada"])
-
-        with aba_criar:
-            instrucao = st.text_input("O que o Zeus deve desenvolver?",
-                                      placeholder="Ex: funcao que calcula sensacao termica...", key="zf_instrucao")
-            linguagem = st.selectbox("Linguagem", ["python", "javascript", "cpp", "java"], key="zf_linguagem")
-            st.caption("Python executa automaticamente. Outras linguagens sao geradas e salvas, sem execucao automatica.")
-            if st.button("Gerar, Revisar e Salvar", key="zf_btn_aprender"):
-                if instrucao.strip():
-                    with st.spinner("Gerando, revisando e salvando..."):
-                        resultado = zf_aprender_ensemble(instrucao.strip(), linguagem)
-                    st.markdown(resultado)
-                else:
-                    st.warning("Insira uma instrucao valida.")
-
-        with aba_memoria:
-            pasta_consulta = st.text_input("Pasta no Database (GitHub):", value=_ZF_PASTA_MODULOS, key="zf_pasta_consulta")
-            if st.button("Listar Arquivos", key="zf_btn_listar"):
-                pasta_segura = _zf_sanitizar_pasta(pasta_consulta)
-                arquivos = zf_listar_memoria_github(pasta_segura)
-                st.session_state.zf_arquivos = arquivos
-                st.success(f"Encontrados {len(arquivos)} arquivos.") if arquivos else st.warning("Nenhum arquivo encontrado.")
-            if st.session_state.get("zf_arquivos"):
-                arq_sel = st.selectbox("Selecione um modulo:", st.session_state.zf_arquivos, key="zf_arq_sel")
-                if st.button("Ler Conteudo", key="zf_btn_ler"):
-                    conteudo = zf_ler_arquivo_github(arq_sel)
-                    st.code(conteudo, language="python") if conteudo else st.error("Erro ao recuperar conteudo.")
-
-        with aba_midia:
-            prompt_midia = st.text_area("Descreva a imagem/video:", key="zf_prompt_midia")
-            tipo_midia = st.radio("Tipo:", ["Imagem aprimorada", "Video aprimorado"], key="zf_tipo_midia", horizontal=True)
-            if st.button("Gerar Midia Aprimorada", key="zf_btn_midia"):
-                if prompt_midia.strip():
-                    log_midia = []
-                    with st.spinner("Gerando e aprimorando..."):
-                        if tipo_midia == "Imagem aprimorada":
-                            img = zf_gerar_imagem_aprimorada(prompt_midia.strip(), log_midia)
-                            if img:
-                                st.image(img, caption="Imagem aprimorada")
-                                st.download_button("Baixar", img, file_name="zeus_imagem.png", key="zf_dl_img")
-                            else:
-                                st.error("Nao consegui gerar a imagem.")
-                        else:
-                            vid, img_base = zf_gerar_video_aprimorado(prompt_midia.strip(), log_midia)
-                            if img_base:
-                                st.image(img_base, caption="Quadro base aprimorado")
-                            if vid:
-                                st.video(vid)
-                                st.download_button("Baixar video", vid, file_name="zeus_video.mp4", key="zf_dl_vid")
-                            else:
-                                st.error("Nao consegui gerar o video.")
-                    with st.expander("Log de geracao", expanded=False):
-                        st.write(chr(10).join(log_midia))
-                else:
-                    st.warning("Descreva o que deseja gerar.")
-
-
-def zf_interceptar_musica():
-    msgs = st.session_state.get("messages")
-    if not msgs:
-        return
-    ultima = msgs[-1]
-    if ultima.get("role") != "user":
-        return
-    texto = str(ultima.get("content", "")).lower()
-    if not any(p in texto for p in ("toca ", "tocar ", "toque ", "spotify", "musica ")):
-        return
-    if st.session_state.get("zf_ultima_musica") == ultima["content"]:
-        return
-
-    termo = _re_zf.sub(
-        r"\b(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)\b", "", texto
-    ).strip(" .,!?:-")
-    st.session_state.zf_ultima_musica = ultima["content"]
-    if not termo:
-        return
-
-    with st.spinner(f"Buscando {termo}..."):
-        resultado = zf_tocar_musica(termo)
-    st.toast(resultado, icon="🎵")
-    st.session_state.messages.append({"role": "assistant", "content": resultado})
-    st.rerun()
-
-
-try:
-    zf_render_painel()
-    zf_interceptar_musica()
-except Exception as _zf_err:
-    st.caption("Zeus Final desativado por erro: " + str(_zf_err)[:200])
-
-# zeus_evolucao.py
-import os
-import json
-import base64
-import datetime
-from typing import List, Dict, Any
-import requests
-
-# zeus_evolucao.py
-import os
-import json
-import base64
-import datetime
-from typing import List, Dict, Any
-import requests
-
 # zeus_evolucao.py
 import os
 import json
@@ -2929,7 +2780,7 @@ GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 def _github_api(path: str, method: str = "GET", data: Any = None) -> Dict:
     token, repo = _obter_credenciais()
     if not token or not repo:
-        raise RuntimeError("Variáveis GITHUB_TOKEN ou GITHUB_REPO não encontradas nos Secrets ou variáveis de ambiente.")
+        raise RuntimeError("Variáveis GITHUB_TOKEN ou GITHUB_REPO não encontradas nos Secrets do Streamlit ou variáveis de ambiente.")
     
     headers = {
         "Authorization": f"token {token}",
@@ -3002,8 +2853,5 @@ Data/Hora: {timestamp}
         sha=sha
     )
     print(f"Sucesso! Relatório gravado em {nome_arquivo_relatorio}")
-
-if __name__ == "__main__":
-    executar_ciclo_evolucao()
 
 
