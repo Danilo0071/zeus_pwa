@@ -7689,19 +7689,7 @@ if "session_id" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-with st.sidebar:
-    st.header("⚙️ Configuração")
-    theme_name = st.selectbox(
-        "🎨 Interface", list(THEMES.keys()), index=0, key="theme_sel"
-    )
-    avatar_type = st.selectbox(
-        "🤖 Avatar do Zeus", list(AVATAR_MAP.keys()), index=0, key="avatar_sel"
-    )
-    model_choice = st.selectbox("🧠 Modelo LLM", PROVIDERS, index=0, key="model_sel")
-    st.subheader("🎙️ Voz")
-    stt_label = st.selectbox(
-        "👂 Reconhecimento",
-        [
+
             "Whisper (Groq) — melhor no celular",
             "Navegador — mais rápido, menos preciso",
         ],
