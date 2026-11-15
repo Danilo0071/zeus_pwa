@@ -2894,37 +2894,52 @@ import datetime
 from typing import List, Dict, Any
 import requests
 
+# zeus_evolucao.py
+import os
+import json
+import base64
+import datetime
+from typing import List, Dict, Any
+import requests
+
 # -------------------------------------------------
 # Configurações de ambiente (Compatível com Streamlit Secrets)
 # -------------------------------------------------
-try:
-    import streamlit as st
-    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-    GITHUB_REPO = st.secrets["GITHUB_REPO"]
-except Exception:
-    GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-    GITHUB_REPO = os.getenv("GITHUB_REPO")
+def _obter_credenciais():
+    try:
+        import streamlit as st
+        token = st.secrets.get("GITHUB_TOKEN")
+        repo = st.secrets.get("GITHUB_REPO")
+        if token and repo:
+            return token, repo
+    except Exception:
+        pass
+    
+    token = os.getenv("GITHUB_TOKEN")
+    repo = os.getenv("GITHUB_REPO")
+    return token, repo
 
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 
-if not GITHUB_TOKEN or not GITHUB_REPO:
-    raise RuntimeError("Variáveis GITHUB_TOKEN e GITHUB_REPO são obrigatórias.")
-
-HEADERS = {
-    "Authorization": f"token {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github.v3+json",
-}
-
 def _github_api(path: str, method: str = "GET", data: Any = None) -> Dict:
+    token, repo = _obter_credenciais()
+    if not token:
+        raise RuntimeError("Variável GITHUB_TOKEN não encontrada.")
+    
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
     url = f"https://api.github.com{path}"
-    resp = requests.request(method, url, headers=HEADERS, json=data)
+    resp = requests.request(method, url, headers=headers, json=data)
     if resp.status_code >= 400:
         raise RuntimeError(f"GitHub API error {resp.status_code}: {resp.text}")
     return resp.json()
 
 def _obter_sha_arquivo(caminho: str) -> str | None:
+    _, repo = _obter_credenciais()
     try:
-        meta = _github_api(f"/repos/{GITHUB_REPO}/contents/{caminho}", params={"ref": GITHUB_BRANCH})
+        meta = _github_api(f"/repos/{repo}/contents/{caminho}", params={"ref": GITHUB_BRANCH})
         return meta["sha"]
     except RuntimeError as e:
         if "404" in str(e):
@@ -2932,6 +2947,7 @@ def _obter_sha_arquivo(caminho: str) -> str | None:
         raise
 
 def _criar_commit(caminho: str, conteudo: str, mensagem: str, sha: str | None) -> None:
+    _, repo = _obter_credenciais()
     data = {
         "message": mensagem,
         "content": base64.b64encode(conteudo.encode()).decode(),
@@ -2939,11 +2955,12 @@ def _criar_commit(caminho: str, conteudo: str, mensagem: str, sha: str | None) -
     }
     if sha:
         data["sha"] = sha
-    _github_api(f"/repos/{GITHUB_REPO}/contents/{caminho}", method="PUT", data=data)
+    _github_api(f"/repos/{repo}/contents/{caminho}", method="PUT", data=data)
 
 def _coletar_logs_recentes(limit: int = 100) -> List[Dict]:
+    _, repo = _obter_credenciais()
     try:
-        meta = _github_api(f"/repos/{GITHUB_REPO}/contents/logs/uso.json", params={"ref": GITHUB_BRANCH})
+        meta = _github_api(f"/repos/{repo}/contents/logs/uso.json", params={"ref": GITHUB_BRANCH})
         conteudo_decodificado = base64.b64decode(meta["content"]).decode("utf-8")
         logs = json.loads(conteudo_decodificado)
         return logs[-limit:]
@@ -2951,6 +2968,10 @@ def _coletar_logs_recentes(limit: int = 100) -> List[Dict]:
         return []
 
 def executar_ciclo_evolucao():
+    token, repo = _obter_credenciais()
+    if not token or not repo:
+        raise RuntimeError("Variáveis GITHUB_TOKEN e GITHUB_REPO são obrigatórias nos Secrets do Streamlit ou variáveis de ambiente.")
+        
     print("Iniciando ciclo de auto-evolução do Zeus...")
     logs = _coletar_logs_recentes()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
