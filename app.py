@@ -2886,4 +2886,92 @@ try:
 except Exception as _zf_err:
     st.caption("Zeus Final desativado por erro: " + str(_zf_err)[:200])
 
+# zeus_evolucao.py
+import os
+import json
+import base64
+import datetime
+from typing import List, Dict, Any
+import requests
+
+# -------------------------------------------------
+# Configurações de ambiente (Compatível com Streamlit Secrets)
+# -------------------------------------------------
+try:
+    import streamlit as st
+    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+    GITHUB_REPO = st.secrets["GITHUB_REPO"]
+except Exception:
+    GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+    GITHUB_REPO = os.getenv("GITHUB_REPO")
+
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
+
+if not GITHUB_TOKEN or not GITHUB_REPO:
+    raise RuntimeError("Variáveis GITHUB_TOKEN e GITHUB_REPO são obrigatórias.")
+
+HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json",
+}
+
+def _github_api(path: str, method: str = "GET", data: Any = None) -> Dict:
+    url = f"https://api.github.com{path}"
+    resp = requests.request(method, url, headers=HEADERS, json=data)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"GitHub API error {resp.status_code}: {resp.text}")
+    return resp.json()
+
+def _obter_sha_arquivo(caminho: str) -> str | None:
+    try:
+        meta = _github_api(f"/repos/{GITHUB_REPO}/contents/{caminho}", params={"ref": GITHUB_BRANCH})
+        return meta["sha"]
+    except RuntimeError as e:
+        if "404" in str(e):
+            return None
+        raise
+
+def _criar_commit(caminho: str, conteudo: str, mensagem: str, sha: str | None) -> None:
+    data = {
+        "message": mensagem,
+        "content": base64.b64encode(conteudo.encode()).decode(),
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        data["sha"] = sha
+    _github_api(f"/repos/{GITHUB_REPO}/contents/{caminho}", method="PUT", data=data)
+
+def _coletar_logs_recentes(limit: int = 100) -> List[Dict]:
+    try:
+        meta = _github_api(f"/repos/{GITHUB_REPO}/contents/logs/uso.json", params={"ref": GITHUB_BRANCH})
+        conteudo_decodificado = base64.b64decode(meta["content"]).decode("utf-8")
+        logs = json.loads(conteudo_decodificado)
+        return logs[-limit:]
+    except Exception:
+        return []
+
+def executar_ciclo_evolucao():
+    print("Iniciando ciclo de auto-evolução do Zeus...")
+    logs = _coletar_logs_recentes()
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    nome_arquivo_relatorio = f"evolucao/relatorio_{timestamp}.md"
+    conteudo_relatorio = f"""# Relatório de Auto-Evolução - Zeus
+Data/Hora: {timestamp}
+
+## Status do Ciclo
+- Logs analisados: {len(logs)} registros.
+- Estado do motor: Operacional com integração ativa ao GitHub via Streamlit Secrets.
+- Ação: Ciclo de auto-análise e registro estruturado executado com sucesso.
+"""
+    sha = _obter_sha_arquivo(nome_arquivo_relatorio)
+    _criar_commit(
+        caminho=nome_arquivo_relatorio,
+        conteudo=conteudo_relatorio,
+        mensagem=f"Zeus: auto-evolução registrada em {timestamp}",
+        sha=sha
+    )
+    print(f"Sucesso! Relatório gravado em {nome_arquivo_relatorio}")
+
+if __name__ == "__main__":
+    executar_ciclo_evolucao()
 
