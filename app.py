@@ -259,6 +259,9 @@ def _resumo(text):
     return text[:120]
 
 
+# Arquivo de correção para o projeto Zeus
+# Copie e cole este bloco no seu app.py ou abra no Bloco de Notas
+
 def get_llm_response(session_id, prompt, model_choice, system=None, use_history=True):
     """Retorna (ok, texto, provedor_usado, lista_de_erros)."""
     msgs = _normalize((get_recent_context(session_id) if use_history else []) + [{"role": "user", "content": prompt}])
@@ -271,14 +274,28 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
             continue
         override = _secret(MODEL_SECRET[prov])
         candidates = [override] if override else MODELS[prov]
-      ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
-      rros.append(f"{prov}: {_resumo(text)}")
-return False, "❌ Nenhum modelo respondeu.", " - ".join(erros), erros
+        ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
+        if ok:
+            return True, text or "(resposta vazia)", prov, erros
+        erros.append(f"{prov}: {_resumo(text)}")
+    return False, "❌ Nenhum modelo respondeu.", " - ".join(erros), erros
 
 
 def processar_prompt(prompt):
+    sid = st.session_state.session_id
+    escolhido = st.session_state.get("model_sel", "groq")
     st.session_state.messages.append({"role": "user", "content": prompt})
     prompt_llm, fonte_web = enriquecer_com_web(prompt)
+    ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
+    add_message(sid, "user", prompt)
+    st.session_state.messages.append({"role": "assistant", "content": response})
+    if ok:
+        add_message(sid, "assistant", response)
+        st.session_state.last_info = f"🤖 Respondeu: {prov}" + (f" (falhou: {', '.join(erros)})" if erros else "") + (" - 🌐 web" if fonte_web else "")
+    else:
+        st.session_state.last_info = f"❌ 🤖 - {', '.join(erros)}"
+    return response
+
     ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
     add_message(sid, "user", prompt)
     st.session_state.messages.append({"role": "assistant", "content": response})
