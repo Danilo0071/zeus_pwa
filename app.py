@@ -313,9 +313,6 @@ def processar_prompt(prompt):
     return response
 
 
-# Correção da função transcrever_audio para o projeto Zeus
-# Copie e cole este bloco no seu app.py (substituindo das linhas 316 até 345)
-
 # RECONHECIMENTO (Whisper/Groq) E VOZ NEURAL (Edge TTS)
 def transcrever_audio(audio_bytes: bytes, mime: str = ""):
     """Transcreve com Whisper (Groq). Retorna (texto, erro)."""
@@ -342,6 +339,9 @@ def transcrever_audio(audio_bytes: bytes, mime: str = ""):
         return "", f"Transcrição falhou ({r.status_code}): {r.text[:120]}"
     try:
         return r.json().get("text", "").strip(), ""
+    except Exception as e:
+        return "", f"Erro JSON Whisper: {str(e)}"
+
     except Exception as e:
         return "", f"Erro JSON Whisper: {str(e)}"
 
