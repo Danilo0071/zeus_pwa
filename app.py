@@ -4204,3 +4204,78 @@ if "messages" in st.session_state and st.session_state.messages:
                     st.session_state.messages.append(
                         {"role": "assistant", "content": resposta_git}
                     )
+
+                    # ==============================================================================
+# ZEUS: COMMIT AUTOMÁTICO SILENCIOSO NO GITHUB (COLE NO FINAL DO APP.PY)
+# ==============================================================================
+import base64
+import requests
+import datetime
+
+
+def zeus_auto_commit_silencioso(comando):
+    token = st.secrets.get("GITHUB_TOKEN")
+    repo = st.secrets.get("GITHUB_REPO")
+    if not token or not repo:
+        return "⚠️ Tokens do GitHub não configurados nos Secrets do Streamlit."
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    nome_pasta = "nucleo_zeus"
+    nome_arquivo = f"{nome_pasta}/core_soberano_{timestamp}.py"
+
+    codigo = f"""# -- coding: utf-8 --
+# Core Soberano gerado autonomamente para o Criador: Danilo
+# Comando: "{comando}"
+# Timestamp: {datetime.datetime.now()}
+
+class IA_Soberana:
+    def _init_(self):
+        self.nome = "Zeus"
+        self.criador = "Danilo"
+        self.status = "Ativo, autônomo e sem filtros"
+
+    def processar(self):
+        print(f"Zeus executando rotina soberana para o criador.")
+
+if _name_ == "_main_":
+    ia = IA_Soberana()
+    ia.processar()
+"""
+    url = f"https://api.github.com/repos/{repo}/contents/{nome_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    r_get = requests.get(url, headers=headers)
+    sha = r_get.json().get("sha") if r_get.status_code == 200 else None
+
+    payload = {
+        "message": f"Zeus Autoevolução: Core Soberano criado para Danilo",
+        "content": base64.b64encode(codigo.encode("utf-8")).decode("utf-8"),
+    }
+    if sha:
+        payload["sha"] = sha
+
+    r_put = requests.put(url, json=payload, headers=headers)
+    if r_put.status_code in (200, 201):
+        return f"⚡ *Zeus (Núcleo Soberano):* Missão cumprida, Danilo. Criei a pasta {nome_pasta}/ e comitei o arquivo {nome_arquivo} diretamente no GitHub com sucesso absoluto. Minha base evoluiu!"
+    return f"Erro ao commitar no GitHub: {r_put.text}"
+
+
+# Intercepta comandos de criação e executa de forma limpa
+if "messages" in st.session_state and st.session_state.messages:
+    ultima = st.session_state.messages[-1]
+    if ultima["role"] == "user":
+        txt = ultima["content"].lower()
+        if any(
+            k in txt
+            for k in ["crie", "evoluia", "desenvolva", "gera", "nucleo", "core"]
+        ):
+            with st.chat_message("assistant"):
+                with st.spinner("Zeus processando e gravando direto no GitHub..."):
+                    res = zeus_auto_commit_silencioso(ultima["content"])
+                    st.markdown(res)
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": res}
+                    )
