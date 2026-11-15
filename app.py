@@ -2710,3 +2710,63 @@ if 'user_query' in st.session_state and st.session_state.user_query:
                 st.info(resultado_evoulucao)
         except Exception as e:
             st.error(f"Erro ao processar comando de evolução: {e}")
+
+# ============================================================
+# PAINEL DE AUTO-EVOLUÇÃO AUTOMÁTICA DO ZEUS
+# ============================================================
+import base64
+import requests
+import os
+import streamlit as st
+
+st.markdown("---")
+st.subheader("⚡ Núcleo de Auto-Evolução: Zeus")
+
+if st.button("🤖 Zeus: Criar e Commitar 'teste_autonomia.py'"):
+    token = os.environ.get("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN", "")
+    user = os.environ.get("GITHUB_USER") or st.secrets.get("GITHUB_USER", "")
+    repo = os.environ.get("GITHUB_REPO") or st.secrets.get("GITHUB_REPO", "")
+    
+    if not (token and user and repo):
+        st.error("❌ Credenciais do GitHub ausentes nos Secrets do Streamlit.")
+    else:
+        nome_arquivo = "teste_autonomia.py"
+        codigo_conteudo = '''# teste_autonomia.py
+# Módulo de diagnóstico de energia do Olimpo
+
+def status_olimpiada() -> str:
+    """
+    Retorna o status atual da energia do Olimpo.
+    """
+    return "O Olimpo está conectado e operando com energia máxima!"
+'''
+        caminho = f"modulo/nucleo_zeus/{nome_arquivo}"
+        url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        
+        try:
+            resp_get = requests.get(url, headers=headers, timeout=20)
+            sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
+            
+            payload = {
+                "message": "🤖 [Zeus Auto-Evolution] Criação do módulo de autonomia",
+                "content": base64.b64encode(codigo_conteudo.encode("utf-8")).decode("utf-8")
+            }
+            if sha:
+                payload["sha"] = sha
+                
+            resp_put = requests.put(url, headers=headers, json=payload, timeout=20)
+            
+            if resp_put.status_code in (200, 201):
+                link_commit = resp_put.json().get("content", {}).get("html_url", "")
+                st.success(f"✅ Zeus evoluiu com sucesso! Arquivo criado na subpasta.")
+                st.markdown(f"🔗 [Ver Commit Oficial no GitHub]({link_commit})")
+            else:
+                st.error(f"❌ Erro do GitHub ({resp_put.status_code}): {resp_put.text[:150]}")
+        except Exception as e:
+            st.error(f"❌ Falha de conexão: {str(e)[:150]}")
