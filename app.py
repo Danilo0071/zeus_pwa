@@ -2854,3 +2854,15 @@ Data/Hora: {timestamp}
     )
     print(f"Sucesso! Relatório gravado em {nome_arquivo_relatorio}")
 
+import streamlit as st
+
+st.markdown("---")
+st.subheader("⚡ Painel de Auto-Evolução - Zeus")
+
+if st.button("🚀 Executar Ciclo de Auto-Evolução e Salvar no GitHub"):
+    with st.spinner("Zeus acionando a API do GitHub e registrando evolução..."):
+        try:
+            executar_ciclo_evolucao()
+            st.success("✅ Sucesso! O Zeus executou o ciclo e gravou o relatório lá no GitHub!")
+        except Exception as e:
+            st.error(f"❌ Erro na execução: {e}")
