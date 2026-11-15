@@ -2893,3 +2893,6 @@ def renderizar_painel_auto_evolucao():
                 )
             except Exception as e:
                 st.error(f"❌ Erro na execução: {e}")
+
+import zeus_evolucao
+zeus_evolucao.renderizar_painel_auto_evolucao()
