@@ -313,6 +313,9 @@ def processar_prompt(prompt):
     return response
 
 
+# Correção da função transcrever_audio para o projeto Zeus
+# Copie e cole este bloco no seu app.py (substituindo das linhas 316 até 345)
+
 # RECONHECIMENTO (Whisper/Groq) E VOZ NEURAL (Edge TTS)
 def transcrever_audio(audio_bytes: bytes, mime: str = ""):
     """Transcreve com Whisper (Groq). Retorna (texto, erro)."""
@@ -323,15 +326,25 @@ def transcrever_audio(audio_bytes: bytes, mime: str = ""):
         return "", "Áudio vazio."
     base = (mime or "audio/webm").split(";")[0]
     ext = "mp4" if "mp4" in base else "ogg" if "ogg" in base else "webm"
-        r = requests.post(
-            "https://api.groq.com/openai/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            files={"file": (f"audio.{ext}", audio_bytes, base)},
-            data={"model": "whisper-large-v3-turbo", "language": "pt", "temperature": "0",
-                  "prompt": "Conversa em português do Brasil com o assistente Zeus."},
-            timeout=60)
-        if r.status_code != 200:
-            return "", f"Transcrição falhou ({r.status_code}): {r.text[:120]}"
+    r = requests.post(
+        "https://api.groq.com/openai/v1/audio/transcriptions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        files={"file": (f"audio.{ext}", audio_bytes, base)},
+        data={
+            "model": "whisper-large-v3-turbo",
+            "language": "pt",
+            "temperature": "0",
+            "prompt": "Conversa em português do Brasil com o assistente Zeus.",
+        },
+        timeout=60
+    )
+    if r.status_code != 200:
+        return "", f"Transcrição falhou ({r.status_code}): {r.text[:120]}"
+    try:
+        return r.json().get("text", "").strip(), ""
+    except Exception as e:
+        return "", f"Erro JSON Whisper: {str(e)}"
+
         texto = r.json().get("text", "").strip()
         if len(texto) < 2 or "legendas pela comunidade" in texto.lower():
             return "", ""
