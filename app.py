@@ -26,7 +26,7 @@ import sys
 import tempfile
 import time
 import zipfile
-import zeus_olimpico.py
+import zeus_olimpico
 import requests
 
 try:
