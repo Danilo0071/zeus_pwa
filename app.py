@@ -2861,3 +2861,6 @@ def renderizar_painel_auto_evolucao():
                 st.success("✅ Sucesso! O Zeus executou o ciclo e gravou o relatório lá no GitHub!")
             except Exception as e:
                 st.error(f"❌ Erro na execução: {e}")
+
+import zeus_evolucao
+zeus_evolucao.renderizar_painel_auto_evolucao()
