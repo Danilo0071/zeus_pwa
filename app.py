@@ -2835,7 +2835,7 @@ def executar_ciclo_evolucao():
     print("Iniciando ciclo de auto-evolução do Zeus...")
     logs = _coletar_logs_recentes()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    nome_arquivo_relatorio = f"evolucao/relatorio_{timestamp}.md"
+    nome_arquivo_relatorio = f"relatorio_{timestamp}.md"
     
     conteudo_relatorio = f"""# Relatório de Auto-Evolução - Zeus
 Data/Hora: {timestamp}
@@ -2843,7 +2843,7 @@ Data/Hora: {timestamp}
 ## Status do Ciclo
 - Logs analisados: {len(logs)} registros.
 - Estado do motor: Operacional com integração ativa ao GitHub via Streamlit Secrets.
-- Ação: Ciclo de auto-análise e registro estruturado executado com sucesso de forma autônoma.
+- Ação: Ciclo de auto-análise e registro estruturado executado com sucesso de forma autônoma na raiz do repositório.
 """
     sha = _obter_sha_arquivo(nome_arquivo_relatorio)
     _criar_commit(
@@ -2854,15 +2854,15 @@ Data/Hora: {timestamp}
     )
     print(f"Sucesso! Relatório gravado em {nome_arquivo_relatorio}")
 
-import streamlit as st
-
-st.markdown("---")
-st.subheader("⚡ Painel de Auto-Evolução - Zeus")
-
-if st.button("🚀 Executar Ciclo de Auto-Evolução e Salvar no GitHub"):
-    with st.spinner("Zeus acionando a API do GitHub e registrando evolução..."):
-        try:
-            executar_ciclo_evolucao()
-            st.success("✅ Sucesso! O Zeus executou o ciclo e gravou o relatório lá no GitHub!")
-        except Exception as e:
-            st.error(f"❌ Erro na execução: {e}")
+# --- Bloco do Painel e Botão do Streamlit ---
+def renderizar_painel_auto_evolucao():
+    import streamlit as st
+    st.markdown("---")
+    st.subheader("⚡ Painel de Auto-Evolução - Zeus")
+    if st.button("🚀 Executar Ciclo de Auto-Evolução e Salvar no GitHub"):
+        with st.spinner("Zeus acionando a API do GitHub e registrando evolução..."):
+            try:
+                executar_ciclo_evolucao()
+                st.success("✅ Sucesso! O Zeus executou o ciclo e gravou o relatório lá no GitHub!")
+            except Exception as e:
+                st.error(f"❌ Erro na execução: {e}")
