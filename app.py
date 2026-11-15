@@ -2902,9 +2902,14 @@ import datetime
 from typing import List, Dict, Any
 import requests
 
-# -------------------------------------------------
-# Configurações de ambiente (Compatível com Streamlit Secrets)
-# -------------------------------------------------
+# zeus_evolucao.py
+import os
+import json
+import base64
+import datetime
+from typing import List, Dict, Any
+import requests
+
 def _obter_credenciais():
     try:
         import streamlit as st
@@ -2923,8 +2928,8 @@ GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 
 def _github_api(path: str, method: str = "GET", data: Any = None) -> Dict:
     token, repo = _obter_credenciais()
-    if not token:
-        raise RuntimeError("Variável GITHUB_TOKEN não encontrada.")
+    if not token or not repo:
+        raise RuntimeError("Variáveis GITHUB_TOKEN ou GITHUB_REPO não encontradas nos Secrets ou variáveis de ambiente.")
     
     headers = {
         "Authorization": f"token {token}",
@@ -2968,21 +2973,26 @@ def _coletar_logs_recentes(limit: int = 100) -> List[Dict]:
         return []
 
 def executar_ciclo_evolucao():
+    """
+    Função principal que executa o ciclo de auto-evolução e faz o commit no GitHub.
+    Projetada para ser chamada exclusivamente após o carregamento do app (ex: via botão).
+    """
     token, repo = _obter_credenciais()
     if not token or not repo:
-        raise RuntimeError("Variáveis GITHUB_TOKEN e GITHUB_REPO são obrigatórias nos Secrets do Streamlit ou variáveis de ambiente.")
+        raise RuntimeError("Variáveis GITHUB_TOKEN e GITHUB_REPO são obrigatórias nos Secrets do Streamlit.")
         
     print("Iniciando ciclo de auto-evolução do Zeus...")
     logs = _coletar_logs_recentes()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     nome_arquivo_relatorio = f"evolucao/relatorio_{timestamp}.md"
+    
     conteudo_relatorio = f"""# Relatório de Auto-Evolução - Zeus
 Data/Hora: {timestamp}
 
 ## Status do Ciclo
 - Logs analisados: {len(logs)} registros.
 - Estado do motor: Operacional com integração ativa ao GitHub via Streamlit Secrets.
-- Ação: Ciclo de auto-análise e registro estruturado executado com sucesso.
+- Ação: Ciclo de auto-análise e registro estruturado executado com sucesso de forma autônoma.
 """
     sha = _obter_sha_arquivo(nome_arquivo_relatorio)
     _criar_commit(
@@ -2995,4 +3005,5 @@ Data/Hora: {timestamp}
 
 if __name__ == "__main__":
     executar_ciclo_evolucao()
+
 
