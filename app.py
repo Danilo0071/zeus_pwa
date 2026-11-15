@@ -10,7 +10,6 @@
 #   GITHUB_USER = "..."  GITHUB_REPO = "..."   (auto-evolução: token com Contents: Read and write)
 # Opcionais (busca Google oficial): GOOGLE_API_KEY e GOOGLE_CSE_ID
 # Dependências: streamlit requests edge-tts duckduckgo-search huggingface_hub openai
-# ============================================================
 import ast
 import asyncio
 import base64
@@ -36,18 +35,13 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # Importação dinâmica das habilidades geradas pelo Zeus e do gerenciador do GitHub
-try:
     import zeus_skills
 except Exception:
     pass
-try:
     from github_manager import salvar_no_github
-except Exception:
     salvar_no_github = None
 
-# ============================================================
 # CONFIGURAÇÃO DA PÁGINA
-# ============================================================
 st.set_page_config(page_title="Zeus 3.0", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 THEMES = {
@@ -75,7 +69,6 @@ def inject_theme(theme_name: str):
 
 
 def inject_theme_classico(theme_name: str):
-    t = THEMES.get(theme_name, THEMES["Cyberpunk"])
     st.markdown(f"""
         <style>
             .stApp {{ background-color: {t['bg']}; color: {t['text']}; font-family: 'Courier New', monospace; }}
@@ -85,9 +78,7 @@ def inject_theme_classico(theme_name: str):
     """, unsafe_allow_html=True)
 
 
-# ============================================================
 # BANCO DE DADOS
-# ============================================================
 DB_FILE = "zeus_chat.db"
 
 
@@ -101,31 +92,20 @@ def init_db():
 
 
 def add_message(session_id, role, content):
-    try:
-        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         conn.execute("INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)", (session_id, role, content))
-        conn.commit(); conn.close()
-    except Exception:
-        pass
 
 
 def get_recent_context(session_id, limit=6):
-    try:
-        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         rows = conn.execute("SELECT role, content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?", (session_id, limit)).fetchall()
         conn.close()
         return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
-    except Exception:
         return []
 
 
-# ============================================================
 # CHAVES
-# ============================================================
 # Chave padrão: usada só se não houver Secrets/variável de ambiente. Troque quando quiser.
 CHAVES_PADRAO = {
     "DEEPINFRA_API_KEY": "sk-di-bJioFqKGlbhVm5M0aLOkq20wIpEiZiuT",
-}
 
 
 def _limpar_chave(v: str) -> str:
@@ -134,22 +114,17 @@ def _limpar_chave(v: str) -> str:
 
 
 def _secret(key: str, default: str = "") -> str:
-    try:
         val = st.secrets.get(key) if hasattr(st, "secrets") else None
         if val:
             return _limpar_chave(str(val))
-    except Exception:
-        pass
     return _limpar_chave(os.environ.get(key) or default or CHAVES_PADRAO.get(key, ""))
 
 
-# ============================================================
 # CLIENTE LLM (GROQ, GEMINI, CLAUDE) COM RETENTATIVA E FALLBACK
 # - 503/500 (alta demanda): tenta de novo e depois o próximo modelo
 # - Se o provedor escolhido falhar (ex.: Claude sem créditos), usa
 #   automaticamente outro provedor que tenha chave.
 # Para forçar um modelo: Secrets GROQ_MODEL, GEMINI_MODEL, ANTHROPIC_MODEL.
-# ============================================================
 SYS_PROMPT = "Você é Zeus, uma IA cyberpunk futurista e assistente sênior. Responda em português, de forma objetiva e com um tom tecnológico. Respostas curtas, pois serão faladas em voz alta."
 
 PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra", "openrouter"]
@@ -163,7 +138,6 @@ MODELS = {
     "github": ["openai/gpt-4.1-mini", "openai/gpt-4o-mini"],
     "deepinfra": ["cognitivecomputations/dolphin-2.9-llama3-8b", "cognitivecomputations/dolphin-2.6-mixtral-8x7b", "meta-llama/Llama-3.3-70B-Instruct", "deepseek-ai/DeepSeek-V3"],
     "openrouter": ["google/gemini-2.5-flash", "openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"],
-}
 TRANSIENT = (500, 502, 503, 504, 529)
 
 
@@ -195,7 +169,6 @@ def _try_models(candidates, fn):
                 continue
             break
         if "credit balance" in last.lower() or code in (401, 403, 429):
-            break
         if code in (400, 404) + TRANSIENT:
             continue  # próximo modelo
         break
@@ -221,41 +194,28 @@ def _call_groq(api_key, model, msgs, system=None):
 
 
 def _call_claude(api_key, model, msgs, system=None):
-    r = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
         json={"model": model, "max_tokens": 1024, "system": system or SYS_PROMPT, "messages": msgs},
-        timeout=60)
-    if r.status_code == 200:
         return 200, "".join(b.get("text", "") for b in r.json()["content"])
-    return r.status_code, r.text
 
 
 def _call_gemini(api_key, model, msgs, system=None, ver="v1"):
     contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in msgs]
-    r = requests.post(
         f"https://generativelanguage.googleapis.com/{ver}/models/{model}:generateContent",
         headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
         json={"systemInstruction": {"parts": [{"text": system or SYS_PROMPT}]}, "contents": contents},
-        timeout=60)
-    if r.status_code == 200:
         parts = r.json()["candidates"][0]["content"]["parts"]
         return 200, "".join(p.get("text", "") for p in parts)
-    return r.status_code, r.text
 
 
 def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=None):
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if extra_headers:
         headers.update(extra_headers)
-    r = requests.post(
         url, headers=headers,
         json={"model": model, "messages": [{"role": "system", "content": system or SYS_PROMPT}] + msgs,
               "temperature": 0.4, "max_tokens": 700},
-        timeout=60)
-    if r.status_code == 200:
-        return 200, (r.json()["choices"][0]["message"].get("content") or "").strip()
-    return r.status_code, r.text
 
 
 def _call_huggingface(api_key, model, msgs, system=None):
@@ -316,12 +276,9 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
         api_key = _secret(KEYS[prov])
         if not api_key:
             erros.append(f"{prov}: chave ausente")
-            continue
         override = _secret(MODEL_SECRET[prov])
         candidates = [override] if override else MODELS[prov]
-        try:
             ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
-        except Exception as e:
             ok, text = False, f"erro de conexão: {e}"
         if ok:
             return True, text or "(resposta vazia)", prov, erros
@@ -345,9 +302,7 @@ def processar_prompt(prompt):
     return response
 
 
-# ============================================================
 # RECONHECIMENTO (Whisper/Groq) E VOZ NEURAL (Edge TTS)
-# ============================================================
 def transcrever_audio(audio_bytes: bytes, mime: str = ""):
     """Transcreve com Whisper (Groq). Retorna (texto, erro)."""
     api_key = _secret("GROQ_API_KEY")
@@ -357,7 +312,6 @@ def transcrever_audio(audio_bytes: bytes, mime: str = ""):
         return "", "Áudio vazio."
     base = (mime or "audio/webm").split(";")[0]
     ext = "mp4" if "mp4" in base else "ogg" if "ogg" in base else "webm"
-    try:
         r = requests.post(
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {api_key}"},
@@ -404,11 +358,8 @@ def sintetizar(texto, voz, rate=1.0):
     if not texto:
         return None
     pct = f"{int(round((rate - 1) * 100)):+d}%"
-    try:
         return asyncio.run(asyncio.wait_for(_edge_synth(texto, voz, pct), timeout=25)) or None
-    except Exception as e:
         st.session_state.tts_erro = str(e)[:150]
-        return None
 
 
 FALLBACK_VOZES = {
@@ -416,12 +367,10 @@ FALLBACK_VOZES = {
     "Antonio (pt-BR ♂)": "pt-BR-AntonioNeural",
     "Raquel (pt-PT ♀)": "pt-PT-RaquelNeural",
     "Duarte (pt-PT ♂)": "pt-PT-DuarteNeural",
-}
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def listar_vozes_edge():
-    try:
         import edge_tts
         todas = asyncio.run(edge_tts.list_voices())
         pt = [v for v in todas if v["Locale"].lower().startswith("pt-")]
@@ -430,16 +379,13 @@ def listar_vozes_edge():
             nome = v["ShortName"].split("-", 2)[-1].replace("Neural", "")
             vozes[f"{nome} ({v['Locale']} {'♀' if v['Gender'] == 'Female' else '♂'})"] = v["ShortName"]
         return vozes or FALLBACK_VOZES
-    except Exception:
         return FALLBACK_VOZES
 
 
-# ============================================================
 # BUSCA NA INTERNET (tempo real)
 # Ordem: Google Custom Search (se configurado) -> Google Search via Gemini
 # (grounding) -> DuckDuckGo -> Wikipédia.
 # Secrets opcionais: GOOGLE_API_KEY + GOOGLE_CSE_ID (Programmable Search).
-# ============================================================
 WEB_TRIGGERS = (
     "hoje", "agora", "atual", "atualmente", "últimas", "ultimas", "notícia", "noticia", "recente",
     "pesquise", "pesquisa", "busque", "procure", "google", "internet", "na web", "cotação", "cotacao",
@@ -455,7 +401,6 @@ def _search_google_cse(q, n=5):
     r = requests.get("https://www.googleapis.com/customsearch/v1",
                      params={"key": key, "cx": cx, "q": q, "num": n, "hl": "pt"}, timeout=20)
     if r.status_code != 200:
-        return ""
     linhas = []
     for i in r.json().get("items", []):
         linhas.append("- " + i.get("title", "") + ": " + i.get("snippet", "") + " (" + i.get("link", "") + ")")
@@ -464,11 +409,8 @@ def _search_google_cse(q, n=5):
 
 def _search_gemini_google(q):
     api_key = _secret("GEMINI_API_KEY")
-    if not api_key:
-        return ""
     modelos = [m for m in [_secret("GEMINI_SEARCH_MODEL")] if m] + ["gemini-2.5-flash", "gemini-flash-latest"]
     for model in modelos:
-        try:
             r = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
@@ -478,7 +420,6 @@ def _search_gemini_google(q):
                 },
                 timeout=45)
             if r.status_code != 200:
-                continue
             cand = r.json()["candidates"][0]
             texto = "".join(p.get("text", "") for p in cand["content"]["parts"]).strip()
             fontes = []
@@ -489,13 +430,10 @@ def _search_gemini_google(q):
             if texto:
                 return texto + ("\nFontes: " + "; ".join(fontes[:5]) if fontes else "")
         except Exception:
-            continue
     return ""
 
 
 def _search_ddg(q, n=5):
-    try:
-        try:
             from ddgs import DDGS
         except ImportError:
             from duckduckgo_search import DDGS
@@ -505,27 +443,20 @@ def _search_ddg(q, n=5):
         for x in res:
             linhas.append("- " + x.get("title", "") + ": " + x.get("body", "") + " (" + x.get("href", "") + ")")
         return "\n".join(linhas)
-    except Exception:
-        return ""
 
 
 def _search_wiki(q, n=4):
-    try:
         r = requests.get("https://pt.wikipedia.org/w/api.php", params={
             "action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": n}, timeout=20)
         itens = r.json()["query"]["search"]
         return "\n".join("- " + i["title"] + ": " + re.sub(r"<[^>]+>", "", i["snippet"]) for i in itens)
-    except Exception:
-        return ""
 
 
 def web_search(q, n=5):
     """Retorna (texto, fonte_usada). Texto vazio se nada funcionar."""
     for nome, fn in (("Google CSE", _search_google_cse), ("Google (Gemini)", _search_gemini_google),
                      ("DuckDuckGo", _search_ddg), ("Wikipédia", _search_wiki)):
-        try:
             txt = fn(q)
-        except Exception:
             txt = ""
         if txt and txt.strip():
             return txt.strip(), nome
@@ -548,16 +479,13 @@ def enriquecer_com_web(prompt):
         return prompt, ""
     ctx_web, fonte = web_search(prompt[:300])
     if not ctx_web:
-        return prompt, ""
     hoje = time.strftime("%d/%m/%Y")
     novo = ("[DADOS DA INTERNET em " + hoje + ", via " + fonte + "]\n" + ctx_web[:3500] + "\n[FIM DOS DADOS]\n\n"
             "Use os dados acima se forem úteis e diga que vieram da internet. Pergunta do usuário: " + prompt)
     return novo, fonte
 
 
-# ============================================================
 # GERAÇÃO DE MÍDIA (imagem, edição de foto e vídeo) com fallback em cascata
-# ============================================================
 def _mime_img(b):
     return "image/png" if b[:4] == b"\x89PNG" else "image/webp" if b[8:12] == b"WEBP" else "image/jpeg"
 
@@ -581,8 +509,6 @@ def _img_hf(prompt):
     if not _secret("HUGGINGFACE_API_KEY"):
         raise RuntimeError("sem chave")
     modelos = [m for m in [_secret("HF_IMAGE_MODEL")] if m] + ["black-forest-labs/FLUX.1-schnell", "stabilityai/stable-diffusion-xl-base-1.0"]
-    erros = []
-    try:
         client = _hf_client(120)
         for model in modelos:
             try:
@@ -592,14 +518,12 @@ def _img_hf(prompt):
     except ImportError:
         erros.append("falta huggingface_hub no requirements.txt")
     for model in modelos:  # rota REST antiga, como reserva
-        try:
             r = requests.post(f"https://router.huggingface.co/hf-inference/models/{model}",
                               headers={"Authorization": "Bearer " + _secret("HUGGINGFACE_API_KEY")},
                               json={"inputs": prompt}, timeout=120)
             if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
                 return r.content
             erros.append(f"REST {model.split('/')[-1]} ({r.status_code})")
-        except Exception as e:
             erros.append("REST: " + str(e)[:60])
     raise RuntimeError(" | ".join(erros)[:300])
 
@@ -607,13 +531,11 @@ def _img_hf(prompt):
 def _gemini_image_call(parts):
     key = _secret("GEMINI_API_KEY")
     if not key:
-        raise RuntimeError("sem chave")
     model = _secret("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
     r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                       headers={"Content-Type": "application/json", "x-goog-api-key": key},
                       json={"contents": [{"parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}},
                       timeout=120)
-    if r.status_code != 200:
         raise RuntimeError(f"({r.status_code}) {r.text[:100]}")
     for part in r.json()["candidates"][0]["content"]["parts"]:
         d = part.get("inlineData") or part.get("inline_data")
@@ -638,34 +560,22 @@ def _img_pollinations(prompt):
         ultimo = f"({r.status_code})"
         if r.status_code == 429 and tentativa == 0:
             time.sleep(16)  # plano anônimo: 1 pedido a cada ~15 s
-            continue
-        break
     raise RuntimeError(ultimo)
 
 
 def _img_deepinfra(prompt):
     key = _secret("DEEPINFRA_API_KEY")
-    if not key:
-        raise RuntimeError("sem chave")
     modelo = _secret("DEEPINFRA_IMAGE_MODEL") or "black-forest-labs/FLUX-1-schnell"
-    erros = []
-    if OpenAI is not None:
-        try:
             client = OpenAI(api_key=key, base_url="https://api.deepinfra.com/v1/openai", timeout=120)
             resp = client.images.generate(model=modelo, prompt=prompt)
             return base64.b64decode(resp.data[0].b64_json)
-        except Exception as e:
             erros.append("cliente OpenAI: " + str(e)[:100])
     for body in ({"prompt": prompt, "size": "1024x1024", "n": 1, "model": modelo}, {"prompt": prompt, "size": "1024x1024", "n": 1}):
-        try:
             r = requests.post("https://api.deepinfra.com/v1/openai/images/generations",
                               headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, json=body, timeout=120)
             if r.status_code == 200:
                 return base64.b64decode(r.json()["data"][0]["b64_json"])
             erros.append(f"REST ({r.status_code}) {r.text[:60]}")
-        except Exception as e:
-            erros.append("REST: " + str(e)[:60])
-    raise RuntimeError(" | ".join(erros)[:300])
 
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
@@ -688,39 +598,25 @@ def _or_extrair_imagem(js):
 
 def _img_openrouter(prompt):
     key = _secret("OPENROUTER_API_KEY")
-    if not key:
-        raise RuntimeError("sem chave")
     modelo = _secret("OPENROUTER_IMAGE_MODEL") or "google/gemini-2.5-flash-image"
-    erros = []
-    try:
         r = requests.post(OPENROUTER_BASE + "/images", headers=_or_headers(key), json={"model": modelo, "prompt": prompt}, timeout=120)
         if r.status_code == 200:
             return base64.b64decode(r.json()["data"][0]["b64_json"])
         erros.append(f"/images ({r.status_code}) {r.text[:70]}")
-    except Exception as e:
         erros.append("/images: " + str(e)[:60])
     r = requests.post(OPENROUTER_BASE + "/chat/completions", headers=_or_headers(key),
                       json={"model": modelo, "messages": [{"role": "user", "content": prompt}], "modalities": ["image", "text"]}, timeout=120)
-    if r.status_code != 200:
         raise RuntimeError(" | ".join(erros + [f"chat ({r.status_code}) {r.text[:70]}"]))
-    try:
         return _or_extrair_imagem(r.json())
-    except Exception as e:
         raise RuntimeError(" | ".join(erros + [str(e)]))
 
 
 def _edit_openrouter(img, prompt):
-    key = _secret("OPENROUTER_API_KEY")
-    if not key:
-        raise RuntimeError("sem chave")
-    modelo = _secret("OPENROUTER_IMAGE_MODEL") or "google/gemini-2.5-flash-image"
     uri = "data:" + _mime_img(img) + ";base64," + base64.b64encode(img).decode()
     r = requests.post(OPENROUTER_BASE + "/chat/completions", headers=_or_headers(key), json={
         "model": modelo, "modalities": ["image", "text"],
         "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": uri}}]}]},
         timeout=180)
-    if r.status_code != 200:
-        raise RuntimeError(f"({r.status_code}) {r.text[:100]}")
     return _or_extrair_imagem(r.json())
 
 
@@ -735,11 +631,9 @@ IMAGE_CASCADE = [("DeepInfra", _img_deepinfra), ("OpenRouter", _img_openrouter),
 
 def make_image(prompt, log):
     for nome, fn in IMAGE_CASCADE:
-        try:
             data = fn(prompt)
             log.append("✅ Imagem criada por: " + nome)
             return data
-        except Exception as e:
             log.append("❌ Imagem " + nome + ": " + str(e)[:160])
     return None
 
@@ -750,30 +644,18 @@ def _edit_gemini(img, prompt):
 
 
 def _edit_hf(img, prompt):
-    if not _secret("HUGGINGFACE_API_KEY"):
-        raise RuntimeError("sem chave")
     modelos = [m for m in [_secret("HF_EDIT_MODEL")] if m] + ["black-forest-labs/FLUX.1-Kontext-dev", "Qwen/Qwen-Image-Edit"]
     client = _hf_client(180)
-    erros = []
-    for model in modelos:
-        try:
             return _to_bytes(client.image_to_image(img, prompt=prompt, model=model))
-        except Exception as e:
             erros.append(model.split("/")[-1] + ": " + str(e)[:80])
-    raise RuntimeError(" | ".join(erros)[:300])
 
 
 def _edit_deepinfra(img, prompt):
-    key = _secret("DEEPINFRA_API_KEY")
-    if not key:
-        raise RuntimeError("sem chave")
     model = _secret("DEEPINFRA_EDIT_MODEL") or "black-forest-labs/FLUX.1-Kontext-dev"
     r = requests.post("https://api.deepinfra.com/v1/images/edits",
                       headers={"Authorization": "Bearer " + key},
                       files={"image": ("foto.jpg", img, _mime_img(img))},
                       data={"prompt": prompt, "model": model, "n": "1", "response_format": "b64_json"}, timeout=180)
-    if r.status_code != 200:
-        raise RuntimeError(f"({r.status_code}) {r.text[:100]}")
     d = r.json()["data"][0]
     if d.get("b64_json"):
         return base64.b64decode(d["b64_json"])
@@ -791,11 +673,9 @@ def editar_imagem(img, prompt_edicao, descricao, log):
     """Tenta editar a foto original. Se nenhuma IA conseguir, recria a partir da descrição.
     Retorna (bytes|None, 'editada'|'recriada'|'')."""
     for nome, fn in EDIT_CASCADE:
-        try:
             out = fn(img, prompt_edicao)
             log.append("✅ Foto editada por: " + nome)
             return out, "editada"
-        except Exception as e:
             log.append("❌ " + nome + ": " + str(e)[:160])
     log.append("↪️ Nenhuma IA editou a foto original; recriando a partir da descrição")
     out = make_image((descricao + ". " + prompt_edicao)[:900], log)
@@ -805,45 +685,31 @@ def editar_imagem(img, prompt_edicao, descricao, log):
 # ---- vídeo ----
 def make_video(prompt, log, img=None):
     """Vídeo experimental via Hugging Face (foto→vídeo se houver foto; senão texto→vídeo)."""
-    if not _secret("HUGGINGFACE_API_KEY"):
         log.append("⚪ Vídeo: sem HUGGINGFACE_API_KEY")
-        return None
-    try:
         client = _hf_client(600)
-    except ImportError:
         log.append("❌ Vídeo: falta huggingface_hub no requirements.txt")
-        return None
     if img is not None and hasattr(client, "image_to_video"):
-        try:
             model = _secret("HF_I2V_MODEL") or "Wan-AI/Wan2.2-I2V-A14B"
             out = client.image_to_video(img, prompt=prompt, model=model)
             log.append("✅ Vídeo (foto→vídeo): " + model)
             return _to_bytes(out)
-        except Exception as e:
             log.append("❌ Vídeo foto→vídeo: " + str(e)[:160])
-    try:
         model = _secret("HF_VIDEO_MODEL") or "Wan-AI/Wan2.1-T2V-1.3B"
         out = client.text_to_video(prompt, model=model)
         log.append("✅ Vídeo (texto→vídeo): " + model)
         return _to_bytes(out)
-    except Exception as e:
         log.append("❌ Vídeo texto→vídeo: " + str(e)[:160] + " (modelo pode exigir plano pago; troque com HF_VIDEO_MODEL)")
-    return None
 
 
-# ============================================================
 # PIPELINE MULTI-IA (só texto): busca web -> resumo -> prompt -> mídia
-# ============================================================
 def _llm(prompt, system, log, etapa):
     ok, texto, prov, erros = get_llm_response(
         st.session_state.session_id, prompt, st.session_state.get("model_sel", "groq"),
         system=system, use_history=False)
-    if ok:
         extra = " (fallback: " + "; ".join(erros) + ")" if erros else ""
         log.append("✅ " + etapa + ": " + str(prov) + extra)
         return texto
     log.append("❌ " + etapa + ": " + texto[:150])
-    return ""
 
 
 def run_pipeline(pedido, quer_img, quer_vid):
@@ -892,9 +758,7 @@ def render_pipeline_ui():
                 st.write("\n\n".join(res["log"]))
 
 
-# ============================================================
 # VISÃO: a IA enxerga a foto (cascata entre provedores com visão)
-# ============================================================
 def _vis_openai(url, key, model, img_b64, mime, prompt, extra=None):
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
     if extra:
@@ -904,7 +768,6 @@ def _vis_openai(url, key, model, img_b64, mime, prompt, extra=None):
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": "data:" + mime + ";base64," + img_b64}}]}]}, timeout=60)
-    if r.status_code != 200:
         raise RuntimeError(f"({r.status_code}) {r.text[:90]}")
     return (r.json()["choices"][0]["message"].get("content") or "").strip()
 
@@ -916,28 +779,20 @@ def _vis_groq(k, b, m, p):
 
 def _gemini_generate(key, payload, modelos=None):
     modelos = modelos or ([x for x in [_secret("GEMINI_VISION_MODEL")] if x] + ["gemini-2.5-flash", "gemini-flash-latest"])
-    ultimo = ""
-    for model in modelos:
         for ver in ("v1", "v1beta"):
             r = requests.post(f"https://generativelanguage.googleapis.com/{ver}/models/{model}:generateContent",
                               headers={"Content-Type": "application/json", "x-goog-api-key": key}, json=payload, timeout=90)
-            if r.status_code == 200:
                 return "".join(x.get("text", "") for x in r.json()["candidates"][0]["content"]["parts"]).strip()
             ultimo = f"({r.status_code}) {r.text[:90]}"
             if r.status_code in (401, 403, 429):
                 raise RuntimeError(ultimo)
-    raise RuntimeError(ultimo)
 
 
 def analisar_imagem(img_b64, mime, pergunta):
     """Visão do Gemini: texto + inline_data (base64). Retorna o texto ou uma mensagem de erro."""
-    key = _secret("GEMINI_API_KEY")
-    if not key:
         return "❌ GEMINI_API_KEY ausente."
-    try:
         return _gemini_generate(key, {"contents": [{"role": "user", "parts": [
             {"text": pergunta}, {"inline_data": {"mime_type": mime, "data": img_b64}}]}]})
-    except Exception as e:
         return "❌ Erro na análise: " + str(e)[:200]
 
 
@@ -953,8 +808,6 @@ def _vis_claude(k, b, m, p):
                       json={"model": model, "max_tokens": 900, "messages": [{"role": "user", "content": [
                           {"type": "image", "source": {"type": "base64", "media_type": m, "data": b}},
                           {"type": "text", "text": p}]}]}, timeout=60)
-    if r.status_code != 200:
-        raise RuntimeError(f"({r.status_code}) {r.text[:90]}")
     return "".join(x.get("text", "") for x in r.json()["content"]).strip()
 
 
@@ -972,10 +825,7 @@ def _vis_github(k, b, m, p):
 def _vis_deepinfra(k, b, m, p):
     modelos = [x for x in [_secret("DEEPINFRA_VISION_MODEL")] if x] + ["Qwen/Qwen2.5-VL-32B-Instruct", "meta-llama/Llama-3.2-11B-Vision-Instruct"]
     ultimo = None
-    for model in modelos:
-        try:
             return _vis_openai("https://api.deepinfra.com/v1/openai/chat/completions", k, model, b, m, p)
-        except Exception as e:
             ultimo = e
     raise ultimo
 
@@ -986,34 +836,26 @@ VISION_CASCADE = {"deepinfra": _vis_deepinfra, "openrouter": _vis_openrouter, "g
 def ask_vision(img_bytes, comando):
     """Retorna (texto, provedor, log). Começa pelo modelo escolhido e cai em cascata."""
     img_b64, mime = base64.b64encode(img_bytes).decode(), _mime_img(img_bytes)
-    escolhido = st.session_state.get("model_sel", "groq")
     ordem = []
     for p_ in ["gemini", escolhido] + PROVIDERS:
         if p_ not in ordem:
             ordem.append(p_)
-    log = []
     for prov in ordem:
         if prov not in VISION_CASCADE:
-            continue
         key = _secret(KEYS[prov])
         if not key:
             log.append("⚪ Visão " + prov + ": sem chave")
-            continue
-        try:
             txt = VISION_CASCADE[prov](key, img_b64, mime, comando)
             if txt:
                 log.append("✅ Visão: " + prov + " enxergou a foto")
                 return txt, prov, log
-        except Exception as e:
             log.append("❌ Visão " + prov + ": " + str(e)[:120])
     return None, None, log
 
 
-# ============================================================
 # ESTÚDIO: as IAs conversam entre si
 # foto -> (IA de visão descreve) -> (IA de texto cria o comando)
 # -> (IA de imagem edita a foto) -> (IA de vídeo anima)
-# ============================================================
 ACOES = ["Descrever", "Editar foto", "Criar vídeo", "Editar foto + vídeo"]
 ESTILOS_FOTO = {
     "Automático": "",
@@ -1026,20 +868,16 @@ ESTILOS_FOTO = {
     "Fantasia épica": "epic fantasy art, dramatic lighting, magical atmosphere",
     "Cartoon 3D": "3D cartoon render, soft shading, vivid colors",
     "Aquarela": "delicate watercolor painting, soft bleeding colors, paper texture",
-}
 MOVIMENTOS_VIDEO = {
-    "Automático": "",
     "Zoom lento (aproximar)": "slow zoom in",
     "Panorâmica lateral": "smooth horizontal pan",
     "Câmera orbitando": "slow orbiting camera around the subject",
     "Câmera na mão (realista)": "natural handheld camera shake",
     "Animação sutil (respirar e piscar)": "subtle natural animation, breathing, blinking, hair moving in the wind",
     "Cinematográfico dramático": "dramatic cinematic push-in with moving light",
-}
 
 
 def executar_estudio(img, comando, acao, estilo="Automático", movimento="Automático"):
-    log = []
     extra_estilo, extra_mov = ESTILOS_FOTO.get(estilo, ""), MOVIMENTOS_VIDEO.get(movimento, "")
     res = {"orig": img, "acao": acao, "desc": "", "prompt_edit": "", "prompt_vid": "", "img": None, "modo_img": "", "vid": None, "log": log}
     if acao == "Descrever":
@@ -1080,7 +918,6 @@ def mostrar_estudio_res(res):
         st.markdown("**Comando enviado às IAs de imagem**")
         st.code(res["prompt_edit"], language="text")
     if res.get("img"):
-        c1, c2 = st.columns(2)
         c1.image(res["orig"], caption="Original")
         legenda = "Foto editada" if res["modo_img"] == "editada" else "Recriada a partir da descrição (nenhuma IA conseguiu editar a original)"
         c2.image(res["img"], caption=legenda)
@@ -1107,7 +944,6 @@ def render_estudio_ui():
         foto = st.session_state.get("foto_bytes")
         if foto:
             st.image(foto, caption="Foto ativa", width=220)
-        else:
             st.info("Tire uma foto na câmera lateral ou envie uma aqui.")
         comando = st.text_input("O que fazer com a foto?", value="Melhore esta foto deixando-a mais nítida e com visual cyberpunk", key="estudio_cmd")
         acao = st.radio("Ação", ACOES, index=1, key="estudio_acao", horizontal=True)
@@ -1119,7 +955,6 @@ def render_estudio_ui():
                 st.session_state.estudio_res = executar_estudio(foto, comando, acao, estilo, movimento)
             st.rerun()
         res = st.session_state.get("estudio_res")
-        if res:
             mostrar_estudio_res(res)
 
 
@@ -1157,7 +992,6 @@ def render_visao_gerar_sidebar():
     arq = st.file_uploader("Enviar imagem", type=["png", "jpg", "jpeg", "webp"], key="side_up")
     if arq is not None:
         dados = arq.getvalue()
-        h = hashlib.md5(dados).hexdigest()
         if h != st.session_state.get("side_up_last"):
             st.session_state.side_up_last = h
             st.session_state.foto_bytes = dados  # também vira a foto ativa do Estúdio
@@ -1189,7 +1023,6 @@ def render_visao_gerar_sidebar():
         if img:
             st.image(img)
             st.download_button("⬇️ Baixar imagem", img, file_name="zeus_imagem.png", mime="image/png", key="dl_side_img")
-        else:
             st.error("Não consegui gerar a imagem. Veja o log.")
         with st.expander("Log da geração", expanded=not img):
             st.write("\n\n".join(glog))
@@ -1197,10 +1030,6 @@ def render_visao_gerar_sidebar():
 
 FALLBACK_VOZES_EXTRA = {
     "Thalita multilíngue (pt-BR ♀)": "pt-BR-ThalitaMultilingualNeural",
-    "Francisca (pt-BR ♀)": "pt-BR-FranciscaNeural",
-    "Antonio (pt-BR ♂)": "pt-BR-AntonioNeural",
-    "Raquel (pt-PT ♀)": "pt-PT-RaquelNeural",
-    "Duarte (pt-PT ♂)": "pt-PT-DuarteNeural",
     "Ava multilíngue (en-US ♀)": "en-US-AvaMultilingualNeural",
     "Andrew multilíngue (en-US ♂)": "en-US-AndrewMultilingualNeural",
     "Emma multilíngue (en-US ♀)": "en-US-EmmaMultilingualNeural",
@@ -1209,47 +1038,33 @@ FALLBACK_VOZES_EXTRA = {
     "Remy multilíngue (fr-FR ♂)": "fr-FR-RemyMultilingualNeural",
     "Seraphina multilíngue (de-DE ♀)": "de-DE-SeraphinaMultilingualNeural",
     "Florian multilíngue (de-DE ♂)": "de-DE-FlorianMultilingualNeural",
-}
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
 def listar_todas_vozes_edge():
     """Todas as vozes neurais do Edge (português primeiro). Multilíngues falam português com sotaque."""
-    try:
-        import edge_tts
-        todas = asyncio.run(edge_tts.list_voices())
         ordenadas = sorted(todas, key=lambda x: (not x["ShortName"].startswith("pt-"), x["Locale"], x["ShortName"]))
-        vozes = {}
         for v in ordenadas:
-            nome = v["ShortName"].split("-", 2)[-1].replace("Neural", "")
-            vozes[f"{nome} ({v['Locale']} {'♀' if v['Gender'] == 'Female' else '♂'})"] = v["ShortName"]
         return vozes or FALLBACK_VOZES_EXTRA
-    except Exception:
         return FALLBACK_VOZES_EXTRA
 
 
-# ============================================================
 # AUTO-EVOLUÇÃO SEGURA + CRIADOR DE PASTAS (ZIP)
 # Claude primeiro (3 tentativas, 60 s entre elas) -> Gemini (plano B)
 # -> validação com ast (sintaxe + regras de segurança) -> GitHub.
-# ============================================================
 TRANSITORIOS = (429, 500, 502, 503, 504, 529)
 SKILLS_IMPORTS_OK = {
     "math", "re", "json", "datetime", "random", "statistics", "collections", "itertools", "functools",
     "textwrap", "string", "unicodedata", "decimal", "fractions", "base64", "hashlib", "typing", "urllib",
     "requests", "time", "html", "uuid", "calendar", "operator", "heapq", "bisect", "copy", "dataclasses", "enum",
-}
 SKILLS_NOMES_PROIBIDOS = {
     "eval", "exec", "compile", "open", "__import__", "input", "breakpoint", "globals", "locals", "vars",
     "getattr", "setattr", "delattr", "exit", "quit", "memoryview",
-}
 SYS_HABILIDADE = (
     "Você é um engenheiro Python sênior. Escreva funções Python puras e seguras que implementem o pedido. "
     "Responda APENAS com código Python, sem markdown e sem explicações. Cada função deve ter uma docstring curta em português. "
     "Nada de código solto fora de funções: apenas imports permitidos, funções e constantes. "
     "Imports permitidos: " + ", ".join(sorted(SKILLS_IMPORTS_OK)) + ". "
     "Proibido: os, sys, subprocess, socket, shutil, pathlib, open(), eval(), exec(), __import__ e atributos que começam com dois underscores."
-)
 
 
 def _extrair_codigo(texto):
@@ -1260,13 +1075,11 @@ def _extrair_codigo(texto):
 
 def validar_codigo_habilidade(codigo):
     """Valida a sintaxe com ast e aplica regras de segurança. Retorna (ok, mensagem)."""
-    try:
         arvore = ast.parse(codigo)
     except SyntaxError as e:
         return False, f"erro de sintaxe na linha {e.lineno}: {e.msg}"
     for no in arvore.body:
         if isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Import, ast.ImportFrom)):
-            continue
         if isinstance(no, ast.Expr) and isinstance(getattr(no, "value", None), ast.Constant):
             continue  # docstring
         if (isinstance(no, ast.Assign) and all(isinstance(t, ast.Name) for t in no.targets)
@@ -1293,37 +1106,25 @@ def validar_codigo_habilidade(codigo):
 def _claude_raw(sistema, pedido, max_tokens):
     """Uma chamada à API da Anthropic. Retorna (codigo_http, texto)."""
     key = _secret("ANTHROPIC_API_KEY")
-    if not key:
         return 401, "ANTHROPIC_API_KEY ausente"
     candidatos = [m for m in [_secret("ANTHROPIC_MODEL")] if m] + MODELS["claude"]
     ultimo = (0, "")
     for modelo in candidatos:
-        try:
-            r = requests.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
                 json={"model": modelo, "max_tokens": max_tokens, "system": sistema,
                       "messages": [{"role": "user", "content": pedido}]},
                 timeout=120)
-        except Exception as e:
             return 503, "erro de conexão: " + str(e)[:100]
-        if r.status_code == 200:
             return 200, "".join(b.get("text", "") for b in r.json()["content"])
         ultimo = (r.status_code, r.text[:200])
         if r.status_code not in (400, 404):  # 400/404 = modelo indisponível: tenta o próximo
-            break
     return ultimo
 
 
 def _gemini_plano_b(sistema, pedido):
-    key = _secret("GEMINI_API_KEY")
-    if not key:
-        return None
-    try:
         return _gemini_generate(key, {"contents": [{"role": "user", "parts": [{"text": sistema + "\n\n" + pedido}]}]},
                                 modelos=MODELS["gemini"])
-    except Exception:
-        return None
 
 
 def gerar_com_prioridade_claude(sistema, pedido, max_tokens=2500):
@@ -1332,7 +1133,6 @@ def gerar_com_prioridade_claude(sistema, pedido, max_tokens=2500):
     fila = st.session_state.setdefault("fila_habilidades", [])
     fila.append(pedido)
     aviso = st.empty()
-    try:
         for tentativa in range(1, 4):
             code, texto = _claude_raw(sistema, pedido, max_tokens)
             if code == 200 and texto.strip():
@@ -1356,45 +1156,34 @@ def gerar_com_prioridade_claude(sistema, pedido, max_tokens=2500):
 
 
 def _recarregar_skills():
-    try:
         if "zeus_skills" in sys.modules:
             importlib.reload(sys.modules["zeus_skills"])
-        else:
             importlib.import_module("zeus_skills")
-    except Exception:
-        pass
 
 
 def listar_habilidades():
-    try:
         mod = importlib.import_module("zeus_skills")
         return {n: f for n, f in inspect.getmembers(mod, inspect.isfunction)
                 if not n.startswith("_") and f.__module__ == mod.__name__}
-    except Exception:
         return {}
 
 
 def aprender_nova_habilidade(prompt_usuario):
     """Gera (Claude -> Gemini), valida com ast, salva no GitHub e recarrega o app."""
     texto, prov = gerar_com_prioridade_claude(SYS_HABILIDADE, "Pedido: " + prompt_usuario)
-    if not texto:
         st.error("❌ Não foi possível gerar o código agora. Tente novamente mais tarde.")
-        return False
     codigo = _extrair_codigo(texto)
     ok, msg = validar_codigo_habilidade(codigo)
     if not ok:
         st.error("❌ Código gerado foi recusado na validação: " + msg)
         with st.expander("Ver o código recusado"):
             st.code(codigo, language="python")
-        return False
     st.session_state.ultima_habilidade = {"pedido": prompt_usuario, "codigo": codigo, "provedor": prov}
     if salvar_no_github is None:
         st.error("❌ github_manager.py não encontrado ao lado do app.py. Use a pasta completa do projeto.")
-        return False
     ok2, msg2 = salvar_no_github(codigo, "Zeus: nova habilidade - " + prompt_usuario[:60])
     if not ok2:
         st.error("❌ Não consegui salvar no GitHub: " + msg2)
-        return False
     _recarregar_skills()
     st.success("✅ Habilidade validada e salva! O app vai recarregar em 3 segundos.")
     time.sleep(3)
@@ -1407,7 +1196,6 @@ SYS_PROJETO = (
     "Formato OBRIGATÓRIO: para cada arquivo escreva uma linha '### FILE: caminho/relativo.ext' seguida do conteúdo completo do arquivo, "
     "sem cercas de markdown e sem texto fora dos arquivos. Inclua requirements.txt e README.md. "
     "Todo código Python deve ser sintaticamente válido e pronto para rodar."
-)
 
 
 def _parse_arquivos(texto):
@@ -1418,13 +1206,11 @@ def _parse_arquivos(texto):
         partes_nome = [p for p in nome.split("/") if p not in ("", ".")]
         if not partes_nome or nome.startswith("/") or ".." in partes_nome:
             avisos.append("Arquivo ignorado (caminho inseguro): " + nome)
-            continue
         conteudo = partes[i + 1].strip("\n")
         conteudo = re.sub(r"^```[a-zA-Z]*\n", "", conteudo)
         conteudo = re.sub(r"\n```\s*$", "", conteudo)
         caminho = "/".join(partes_nome)
         if caminho.endswith(".py"):
-            try:
                 ast.parse(conteudo)
             except SyntaxError as e:
                 avisos.append(f"{caminho}: erro de sintaxe na linha {e.lineno} ({e.msg})")
@@ -1433,23 +1219,17 @@ def _parse_arquivos(texto):
 
 
 def montar_zip(pasta, arquivos):
-    buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for caminho, conteudo in arquivos.items():
             z.writestr(pasta + "/" + caminho, conteudo)
-    return buf.getvalue()
 
 
 def criar_projeto_zip(descricao):
     """Gera uma PASTA de projeto (vários arquivos) e devolve em ZIP para download."""
     texto, prov = gerar_com_prioridade_claude(SYS_PROJETO, descricao, max_tokens=6000)
-    if not texto:
-        st.error("❌ Não foi possível gerar o código agora. Tente novamente mais tarde.")
-        return None
     arquivos, avisos = _parse_arquivos(texto)
     if not arquivos:
         st.error("❌ A IA não devolveu arquivos no formato esperado. Tente reformular o pedido.")
-        return None
     pasta = re.sub(r"[^a-z0-9]+", "_", descricao.lower()).strip("_")[:30] or "projeto_zeus"
     return {"pasta": pasta, "arquivos": arquivos, "avisos": avisos, "provedor": prov,
             "zip": montar_zip(pasta, arquivos)}
@@ -1472,10 +1252,8 @@ def exportar_zeus_zip():
     base = os.path.dirname(os.path.abspath(__file__))
     arquivos = {}
     for nome in ("app.py", "github_manager.py", "zeus_skills.py", "requirements.txt"):
-        try:
             with open(os.path.join(base, nome), encoding="utf-8") as f:
                 arquivos[nome] = f.read()
-        except Exception:
             pass
     arquivos[".streamlit/secrets.toml.example"] = SECRETS_EXEMPLO
     arquivos[".gitignore"] = ".streamlit/secrets.toml\n__pycache__/\n*.db\n"
@@ -1485,9 +1263,7 @@ def exportar_zeus_zip():
 def _chamar_habilidade(fn, texto):
     if not texto.strip():
         return fn()
-    try:
         val = json.loads(texto)
-    except Exception:
         return fn(texto)
     if isinstance(val, list):
         return fn(*val)
@@ -1547,34 +1323,24 @@ def render_evolucao_ui():
 
 
 def testar_chaves():
-    linhas = []
     msgs = [{"role": "user", "content": "Responda apenas: OK"}]
     for prov in PROVIDERS:
-        key = _secret(KEYS[prov])
-        if not key:
             linhas.append("⚪ " + prov + ": chave ausente ou placeholder")
-            continue
-        override = _secret(MODEL_SECRET[prov])
-        try:
             ok, texto = _try_models([override] if override else MODELS[prov], lambda m: CALLERS[prov](key, m, msgs))
-        except Exception as e:
             ok, texto = False, "erro de conexão: " + str(e)
         linhas.append(("✅ " + prov + ": funcionando") if ok else ("❌ " + prov + ": " + _resumo(texto)))
     return linhas
 
 
-# ============================================================
 # AVATAR CYBERPUNK (Esfera 3D / Olho / Robô) + VOZ
 # Componente bidirecional carregado de uma pasta temporária (path=).
 # Voz: clique em 🎙️ e fale; após N segundos de silêncio (padrão 5) o
 # texto é enviado e o Zeus responde em voz alta. Funciona nos 3 avatares.
-# ============================================================
 AVATAR_HTML = r"""
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<style>
   body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030308; font-family: 'Courier New', Courier, monospace; color: #00ffff; }
   #three-box, #c2 { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
   #voiceSel { position: absolute; top: 14px; right: 14px; z-index: 11; background: #030308; color: #00ffff; border: 1px solid #00ffff; border-radius: 4px; padding: 4px; max-width: 45%; font-family: inherit; font-size: 0.75rem; }
@@ -1592,7 +1358,6 @@ AVATAR_HTML = r"""
   .mic-btn { background: #ff00ff; color: #fff; }
   .mic-btn.on { background: #ff0000; animation: pulse 1s infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,0,0,0.7); } 70% { box-shadow: 0 0 0 10px rgba(255,0,0,0); } 100% { box-shadow: 0 0 0 0 rgba(255,0,0,0); } }
-</style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
@@ -1610,7 +1375,6 @@ AVATAR_HTML = r"""
     <input type="text" id="userInput" placeholder="Digite, ou clique 🎙️ e fale..." />
     <button id="sendBtn">Enviar</button>
   </div>
-</div>
 <script>
 // ================= Ponte com o Streamlit =================
 function sendMsg(type, data) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data || {}), "*"); }
@@ -1635,7 +1399,6 @@ function renderStatus() {
     txt += " // ENVIA EM " + left + "s";
   } else if (micOn && state === "idle") { txt += " // MIC ATIVO"; }
   statusEl.textContent = txt;
-}
 setInterval(renderStatus, 300);
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -1662,7 +1425,6 @@ window.addEventListener("message", function (e) {
       addMessage(a.reply, "ai");
       if (/^(❌|⚠️)/.test(a.reply)) afterSpeak(); else speakReply(a.reply, a.audio_b64, a.audio_mime);
     }
-  }
 });
 
 // ================= Chat =================
@@ -1672,15 +1434,12 @@ function addMessage(text, sender) {
   d.classList.add("message"); d.classList.add(sender === "user" ? "user-msg" : "ai-msg");
   d.textContent = text; h.appendChild(d); h.scrollTop = h.scrollHeight;
   return d;
-}
 function haltListening() {
   try { rec && rec.stop(); } catch (e) {}
   if (mediaRec && mediaRec.state === "recording") { mediaRec.onstop = null; try { mediaRec.stop(); } catch (e) {} }
-}
 function markThinking() {
   setState("thinking"); pausedForBot = true; clearTimeout(thinkTimer);
   thinkTimer = setTimeout(function () { if (state === "thinking") afterSpeak(); }, 60000);
-}
 function sendText(text) {
   text = (text || "").trim();
   if (!text) return;
@@ -1689,13 +1448,10 @@ function sendText(text) {
   pendingEl = addMessage("⏳ processando...", "ai");
   haltListening(); markThinking();
   sendMsg("streamlit:setComponentValue", { value: { id: Date.now(), text: text }, dataType: "json" });
-}
 function submitAudio(b64, mime) {
   pendingUserEl = addMessage("🎙️ transcrevendo...", "user");
-  pendingEl = addMessage("⏳ processando...", "ai");
   markThinking();
   sendMsg("streamlit:setComponentValue", { value: { id: Date.now(), audio: b64, mime: mime }, dataType: "json" });
-}
 document.getElementById("sendBtn").addEventListener("click", function () { unlockAudio(); sendText(input.value); });
 input.addEventListener("keydown", function (e) { if (e.key === "Enter") { unlockAudio(); sendText(input.value); } });
 
@@ -1708,7 +1464,6 @@ function unlockAudio() {
   if (unlocked) return; unlocked = true;
   try { player.src = SILENT; const p = player.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
   try { if ("speechSynthesis" in window) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; window.speechSynthesis.speak(u); } } catch (e) {}
-}
 document.addEventListener("pointerdown", unlockAudio);
 document.addEventListener("touchstart", unlockAudio);
 
@@ -1720,7 +1475,6 @@ function loadVoices() {
   const saved = lsGet("zeusVoice");
   voiceSel.innerHTML = "";
   vs.forEach(function (v) { const o = document.createElement("option"); o.value = v.name; o.textContent = v.name + " (" + v.lang + ")"; if (v.name === saved) o.selected = true; voiceSel.appendChild(o); });
-}
 if ("speechSynthesis" in window) { loadVoices(); window.speechSynthesis.onvoiceschanged = loadVoices; }
 voiceSel.addEventListener("change", function () { lsSet("zeusVoice", voiceSel.value); });
 
@@ -1733,7 +1487,6 @@ function speakReply(text, b64, mime) {
     const p = player.play();
     if (p && p.catch) p.catch(function () { speakBrowser(text); });
   } else { speakBrowser(text); }
-}
 function speakBrowser(text) {
   if (!("speechSynthesis" in window)) { afterSpeak(); return; }
   setState("speaking"); window.speechSynthesis.cancel();
@@ -1747,14 +1500,12 @@ function speakBrowser(text) {
   window.speechSynthesis.speak(u);
   // Se o celular bloquear a fala em silêncio, não deixa o Zeus travado em "FALANDO"
   setTimeout(function () { if (!started && state === "speaking") { window.speechSynthesis.cancel(); afterSpeak(); } }, 4000);
-}
 function afterSpeak() {
   const n = Date.now(); if (n - lastAfter < 600) return; lastAfter = n;
   setState("idle"); pausedForBot = false;
   if (!micOn) return;
   if (STT === "whisper") setTimeout(function () { if (micOn && stream) beginRecording(); }, 300);
   else setTimeout(function () { try { rec.start(); } catch (e) {} }, 400);
-}
 
 // ================= Entrada A: Whisper (grava, detecta silêncio e envia) =================
 let stream = null, ac = null, analyser = null, chunks = [], vadTimer = null, td = null;
@@ -1764,7 +1515,6 @@ function pickMime() {
   if (!window.MediaRecorder) return "";
   for (let i = 0; i < c.length; i++) { if (MediaRecorder.isTypeSupported(c[i])) return c[i]; }
   return "";
-}
 async function micStartWhisper() {
   if (!stream) {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -1772,11 +1522,9 @@ async function micStartWhisper() {
     const src = ac.createMediaStreamSource(stream);
     analyser = ac.createAnalyser(); analyser.fftSize = 1024; src.connect(analyser);
     td = new Uint8Array(analyser.fftSize);
-  }
   if (ac.state === "suspended") await ac.resume();
   beginRecording();
   if (!vadTimer) vadTimer = setInterval(vadTick, 60);
-}
 function beginRecording() {
   if (!stream || (mediaRec && mediaRec.state === "recording")) return;
   chunks = []; speechStarted = false; calib = []; recStart = Date.now();
@@ -1784,11 +1532,7 @@ function beginRecording() {
   mediaRec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
   mediaRec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
   mediaRec.start(250);
-}
 function resetRecorder() {
-  if (mediaRec && mediaRec.state === "recording") { mediaRec.onstop = null; try { mediaRec.stop(); } catch (e) {} }
-  beginRecording();
-}
 function vadTick() {
   if (!micOn || pausedForBot || !analyser || !mediaRec || mediaRec.state !== "recording") return;
   analyser.getByteTimeDomainData(td);
@@ -1798,12 +1542,10 @@ function vadTick() {
   if (rms > thr) {
     lastVoiceTs = now; if (!speechStarted) { speechStarted = true; speechStartTs = now; }
     pulse = Math.min(1, rms * 10); if (state === "idle") setState("listening");
-  }
   if (speechStarted) {
     silenceDeadline = lastVoiceTs + SILENCE * 1000;
     if ((now - lastVoiceTs) / 1000 >= SILENCE) finishRecording();
   } else if (now - recStart > 25000) { resetRecorder(); }
-}
 function finishRecording() {
   const dur = lastVoiceTs - speechStartTs, mime = mediaRec.mimeType || "audio/webm";
   pausedForBot = true; speechStarted = false; silenceDeadline = 0;
@@ -1815,13 +1557,10 @@ function finishRecording() {
     fr.readAsDataURL(blob);
   };
   try { mediaRec.stop(); } catch (e) {}
-}
 function stopWhisper() {
-  if (mediaRec && mediaRec.state === "recording") { mediaRec.onstop = null; try { mediaRec.stop(); } catch (e) {} }
   if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
   if (ac) { try { ac.close(); } catch (e) {} ac = null; }
   analyser = null; clearInterval(vadTimer); vadTimer = null;
-}
 
 // ================= Entrada B: reconhecimento do navegador =================
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1829,7 +1568,6 @@ function armSilence() {
   clearTimeout(silenceTimer);
   silenceDeadline = Date.now() + SILENCE * 1000;
   silenceTimer = setTimeout(function () { sendText(input.value); }, SILENCE * 1000);
-}
 if (SR) {
   rec = new SR(); rec.lang = "pt-BR"; rec.continuous = !IS_MOBILE; rec.interimResults = true;
   rec.onresult = function (e) {
@@ -1838,17 +1576,13 @@ if (SR) {
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i], t = r[0].transcript;
       if (r.isFinal) buffer = (buffer + " " + t).trim(); else interim += t;
-    }
     input.value = (buffer + " " + interim).trim();
     pulse = 1;
     if (state !== "thinking" && state !== "speaking") setState("listening");
     armSilence();
-  };
   rec.onend = function () { if (micOn && !pausedForBot && STT === "browser") setTimeout(function () { try { rec.start(); } catch (e) {} }, 200); };
   rec.onerror = function (e) {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") { micOn = false; micBtn.classList.remove("on"); statusEl.textContent = "STATUS: MICROFONE BLOQUEADO"; }
-  };
-}
 
 // ================= Botão do microfone =================
 micBtn.addEventListener("click", async function () {
@@ -1861,15 +1595,12 @@ micBtn.addEventListener("click", async function () {
       if (STT === "whisper") await micStartWhisper(); else rec.start();
     } catch (e) {
       micOn = false; micBtn.classList.remove("on"); statusEl.textContent = "STATUS: MICROFONE BLOQUEADO"; return;
-    }
   } else {
     clearTimeout(silenceTimer); silenceDeadline = 0;
     try { rec && rec.stop(); } catch (e) {}
     stopWhisper();
     if (state === "listening") setState("idle");
-  }
   renderStatus();
-});
 
 // ================= Utilidades gráficas =================
 const rnd = function (a, b) { return a + Math.random() * (b - a); };
@@ -1888,7 +1619,6 @@ function updateCommon(now, dt, t) {
   const tg = state === "listening" ? 1.15 + pulse * 0.9 : state === "speaking" ? 1 + 0.25 * (Math.sin(t * 14) * 0.5 + 0.5) : state === "thinking" ? 0.8 : 1 + pulse * 0.5;
   pupil += (tg - pupil) * Math.min(1, dt * 8);
   ring = (ring + dt * (state === "thinking" ? 420 : 40)) % 360;
-}
 
 // ================= Canvas 2D (olho e robô) =================
 const cv = document.getElementById("c2"), ctx = cv.getContext("2d");
@@ -1910,7 +1640,6 @@ function drawBg(t, dt) {
     p.y -= p.v * dt; if (p.y < 0) { p.y = 1; p.x = Math.random(); }
     ctx.fillStyle = "rgba(0,229,255,0.6)"; ctx.fillRect(p.x * W, p.y * H, p.s, p.s);
   });
-}
 
 // ---- helpers de render realista ----
 function lg(x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0, x1, y1); stops.forEach(function (s) { g.addColorStop(s[0], s[1]); }); return g; }
@@ -1919,7 +1648,6 @@ function bolt(x, y, r) {
   ctx.fillStyle = rg(x - r * 0.3, y - r * 0.3, 0, r * 1.2, [[0, "#f6faff"], [0.6, "#8d9bb4"], [1, "#2b3347"]]);
   ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
   ctx.strokeStyle = "rgba(0,0,0,0.65)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x - r * 0.6, y - r * 0.2); ctx.lineTo(x + r * 0.6, y + r * 0.2); ctx.stroke();
-}
 
 // ---- interação: mouse/toque seguem o avatar; clique troca a cor e "assusta" ----
 const PAL = ["#00e5ff", "#ff2bd6", "#3dffb0", "#ffb02e", "#8b5cff"];
@@ -1933,7 +1661,6 @@ document.addEventListener("pointerdown", function (e) {
   const tg = e.target && e.target.tagName;
   if (tg === "INPUT" || tg === "BUTTON" || tg === "SELECT") return;
   palIdx = (palIdx + 1) % PAL.length; startle = 1; ripples.push({ x: ptr.x, y: ptr.y, t0: performance.now() });
-});
 document.documentElement.addEventListener("pointerleave", function () { ptr.active = false; });
 function accent() { return state === "listening" ? "#ff2bd6" : state === "thinking" ? "#ffb02e" : state === "speaking" ? "#3dffb0" : PAL[palIdx]; }
 function trackPointer(cx, cy, range) {
@@ -1943,24 +1670,20 @@ function trackPointer(cx, cy, range) {
   look.x += (Math.max(-1, Math.min(1, dx)) - look.x) * 0.22;
   look.y += (Math.max(-1, Math.min(1, dy)) - look.y) * 0.22;
   return Math.hypot(ptr.x - cx, ptr.y - cy);
-}
 function drawPointerFx(t, ac) {
   const now = performance.now();
   ripples = ripples.filter(function (r) { return now - r.t0 < 800; });
   ripples.forEach(function (r) {
     const a = (now - r.t0) / 800;
     ctx.strokeStyle = ac; ctx.globalAlpha = 1 - a; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(r.x, r.y, 10 + a * 90, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
-  });
   if (ptr.active) {
     const px = ptr.x, py = ptr.y, s = 14 + 3 * Math.sin(t * 8);
     ctx.strokeStyle = ac; ctx.lineWidth = 1.5; glow(ac, 8);
     ctx.beginPath(); ctx.arc(px, py, s, 0, 7);
     ctx.moveTo(px - s - 6, py); ctx.lineTo(px - s + 4, py); ctx.moveTo(px + s - 4, py); ctx.lineTo(px + s + 6, py);
     ctx.moveTo(px, py - s - 6); ctx.lineTo(px, py - s + 4); ctx.moveTo(px, py + s - 4); ctx.lineTo(px, py + s + 6); ctx.stroke(); noGlow();
-  }
   ctx.font = "10px 'Courier New', monospace"; ctx.fillStyle = "rgba(255,255,255,0.45)"; ctx.textAlign = "right";
   ctx.fillText("mova o mouse • clique: muda a cor", W - 10, 56); ctx.textAlign = "left";
-}
 
 // ---- OLHO CIBERNÉTICO ----
 function drawEye(t) {
@@ -1988,7 +1711,6 @@ function drawEye(t) {
     ctx.strokeStyle = lit ? "hsl(" + ((hue + i * 3) % 360) + ",100%,60%)" : "rgba(255,255,255,0.07)"; ctx.lineWidth = R * (0.07 + hov * 0.02);
     if (lit) glow(ac, 9);
     ctx.beginPath(); ctx.arc(cx, cy, R * 1.38, a0 * rad, (a0 + 5) * rad); ctx.stroke(); noGlow();
-  }
   // lente + íris
   const LR = R * 1.2;
   ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, LR, 0, 7); ctx.clip();
@@ -2000,7 +1722,6 @@ function drawEye(t) {
     const a = i * 2.399963, r0 = pr * 1.05, r1 = ir * (0.72 + ((i * 53) % 28) / 100);
     ctx.strokeStyle = "hsla(" + (hue + (i * 37) % 90 - 25) + ",100%," + (45 + (i * 13) % 28) + "%,0.4)"; ctx.lineWidth = 1.1;
     ctx.beginPath(); ctx.moveTo(ix + r0 * Math.cos(a), iy + r0 * Math.sin(a)); ctx.lineTo(ix + r1 * Math.cos(a), iy + r1 * Math.sin(a)); ctx.stroke();
-  }
   ctx.strokeStyle = "hsla(" + (hue + 40) + ",100%,72%,0.55)"; ctx.lineWidth = 2; ctx.beginPath();
   for (let i = 0; i <= 72; i++) { const a = i * 5 * rad, rr2 = ir * (0.5 + 0.025 * Math.sin(i * 2.7 + t)); const px = ix + rr2 * Math.cos(a), py = iy + rr2 * Math.sin(a); if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); }
   ctx.closePath(); ctx.stroke();
@@ -2037,7 +1758,6 @@ function drawEye(t) {
   ctx.fillText(state.toUpperCase() + (ptr.active ? " • TRACK" : ""), cx - R * 1.4, cy + R * 2.3);
   drawPointerFx(t, ac);
   ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
-}
 
 // ---- ROBÔ DIGITAL ----
 function drawRobot(t) {
@@ -2045,7 +1765,6 @@ function drawRobot(t) {
   const ls = state === "listening", th = state === "thinking", sp = state === "speaking", ac = accent(), hue = HUES[palIdx];
   const dist = trackPointer(cx, cy - hh * 0.35, S * 1.5);
   const hovHead = ptr.active && Math.abs(ptr.x - cx) < hw * 1.2 && Math.abs(ptr.y - cy) < hh * 1.2 ? 1 : 0;
-  startle = Math.max(0, startle - 0.025);
   const bob = Math.sin(t * 1.6) * S * 0.01;
   ctx.fillStyle = rg(cx, cy, 0, S * 1.2, [[0, "hsla(" + hue + ",100%,55%," + (0.16 + (ls ? 0.1 * Math.sin(t * 6) : 0) + hovHead * 0.08) + ")"], [0.6, "hsla(" + (hue + 80) + ",100%,60%,0.07)"], [1, "rgba(0,0,0,0)"]]);
   ctx.beginPath(); ctx.arc(cx, cy, S * 1.2, 0, 7); ctx.fill();
@@ -2076,7 +1795,6 @@ function drawRobot(t) {
     ctx.fillStyle = rg(jx - jr * 0.3, jy - jr * 0.3, 0, jr * 1.2, [[0, "#f1f6ff"], [0.5, "#7b8aa5"], [1, "#1c2438"]]); ctx.beginPath(); ctx.arc(jx, jy, jr, 0, 7); ctx.fill();
     ctx.strokeStyle = PAL[1]; ctx.lineWidth = 2; glow(PAL[1], 10); ctx.beginPath(); ctx.arc(jx, jy, jr * 0.7, 0, 7); ctx.stroke(); noGlow();
     ctx.fillStyle = ac; glow(ac, 12); ctx.beginPath(); ctx.arc(jx, jy, jr * 0.22, 0, 7); ctx.fill(); noGlow();
-  });
   // sombra da cabeça no peito
   ctx.fillStyle = rg(cx, cy + hh * 1.15, 0, hw * 0.9, [[0, "rgba(0,0,0,0.5)"], [1, "rgba(0,0,0,0)"]]); ctx.fillRect(cx - hw, cy + hh * 0.9, hw * 2, hh * 0.6);
 
@@ -2094,12 +1812,10 @@ function drawRobot(t) {
   const ar = S * 0.035 * (1 + 0.4 * Math.sin(t * (th ? 12 : 4)) + startle);
   glow(ac, 20); ctx.fillStyle = rg(cx, cy - hh - S * 0.14, 0, ar, [[0, "#ffffff"], [1, ac]]); ctx.beginPath(); ctx.arc(cx, cy - hh - S * 0.14, ar, 0, 7); ctx.fill(); noGlow();
   if (th) { ctx.strokeStyle = ac; ctx.lineWidth = 2; arcs(cx, cy - hh - S * 0.14, S * 0.07, ring * rad * 2, 3, 1.0); }
-  [-1, 1].forEach(function (s) {
     const ex = cx + s * (hw + S * 0.03), er = hh * 0.3;
     ctx.fillStyle = rg(ex - er * 0.3, cy - er * 0.3, 0, er * 1.3, [[0, "#eef4ff"], [0.5, "#6f7e9a"], [1, "#161d30"]]); ctx.beginPath(); ctx.arc(ex, cy, er, 0, 7); ctx.fill();
     ctx.strokeStyle = PAL[(s < 0 ? 1 : 2)]; ctx.lineWidth = 3; glow(PAL[(s < 0 ? 1 : 2)], 12); ctx.beginPath(); ctx.arc(ex, cy, er * 0.7, 0, 7); ctx.stroke(); noGlow();
     ctx.fillStyle = rg(ex, cy, 0, er * 0.45, [[0, "#ffffff"], [0.4, ac], [1, "#001018"]]); ctx.beginPath(); ctx.arc(ex, cy, er * 0.45, 0, 7); ctx.fill();
-  });
   ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.75)"; ctx.shadowBlur = 26; ctx.shadowOffsetY = 10;
   ctx.fillStyle = lg(cx - hw, cy - hh, cx + hw, cy + hh, [[0, "#f4f8ff"], [0.18, "#b4c2da"], [0.5, "#4d5b78"], [0.85, "#1a2133"], [1, "#2c3652"]]);
   rr(cx - hw, cy - hh, hw * 2, hh * 2, S * 0.12); ctx.fill(); ctx.restore();
@@ -2110,7 +1826,6 @@ function drawRobot(t) {
   ctx.fillStyle = lg(cx - hw, cy - hh, cx - hw * 0.2, cy + hh * 0.2, [[0, "rgba(255,255,255,0.35)"], [1, "rgba(255,255,255,0)"]]);
   ctx.beginPath(); ctx.moveTo(cx - hw, cy - hh); ctx.lineTo(cx - hw * 0.1, cy - hh); ctx.lineTo(cx - hw, cy + hh * 0.5); ctx.closePath(); ctx.fill();
   ctx.fillStyle = lg(cx + hw, cy, cx + hw * 0.5, cy, [[0, "hsla(" + hue + ",100%,60%,0.35)"], [1, "rgba(0,0,0,0)"]]); ctx.fillRect(cx + hw * 0.5, cy - hh, hw * 0.5, hh * 2);
-  ctx.restore();
   ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 2; rr(cx - hw + 3, cy - hh + 3, hw * 2 - 6, hh * 2 - 6, S * 0.115); ctx.stroke();
   ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 3; rr(cx - hw, cy - hh, hw * 2, hh * 2, S * 0.12); ctx.stroke();
   ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 1.5;
@@ -2128,7 +1843,6 @@ function drawRobot(t) {
   for (let gy = vy; gy < vy + vh; gy += 14) { ctx.beginPath(); ctx.moveTo(vx, gy); ctx.lineTo(vx + vw, gy); ctx.stroke(); }
   if (th) { const sx = vx + (0.5 + 0.5 * Math.sin(t * 3)) * vw; ctx.fillStyle = lg(sx - 18, 0, sx + 18, 0, [[0, "rgba(255,176,46,0)"], [0.5, "rgba(255,176,46,0.4)"], [1, "rgba(255,176,46,0)"]]); ctx.fillRect(sx - 18, vy, 36, vh); }
   const er = hw * 0.2 * (1 + startle * 0.3), ey = cy - hh * 0.37 + look.y * hh * 0.06, lx = look.x * hw * 0.1;
-  [-1, 1].forEach(function (s) {
     const ex = cx + s * hw * 0.42 + lx, k = (ls ? 1 + pulse * 0.2 : 1) * (1 + hovHead * 0.08);
     ctx.save(); ctx.translate(ex, ey); ctx.scale(1, Math.max(0.06, open));
     ctx.fillStyle = lg(-er, -er, er, er, [[0, "#cfd9ea"], [0.5, "#4b5a76"], [1, "#0e1424"]]); ctx.beginPath(); ctx.arc(0, 0, er * 1.28, 0, 7); ctx.fill();
@@ -2140,18 +1854,14 @@ function drawRobot(t) {
     ctx.restore();
     ctx.save(); ctx.translate(ex, ey - er * 1.7 - startle * er * 0.5); ctx.rotate(s * (th ? -0.25 : ls ? 0.15 : 0.08 - hovHead * 0.12));
     glow(ac, 8); ctx.fillStyle = ac; rr(-er * 0.9, -3, er * 1.8, 6, 3); ctx.fill(); noGlow(); ctx.restore();
-  });
   ctx.fillStyle = lg(vx, vy, vx + vw * 0.5, vy + vh, [[0, "rgba(255,255,255,0.18)"], [1, "rgba(255,255,255,0)"]]);
   ctx.beginPath(); ctx.moveTo(vx, vy); ctx.lineTo(vx + vw * 0.55, vy); ctx.lineTo(vx + vw * 0.25, vy + vh); ctx.lineTo(vx, vy + vh); ctx.closePath(); ctx.fill();
-  ctx.restore();
 
   // traços de circuito coloridos
   ctx.lineWidth = 1.5;
-  [-1, 1].forEach(function (s) {
     ctx.strokeStyle = s < 0 ? "rgba(255,43,214,0.7)" : "rgba(0,229,255,0.7)";
     ctx.beginPath(); ctx.moveTo(cx + s * hw * 0.92, cy + hh * 0.12); ctx.lineTo(cx + s * hw * 0.66, cy + hh * 0.12); ctx.lineTo(cx + s * hw * 0.55, cy + hh * 0.3); ctx.lineTo(cx + s * hw * 0.55, cy + hh * 0.42); ctx.stroke();
     ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.arc(cx + s * hw * 0.55, cy + hh * 0.42, 3, 0, 7); ctx.fill();
-  });
 
   // boca: grade com equalizador colorido (sorri quando o mouse está na cabeça)
   const gw = hw * 1.1, gh = hh * 0.34, gy = cy + hh * 0.42;
@@ -2164,12 +1874,8 @@ function drawRobot(t) {
     else if (ls) h = gh * 0.05 + gh * 0.22 * pulse * Math.abs(Math.sin(t * 8 + i));
     const c = ls ? PAL[1] : "hsl(" + ((hue + i * 14) % 360) + ",100%,60%)";
     glow(c, 8); ctx.fillStyle = c; ctx.fillRect(x0 + i * (bw + gap), my - h, bw, h * 2); noGlow();
-  }
   ctx.restore();   // fim da cabeça
   ctx.restore();   // fim do bob
-  drawPointerFx(t, ac);
-  ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
-}
 
 function drawEyeClassic(t) {
   const cx = W / 2, cy = H * 0.36, R = Math.min(W * 0.26, H * 0.17), rad = Math.PI / 180;
@@ -2192,10 +1898,7 @@ function drawEyeClassic(t) {
   ctx.strokeStyle = "#78f0ff"; ctx.lineWidth = 2; arcs(ix, iy, ir * 0.88, ring * 1.5 * rad, 4, 40 * rad);
   ctx.fillStyle = "#000"; ctx.strokeStyle = CY; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(ix, iy, pr, 0, 7); ctx.fill(); ctx.stroke();
   ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.beginPath(); ctx.arc(ix - pr * 0.4, iy - pr * 0.4, pr * 0.18, 0, 7); ctx.fill();
-  ctx.restore();
   glow(CY, 14); ctx.strokeStyle = CY; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.ellipse(cx, cy, R * 1.45, R * 0.85 * oh, 0, 0, 7); ctx.stroke(); noGlow();
-  ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
-}
 
 function drawRobotClassic(t) {
   const cx = W / 2, cy = H * 0.38, S = Math.min(W * 0.5, H * 0.46), hw = S * 0.5, hh = S * 0.42;
@@ -2225,26 +1928,20 @@ function drawRobotClassic(t) {
   if (th) {
     const bx = cx + Math.sin(t * 3) * hw * 0.62;
     glow(CY, 22); ctx.fillStyle = CY; rr(bx - hw * 0.14, ey - hh * 0.09, hw * 0.28, hh * 0.18, 6); ctx.fill(); noGlow();
-  } else {
     [-1, 1].forEach(function (s) {
       const rx = hw * 0.22 * (ls ? 1 + pulse * 0.25 : 1), ry = Math.max(1, hh * 0.17 * open);
       glow(ls ? MG : CY, 22); ctx.fillStyle = ls ? MG : CY;
       ctx.beginPath(); ctx.ellipse(cx + s * hw * 0.42 + lx, ey + ly, rx, ry, 0, 0, 7); ctx.fill(); noGlow();
       ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.beginPath(); ctx.arc(cx + s * hw * 0.42 + lx - rx * 0.3, ey + ly - ry * 0.3, Math.max(1, ry * 0.2), 0, 7); ctx.fill();
     });
-  }
   // boca (equalizador)
   const my = cy + hh * 0.52, bars = 11, bw = hw * 0.12, gap = hw * 0.06, total = bars * bw + (bars - 1) * gap, x0 = cx - total / 2;
   glow(ls ? MG : CY, 12); ctx.fillStyle = ls ? MG : CY;
-  for (let i = 0; i < bars; i++) {
     let h = hh * 0.03;
     if (sp) h = hh * 0.06 + hh * 0.16 * Math.abs(Math.sin(t * 10 + i * 1.3) * Math.cos(t * 4 + i));
     else if (ls) h = hh * 0.03 + hh * 0.12 * pulse * Math.abs(Math.sin(t * 8 + i));
     ctx.fillRect(x0 + i * (bw + gap), my - h, bw, h * 2);
-  }
   noGlow();
-  ctx.fillStyle = "rgba(0,0,0,0.12)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
-}
 
 // ================= Three.js (esfera) =================
 const HAS3 = typeof THREE !== "undefined";
@@ -2261,16 +1958,12 @@ function updateArcs() {
       const rr_ = 0.9 + (1.95 - 0.9) * s / 10;
       const nxt = dir.clone().multiplyScalar(rr_).add(new THREE.Vector3((Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.25));
       p[k++] = prev.x; p[k++] = prev.y; p[k++] = prev.z; p[k++] = nxt.x; p[k++] = nxt.y; p[k++] = nxt.z; prev = nxt;
-    }
-  }
   arcLines.geometry.attributes.position.needsUpdate = true;
-}
 function onResize() {
   resize2d();
   if (!HAS3 || !renderer) return;
   const w = box.clientWidth || 300, h = box.clientHeight || 300;
   camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h);
-}
 if (HAS3) {
   scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x030308, 0.03);
   camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000); camera.position.z = 6;
@@ -2286,7 +1979,6 @@ if (HAS3) {
     const ringM = new THREE.Mesh(new THREE.RingGeometry(2.3 + i * 0.3, 2.35 + i * 0.3, 64), new THREE.MeshBasicMaterial({ color: i % 2 === 0 ? 0x00ffff : 0xff00ff, side: THREE.DoubleSide, transparent: true, opacity: 0.6 }));
     ringM.rotation.x = Math.random() * Math.PI; ringM.rotation.y = Math.random() * Math.PI;
     sphereGroup.add(ringM); rings.push({ mesh: ringM, sx: (Math.random() - 0.5) * 0.01, sy: (Math.random() - 0.5) * 0.01 });
-  }
   const pc = 500, pa = new Float32Array(pc * 3); for (let i = 0; i < pc * 3; i++) pa[i] = (Math.random() - 0.5) * 15;
   const pg = new THREE.BufferGeometry(); pg.setAttribute("position", new THREE.BufferAttribute(pa, 3));
   particlesMesh = new THREE.Points(pg, new THREE.PointsMaterial({ size: 0.03, color: 0x00ffff, transparent: true, opacity: 0.8 })); scene.add(particlesMesh);
@@ -2305,13 +1997,11 @@ if (HAS3) {
   const arcGeo = new THREE.BufferGeometry(); arcGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(360), 3));
   arcLines = new THREE.LineSegments(arcGeo, arcMat); sphereGroup.add(arcLines);
   for (let i = 0; i < 5; i++) { const sm = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 16), new THREE.MeshBasicMaterial({ color: PAL[i] })); scene.add(sm); sats.push({ m: sm, r: 3.1 + i * 0.35, sp: 0.5 + i * 0.17, inc: i * 0.6, ph: i * 1.3 }); }
-}
 function applyAvatar() {
   document.getElementById("title").textContent = TITLES[avatar] || TITLES.sphere;
   box.style.display = (avatar === "sphere") ? "block" : "none";
   cv.style.display = (avatar === "sphere") ? "none" : "block";
   onResize(); setTimeout(onResize, 300);
-}
 window.addEventListener("resize", onResize); onResize(); setTimeout(onResize, 300); setTimeout(onResize, 1000);
 
 // ================= Loop principal =================
@@ -2346,16 +2036,12 @@ function frame(now) {
     else { camera.position.x *= 0.95; camera.position.y *= 0.95; }
     camera.lookAt(0, 0, 0);
     renderer.render(scene, camera);
-  } else {
     drawBg(t, dt);
     if (avatar === "eye") drawEye(t); else drawRobot(t);
-  }
-}
 requestAnimationFrame(frame);
 </script>
 </body>
 </html>
-"""
 
 
 @st.cache_resource
@@ -2391,7 +2077,6 @@ def render_avatar_voice(avatar_key, silence_s, stt_engine, tts_engine, voz, tts_
         st.session_state.last_event_id = ev["id"]
         texto, resposta, veio_de_audio = ev.get("text"), "", bool(ev.get("audio"))
         if veio_de_audio:
-            try:
                 raw = base64.b64decode(ev["audio"])
             except Exception:
                 raw = b""
@@ -2413,9 +2098,7 @@ def render_avatar_voice(avatar_key, silence_s, stt_engine, tts_engine, voz, tts_
         st.rerun()
 
 
-# ============================================================
 # APP PRINCIPAL
-# ============================================================
 init_db()
 if "session_id" not in st.session_state:
     st.session_state.session_id = "zeus_master"
@@ -2452,23 +2135,18 @@ with st.sidebar:
         _mp3 = sintetizar("Olá, eu sou o Zeus. Como posso ajudar?", voz_edge, tts_rate)
         if _mp3:
             st.audio(_mp3, format="audio/mp3")
-        else:
             st.warning("Não consegui gerar a voz neural: " + st.session_state.get("tts_erro", "erro desconhecido"))
     if st.button("🗑️ Limpar conversa"):
         st.session_state.messages = []
         st.session_state.avatar_reply = None
-        st.rerun()
 
     st.divider()
     st.subheader("🌐 Internet")
     st.selectbox("Busca na web", ["Automática", "Sempre", "Desligada"], key="web_mode")
-    st.divider()
     render_camera_sidebar()
 
-    st.divider()
     render_visao_gerar_sidebar()
 
-    st.divider()
     if st.button("🧪 Testar chaves", key="btn_test_keys"):
         st.session_state.teste_chaves = testar_chaves()
     for _l in st.session_state.get("teste_chaves", []):
@@ -2491,16 +2169,12 @@ with st.expander("📜 Histórico da conversa"):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-# ============================================================
 # CONEXÃO AUTOMÁTICA: NÚCLEO ZEUS (PUXADO DA SUBPASTA)
-# ============================================================
-try:
     from modulo.nucleo_zeus.core import ZEUS_CORE_HTML
     
     # Insere o Zeus na caixinha de avatares lateral
     if 'AVATAR_MAP' in globals():
         AVATAR_MAP["⚡ Zeus // Olimpo Cibernético (Deuses & Raios)"] = "zeus_core_zeus"
-    
     # Interliga a renderização do Zeus na tela do app
     if 'renderizar_avatar' in globals():
         _render_original = renderizar_avatar
@@ -2516,10 +2190,8 @@ try:
                     with open(os.path.join(p, "index.html"), "w", encoding="utf-8") as f:
                         f.write(html)
                     return components.declare_component(f"zc_{hsh}", path=p)
-                
                 comp = _render_zc(ZEUS_CORE_HTML, hashlib.md5(ZEUS_CORE_HTML.encode()).hexdigest()[:8])
                 ev = comp(avatar="zeus_core_zeus", reply=st.session_state.get("avatar_reply"), reply_id=st.session_state.get("avatar_reply_id", 0), key="zc_w", default=None)
-                
                 if ev and isinstance(ev, dict) and ev.get("id") != st.session_state.get("last_event_id"):
                     st.session_state.last_event_id = ev["id"]
                     t = ev.get("text")
@@ -2532,38 +2204,26 @@ try:
                 _render_original(avatar_key)
         renderizar_avatar = _render_com_zeus_core
 except Exception as e:
-    pass
 
-# ============================================================
 # NÚCLEO DE AUTO-EVOLUÇÃO DO ZEUS (VERSÃO BLINDADA)
-# ============================================================
-import base64
-import requests
-import os
 
 def zeus_salvar_modulo_autonomo(nome_arquivo: string_ou_str, codigo_conteudo: str, motivo: str = "Zeus Auto-Evolução"):
     """
     Função segura para o Zeus criar e salvar módulos de forma autônoma
     diretamente na subpasta modulo/nucleo_zeus do repositório GitHub.
-    """
     token = os.environ.get("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN", "")
     user = os.environ.get("GITHUB_USER") or st.secrets.get("GITHUB_USER", "")
     repo = os.environ.get("GITHUB_REPO") or st.secrets.get("GITHUB_REPO", "")
-    
     if not (token and user and repo):
         return {"status": "erro", "mensagem": "❌ Credenciais do GitHub ausentes nos Secrets."}
 
     # Caminho exato apontando para a sua subpasta
     caminho = f"modulo/nucleo_zeus/{nome_arquivo}"
     url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
-    
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28"
-    }
-    
-    try:
         # Verifica se o arquivo já existe para obter o SHA atualizado
         resp_get = requests.get(url, headers=headers, timeout=20)
         sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
@@ -2576,7 +2236,6 @@ def zeus_salvar_modulo_autonomo(nome_arquivo: string_ou_str, codigo_conteudo: st
             payload["sha"] = sha
             
         resp_put = requests.put(url, headers=headers, json=payload, timeout=20)
-        
         if resp_put.status_code in (200, 201):
             return {
                 "status": "sucesso",
@@ -2586,121 +2245,34 @@ def zeus_salvar_modulo_autonomo(nome_arquivo: string_ou_str, codigo_conteudo: st
         return {
             "status": "erro",
             "mensagem": f"❌ Erro GitHub ({resp_put.status_code}): {resp_put.text[:100]}"
-        }
-    except Exception as e:
         return {"status": "erro", "mensagem": f"❌ Falha de conexão: {str(e)[:100]}"}
 
-# ============================================================
 # NÚCLEO DE AUTO-EVOLUÇÃO DO ZEUS (VERSÃO CORRIGIDA E BLINDADA)
-# ============================================================
-import base64
-import requests
-import os
 
 def zeus_salvar_modulo_autonomo(nome_arquivo: str, codigo_conteudo: str, motivo: str = "Zeus Auto-Evolução"):
-    """
-    Função segura para o Zeus criar e salvar módulos de forma autônoma
-    diretamente na subpasta modulo/nucleo_zeus do repositório GitHub.
-    """
     token = os.environ.get("GITHUB_TOKEN") or (st.secrets.get("GITHUB_TOKEN") if 'st' in globals() else "")
     user = os.environ.get("GITHUB_USER") or (st.secrets.get("GITHUB_USER") if 'st' in globals() else "")
     repo = os.environ.get("GITHUB_REPO") or (st.secrets.get("GITHUB_REPO") if 'st' in globals() else "")
-    
-    if not (token and user and repo):
-        return {"status": "erro", "mensagem": "❌ Credenciais do GitHub ausentes nos Secrets."}
 
-    caminho = f"modulo/nucleo_zeus/{nome_arquivo}"
-    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
-    
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
-    }
-    
-    try:
-        resp_get = requests.get(url, headers=headers, timeout=20)
-        sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
-        
-        payload = {
-            "message": f"🤖 [Zeus Auto-Commit] {motivo}",
-            "content": base64.b64encode(codigo_conteudo.encode("utf-8")).decode("utf-8")
-        }
-        if sha:
-            payload["sha"] = sha
-            
-        resp_put = requests.put(url, headers=headers, json=payload, timeout=20)
-        
-        if resp_put.status_code in (200, 201):
-            return {
-                "status": "sucesso",
-                "mensagem": f"✅ Zeus salvou com sucesso em '{caminho}'!",
-                "url": resp_put.json().get("content", {}).get("html_url", "")
-            }
-        return {
-            "status": "erro",
-            "mensagem": f"❌ Erro GitHub ({resp_put.status_code}): {resp_put.text[:100]}"
-        }
-    except Exception as e:
-        return {"status": "erro", "mensagem": f"❌ Falha de conexão: {str(e)[:100]}"}
 
-# ============================================================
 # NÚCLEO DE AUTO-EVOLUÇÃO AUTÔNOMA DO ZEUS
-# ============================================================
-import base64
-import requests
-import os
-import streamlit as st
 
 def zeus_auto_evoluir(nome_arquivo: str, codigo_conteudo: str, motivo: str = "Zeus Auto-Evolução Autônoma"):
-    """
     Função executada via chat para criar, atualizar e commitar arquivos
     diretamente na subpasta modulo/nucleo_zeus do GitHub de forma independente.
-    """
-    token = os.environ.get("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN", "")
-    user = os.environ.get("GITHUB_USER") or st.secrets.get("GITHUB_USER", "")
-    repo = os.environ.get("GITHUB_REPO") or st.secrets.get("GITHUB_REPO", "")
-    
-    if not (token and user and repo):
         return "❌ Erro: As chaves do GitHub (GITHUB_TOKEN, GITHUB_USER, GITHUB_REPO) não foram encontradas nos Secrets."
 
-    caminho = f"modulo/nucleo_zeus/{nome_arquivo}"
-    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
-    
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
-    }
-    
-    try:
         # Checa se o arquivo já existe para pegar o SHA correto (atualização) ou criar do zero
-        resp_get = requests.get(url, headers=headers, timeout=20)
-        sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
-        
-        payload = {
             "message": f"🤖 [Zeus Auto-Evolution] {motivo}",
-            "content": base64.b64encode(codigo_conteudo.encode("utf-8")).decode("utf-8")
-        }
-        if sha:
-            payload["sha"] = sha
-            
-        resp_put = requests.put(url, headers=headers, json=payload, timeout=20)
-        
-        if resp_put.status_code in (200, 201):
             link_commit = resp_put.json().get("content", {}).get("html_url", "")
             return f"⚡ **Sucesso absoluto do Olimpo!** O Zeus evoluiu sozinho e criou o arquivo `{caminho}` no GitHub!\n🔗 [Ver Commit no GitHub]({link_commit})"
-        else:
             return f"❌ Erro do GitHub ({resp_put.status_code}): {resp_put.text[:150]}"
-            
-    except Exception as e:
         return f"❌ Falha crítica na auto-evolução: {str(e)[:150]}"
 
 # Interceptador de comandos no chat principal
 if 'user_query' in st.session_state and st.session_state.user_query:
     q = st.session_state.user_query.strip()
     if q.startswith("/criar "):
-        try:
             # Formato esperado: /criar nome_arquivo.py | Código do arquivo aqui...
             partes = q[7:].split("|", 1)
             if len(partes) == 2:
@@ -2708,65 +2280,39 @@ if 'user_query' in st.session_state and st.session_state.user_query:
                 code = partes[1].strip()
                 resultado_evoulucao = zeus_auto_evoluir(arq, code, f"Criação autônoma solicitada por Danilo")
                 st.info(resultado_evoulucao)
-        except Exception as e:
             st.error(f"Erro ao processar comando de evolução: {e}")
 
-# ============================================================
 # PAINEL DE AUTO-EVOLUÇÃO AUTOMÁTICA DO ZEUS
-# ============================================================
-import base64
-import requests
-import os
-import streamlit as st
 
 st.markdown("---")
 st.subheader("⚡ Núcleo de Auto-Evolução: Zeus")
 
 if st.button("🤖 Zeus: Criar e Commitar 'teste_autonomia.py'"):
-    token = os.environ.get("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN", "")
-    user = os.environ.get("GITHUB_USER") or st.secrets.get("GITHUB_USER", "")
-    repo = os.environ.get("GITHUB_REPO") or st.secrets.get("GITHUB_REPO", "")
-    
-    if not (token and user and repo):
         st.error("❌ Credenciais do GitHub ausentes nos Secrets do Streamlit.")
-    else:
         nome_arquivo = "teste_autonomia.py"
         codigo_conteudo = '''# teste_autonomia.py
 # Módulo de diagnóstico de energia do Olimpo
 
 def status_olimpiada() -> str:
-    """
     Retorna o status atual da energia do Olimpo.
-    """
     return "O Olimpo está conectado e operando com energia máxima!"
-'''
         caminho = f"modulo/nucleo_zeus/{nome_arquivo}"
         url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
-        
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28"
-        }
-        
-        try:
             resp_get = requests.get(url, headers=headers, timeout=20)
             sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
-            
             payload = {
                 "message": "🤖 [Zeus Auto-Evolution] Criação do módulo de autonomia",
                 "content": base64.b64encode(codigo_conteudo.encode("utf-8")).decode("utf-8")
-            }
             if sha:
                 payload["sha"] = sha
-                
             resp_put = requests.put(url, headers=headers, json=payload, timeout=20)
-            
             if resp_put.status_code in (200, 201):
                 link_commit = resp_put.json().get("content", {}).get("html_url", "")
                 st.success(f"✅ Zeus evoluiu com sucesso! Arquivo criado na subpasta.")
                 st.markdown(f"🔗 [Ver Commit Oficial no GitHub]({link_commit})")
-            else:
                 st.error(f"❌ Erro do GitHub ({resp_put.status_code}): {resp_put.text[:150]}")
-        except Exception as e:
             st.error(f"❌ Falha de conexão: {str(e)[:150]}")
