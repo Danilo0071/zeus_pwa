@@ -259,7 +259,7 @@ def _resumo(text):
     return text[:120]
 
 
-def get_llm_response(session_id, prompt, model_choice, system=None, use_history=True):
+ddef get_llm_response(session_id, prompt, model_choice, system=None, use_history=True):
     """Retorna (ok, texto, provedor_usado, lista_de_erros)."""
     msgs = _normalize((get_recent_context(session_id) if use_history else []) + [{"role": "user", "content": prompt}])
     order = [model_choice] + [p for p in PROVIDERS if p != model_choice]
@@ -268,14 +268,14 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
         api_key = _secret(KEYS[prov])
         if not api_key:
             erros.append(f"{prov}: chave ausente")
+            continue
         override = _secret(MODEL_SECRET[prov])
         candidates = [override] if override else MODELS[prov]
-            ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
-            ok, text = False, f"erro de conexão: {e}"
+        ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
         if ok:
             return True, text or "(resposta vazia)", prov, erros
         erros.append(f"{prov}: {_resumo(text)}")
-    return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
+    return False, "❌ Nenhum modelo respondeu.", " - ".join(erros), erros
 
 
 def processar_prompt(prompt):
