@@ -194,11 +194,11 @@ def _call_claude(api_key, model, msgs, system=None):
 
 def _call_gemini(api_key, model, msgs, system=None, ver="v1"):
     contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in msgs]
-        f"https://generativelanguage.googleapis.com/{ver}/models/{model}:generateContent",
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        json={"systemInstruction": {"parts": [{"text": system or SYS_PROMPT}]}, "contents": contents},
-        parts = r.json()["candidates"][0]["content"]["parts"]
-        return 200, "".join(p.get("text", "") for p in parts)
+    url = f"https://generativelanguage.googleapis.com/{ver}/models/{model}:generateContent"
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    json={"systemInstruction": {"parts": [{"text": system or SYS_PROMPT}]}, "contents": contents}
+    parts = r.json()["candidates"][0]["content"]["parts"]
+    return 200, "".join(p.get("text", "") for p in parts)
 
 
 def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=None):
