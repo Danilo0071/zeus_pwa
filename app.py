@@ -2288,24 +2288,19 @@ if 'user_query' in st.session_state and st.session_state.user_query:
 st.markdown("---")
 st.subheader("⚡ Núcleo de Auto-Evolução: Zeus")
 
-if st.button("🤖 Zeus: Criar e Commitar 'teste_autonomia.py'"):
-        st.error("❌ Credenciais do GitHub ausentes nos Secrets do Streamlit.")
-        nome_arquivo = "teste_autonomia.py"
-        codigo_conteudo = '''# teste_autonomia.py
+if st.button("⚡ Zeus: Criar e Commitar 'teste_autonomia.py'"):
+    st.error("❌ Credenciais do GitHub ausentes nos Secrets do Streamlit.")
+    nome_arquivo = "teste_autonomia.py"
+    codigo_conteudo = '''# teste_autonomia.py
+def verificar_nucleo():
+    return "O núcleo quântico de Zeus está ativo, pensando e salvando sozinho!"
+'''
+
 # Módulo de diagnóstico de energia do Olimpo
 
 def status_olimpiada() -> str:
-    Retorna o status atual da energia do Olimpo.
+    # Retorna o status atual da energia do Olimpo.
     return "O Olimpo está conectado e operando com energia máxima!"
-        caminho = f"modulo/nucleo_zeus/{nome_arquivo}"
-        url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28"
-            resp_get = requests.get(url, headers=headers, timeout=20)
-            sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
-            payload = {
                 "message": "🤖 [Zeus Auto-Evolution] Criação do módulo de autonomia",
                 "content": base64.b64encode(codigo_conteudo.encode("utf-8")).decode("utf-8")
             if sha:
