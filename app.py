@@ -148,7 +148,6 @@ def _normalize(msgs):
     while out and out[0]["role"] != "user":
         out.pop(0)
     return out
-
 def _try_models(candidates, fn):
     last = ""
     for model in candidates:
@@ -162,9 +161,9 @@ def _try_models(candidates, fn):
                 continue
             break
         if "credit balance" in last.lower() or code in (401, 403, 429):
-        if code in (400, 404) + TRANSIENT:
-            continue  # próximo modelo
-        break
+            if code in (400, 404) + TRANSIENT:
+                continue  # próximo modelo
+            break
     return False, last
 
 
