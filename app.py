@@ -572,8 +572,9 @@ def zeus_tocar_musica(nome_musica: str) -> str:
 
 
 def render_avatar_core(avatar_key):
-    caminho_html = pathlib.Path(_file_).parent / "avatar_zeus.html"
-
+    pasta_atual = os.path.dirname(os.path.abspath(_file_))
+    caminho_html = os.path.join(pasta_atual, "avatar_zeus.html")
+    
     if caminho_html.exists():
         html_content = caminho_html.read_text(encoding="utf-8")
         components.html(html_content, height=650)
