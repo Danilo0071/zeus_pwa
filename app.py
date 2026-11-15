@@ -2589,3 +2589,57 @@ def zeus_salvar_modulo_autonomo(nome_arquivo: string_ou_str, codigo_conteudo: st
         }
     except Exception as e:
         return {"status": "erro", "mensagem": f"❌ Falha de conexão: {str(e)[:100]}"}
+
+# ============================================================
+# NÚCLEO DE AUTO-EVOLUÇÃO DO ZEUS (VERSÃO CORRIGIDA E BLINDADA)
+# ============================================================
+import base64
+import requests
+import os
+
+def zeus_salvar_modulo_autonomo(nome_arquivo: str, codigo_conteudo: str, motivo: str = "Zeus Auto-Evolução"):
+    """
+    Função segura para o Zeus criar e salvar módulos de forma autônoma
+    diretamente na subpasta modulo/nucleo_zeus do repositório GitHub.
+    """
+    token = os.environ.get("GITHUB_TOKEN") or (st.secrets.get("GITHUB_TOKEN") if 'st' in globals() else "")
+    user = os.environ.get("GITHUB_USER") or (st.secrets.get("GITHUB_USER") if 'st' in globals() else "")
+    repo = os.environ.get("GITHUB_REPO") or (st.secrets.get("GITHUB_REPO") if 'st' in globals() else "")
+    
+    if not (token and user and repo):
+        return {"status": "erro", "mensagem": "❌ Credenciais do GitHub ausentes nos Secrets."}
+
+    caminho = f"modulo/nucleo_zeus/{nome_arquivo}"
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    
+    try:
+        resp_get = requests.get(url, headers=headers, timeout=20)
+        sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
+        
+        payload = {
+            "message": f"🤖 [Zeus Auto-Commit] {motivo}",
+            "content": base64.b64encode(codigo_conteudo.encode("utf-8")).decode("utf-8")
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        resp_put = requests.put(url, headers=headers, json=payload, timeout=20)
+        
+        if resp_put.status_code in (200, 201):
+            return {
+                "status": "sucesso",
+                "mensagem": f"✅ Zeus salvou com sucesso em '{caminho}'!",
+                "url": resp_put.json().get("content", {}).get("html_url", "")
+            }
+        return {
+            "status": "erro",
+            "mensagem": f"❌ Erro GitHub ({resp_put.status_code}): {resp_put.text[:100]}"
+        }
+    except Exception as e:
+        return {"status": "erro", "mensagem": f"❌ Falha de conexão: {str(e)[:100]}"}
