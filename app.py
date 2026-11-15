@@ -35,12 +35,13 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # Importação dinâmica das habilidades geradas pelo Zeus e do gerenciador do GitHub
+try:
     import zeus_skills
 except Exception:
     pass
-    from github_manager import salvar_no_github
-    salvar_no_github = None
 
+from github_manager import salvar_no_github
+salvar_no_github = None
 # CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(page_title="Zeus 3.0", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
