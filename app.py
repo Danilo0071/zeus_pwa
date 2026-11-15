@@ -2761,27 +2761,38 @@ import datetime
 from typing import List, Dict, Any, Optional
 import requests
 
+
 def _obter_credenciais():
     try:
         import streamlit as st
+
         token = st.secrets.get("GITHUB_TOKEN")
         repo = st.secrets.get("GITHUB_REPO")
         if token and repo:
             return token, repo
     except Exception:
         pass
-    
+
     token = os.getenv("GITHUB_TOKEN")
     repo = os.getenv("GITHUB_REPO")
     return token, repo
 
+
 GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 
-def _github_api(path: str, method: str = "GET", data: Any = None, params: Optional[Dict[str, Any]] = None) -> Dict:
+
+def _github_api(
+    path: str,
+    method: str = "GET",
+    data: Any = None,
+    params: Optional[Dict[str, Any]] = None,
+) -> Dict:
     token, repo = _obter_credenciais()
     if not token or not repo:
-        raise RuntimeError("Variáveis GITHUB_TOKEN ou GITHUB_REPO não encontradas nos Secrets ou variáveis de ambiente.")
-    
+        raise RuntimeError(
+            "Variáveis GITHUB_TOKEN ou GITHUB_REPO não encontradas nos Secrets ou variáveis de ambiente."
+        )
+
     headers = {
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github.v3+json",
@@ -2792,17 +2803,23 @@ def _github_api(path: str, method: str = "GET", data: Any = None, params: Option
         raise RuntimeError(f"GitHub API error {resp.status_code}: {resp.text}")
     return resp.json()
 
+
 def _obter_sha_arquivo(caminho: str) -> Optional[str]:
     _, repo = _obter_credenciais()
     try:
-        meta = _github_api(f"/repos/{repo}/contents/{caminho}", params={"ref": GITHUB_BRANCH})
+        meta = _github_api(
+            f"/repos/{repo}/contents/{caminho}", params={"ref": GITHUB_BRANCH}
+        )
         return meta.get("sha")
     except RuntimeError as e:
         if "404" in str(e):
             return None
         raise
 
-def _criar_commit(caminho: str, conteudo: str, mensagem: str, sha: Optional[str]) -> None:
+
+def _criar_commit(
+    caminho: str, conteudo: str, mensagem: str, sha: Optional[str]
+) -> None:
     _, repo = _obter_credenciais()
     data = {
         "message": mensagem,
@@ -2813,15 +2830,19 @@ def _criar_commit(caminho: str, conteudo: str, mensagem: str, sha: Optional[str]
         data["sha"] = sha
     _github_api(f"/repos/{repo}/contents/{caminho}", method="PUT", data=data)
 
+
 def _coletar_logs_recentes(limit: int = 100) -> List[Dict]:
     _, repo = _obter_credenciais()
     try:
-        meta = _github_api(f"/repos/{repo}/contents/logs/uso.json", params={"ref": GITHUB_BRANCH})
+        meta = _github_api(
+            f"/repos/{repo}/contents/logs/uso.json", params={"ref": GITHUB_BRANCH}
+        )
         conteudo_decodificado = base64.b64decode(meta["content"]).decode("utf-8")
         logs = json.loads(conteudo_decodificado)
         return logs[-limit:]
     except Exception:
         return []
+
 
 def executar_ciclo_evolucao():
     """
@@ -2830,13 +2851,15 @@ def executar_ciclo_evolucao():
     """
     token, repo = _obter_credenciais()
     if not token or not repo:
-        raise RuntimeError("Variáveis GITHUB_TOKEN e GITHUB_REPO são obrigatórias nos Secrets do Streamlit.")
-        
+        raise RuntimeError(
+            "Variáveis GITHUB_TOKEN e GITHUB_REPO são obrigatórias nos Secrets do Streamlit."
+        )
+
     print("Iniciando ciclo de auto-evolução do Zeus...")
     logs = _coletar_logs_recentes()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     nome_arquivo_relatorio = f"relatorio_{timestamp}.md"
-    
+
     conteudo_relatorio = f"""# Relatório de Auto-Evolução - Zeus
 Data/Hora: {timestamp}
 
@@ -2850,22 +2873,23 @@ Data/Hora: {timestamp}
         caminho=nome_arquivo_relatorio,
         conteudo=conteudo_relatorio,
         mensagem=f"Zeus: auto-evolução registrada em {timestamp}",
-        sha=sha
+        sha=sha,
     )
     print(f"Sucesso! Relatório gravado em {nome_arquivo_relatorio}")
+
 
 # --- Bloco do Painel e Botão do Streamlit ---
 def renderizar_painel_auto_evolucao():
     import streamlit as st
+
     st.markdown("---")
     st.subheader("⚡ Painel de Auto-Evolução - Zeus")
     if st.button("🚀 Executar Ciclo de Auto-Evolução e Salvar no GitHub"):
         with st.spinner("Zeus acionando a API do GitHub e registrando evolução..."):
             try:
                 executar_ciclo_evolucao()
-                st.success("✅ Sucesso! O Zeus executou o ciclo e gravou o relatório lá no GitHub!")
+                st.success(
+                    "✅ Sucesso! O Zeus executou o ciclo e gravou o relatório lá no GitHub!"
+                )
             except Exception as e:
                 st.error(f"❌ Erro na execução: {e}")
-
-import zeus_evolucao
-zeus_evolucao.renderizar_painel_auto_evolucao()
