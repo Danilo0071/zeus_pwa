@@ -1,9 +1,11 @@
 # ============================================================
-# AVATAR: ZEUS // OLIMPO CIBERNÉTICO (3D E INTERATIVO)
-# Salve dentro da pasta: avatares_novo/zeus_olimpico.py
+# AVATAR: ZEUS // OLIMPO CIBERNÉTICO (ADAPTADO PARA O APP.PY)
 # ============================================================
+import streamlit.components.v1 as components
+import os
+import tempfile
 
-ZEUS_OLIMPICO_HTML = r"""
+AVATAR_HTML = r"""
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -129,3 +131,10 @@ animate();
 </body>
 </html>
 """
+
+def _avatar_component(_hash: str):
+    pasta = os.path.join(tempfile.gettempdir(), f"zeus_olimpo_{_hash}")
+    os.makedirs(pasta, exist_ok=True)
+    with open(os.path.join(pasta, "index.html"), "w", encoding="utf-8") as f:
+        f.write(AVATAR_HTML)
+    return components.declare_component(f"zeus_olimpo_{_hash}", path=pasta)
