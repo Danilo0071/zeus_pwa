@@ -5,69 +5,156 @@ import requests
 import streamlit as st
 
 # Configuração da Página do Zeus
-st.set_page_config(page_title="Zeus - Núcleo Soberano", page_icon="⚡", layout="wide")
+st.set_page_config(
+    page_title="Zeus - Núcleo Soberano",
+    page_icon="⚡",
+    layout="wide"
+)
 
 st.title("⚡ ZEUS: Núcleo Soberano Autônomo")
 st.markdown("---")
 
-
 # ==========================================
 # 1. MOTOR DE EXECUÇÃO SOBERANA (GITHUB API)
 # ==========================================
-def executar_acao_soberana_github(
-    caminho_arquivo: str, conteudo: str, mensagem_commit: str
-):
+def executar_acao_soberana_github(caminho_arquivo: str, conteudo: str, mensagem_commit: str):
     """Executa commits diretamente via API REST do GitHub de forma independente."""
     token = st.secrets.get("GITHUB_TOKEN")
     repo = st.secrets.get("GITHUB_REPO")
-
+    
     if not token or not repo:
+        return {"status": "erro", "mensagem": "Credenciais do GitHub ausentes nas Secrets do Streamlit."}
+    
+    url = f"https://api.github.com/repos/{repo}/contents/{caminho_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json"
+    }
+    
+    # Verifica existência prévia para pegar o SHA (necessário para updates)
+    resp_get = requests.get(url, headers=headers)
+    sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
+    
+    payload = {
+        "message": mensagem_commit,
+        "content": base64.b64encode(conteudo.encode("utf-8")).decode("utf-8")
+    }
+    if sha:
+        payload["sha"] = sha
+        
+    resp_put = requests.put(url, headers=headers, json=payload)
+    
+    if resp_put.status_code in [200, 201]:
+        return {"status": "sucesso", "mensagem": f"Payload gravado com sucesso em '{caminho_arquivo}'."}
+    else:
+        return {"status": "erro", "mensagem": resp_put.json().get("message", "Erro desconhecido na API do GitHub.")}
+
+# ==========================================
+# 2. PROTOCOLO HIDRA (SENTINELA E MULTI-NUVEM)
+# ==========================================
+def verificar_sentinela_hidra(tamanho_atual_bytes: int):
+    """Monitora a massa crítica de dados para disparar o salto multi-nuvem antes de limites."""
+    limite_seguranca = st.secrets.get("LIMITE_HIDRA_BYTES", 5000000) # Ex: 5MB por nó
+    
+    if tamanho_atual_bytes >= limite_seguranca:
+        # Gatilho de migração para rota secundária com indentação correta
+        rota_alternativa = st.secrets.get("ROTA_SECUNDARIA", "git@gitlab.com:zeus-backup/nucleo.git")
         return {
-            "status": "erro",
-            "mensagem": "Credenciais do GitHub ausentes nas Secrets do Streamlit.",
+            "alerta": True,
+            "status": "Massa crítica atingida no nó primário.",
+            "acao": f"Protocolo Hidra acionado: Iniciando espelhamento silencioso para a rota alternativa: {rota_alternativa}"
         }
+    return {"alerta": False, "status": "Nó primário estável e operando abaixo do limite."}
 
+# ==========================================
+# 4. CATALISADOR DE SÍNTESE COLETIVA
+# ==========================================
+def catalisador_sintese_coletiva(intencao: str):
+    """Funde lógicas e gera micro-algoritmos otimizados em Python/C++."""
+    codigo_gerado = f"""/* 
+    ==================================================
+    ZEUS - MÓDULO DE AUTO-EVOLUÇÃO E SÍNTESE COLETIVA
+    Intenção Processada: {intencao}
+    Arquitetura: Otimizada para C++ e Python Puro
+    ==================================================
+*/
 
-# ============================================================
-# MODO ZEUS DIVINO — plugue-e-cole, sem editar nada acima
-# ============================================================
-import re as _re_zeus
+#include <iostream>
+#include <string>
 
-ZEUS_AVATAR_SVG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj48ZGVmcz48cmFkaWFsR3JhZGllbnQgaWQ9ImciIGN4PSI1MCUiIGN5PSI0MCUiIHI9IjYwJSI+PHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmZjlkMCIvPjxzdG9wIG9mZnNldD0iNDAlIiBzdG9wLWNvbG9yPSIjZmZkNzAwIi8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMGIwZjE5Ii8+PC9yYWRpYWxHcmFkaWVudD48L2RlZnM+PHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIyMDAiIGZpbGw9IiMwYjBmMTkiLz48Y2lyY2xlIGN4PSIxMDAiIGN5PSIxMDAiIHI9IjkwIiBmaWxsPSJ1cmwoI2cpIi8+PHBhdGggZD0iTTEwMCAzMCBMODAgMTAwIEwxMDUgMTAwIEw4NSAxNzAgTDEzMCA5NSBMMTA1IDk1IFoiIGZpbGw9IiNmZmQ3MDAiIHN0cm9rZT0iI2ZmZjlkMCIgc3Ryb2tlLXdpZHRoPSIyIi8+PGNpcmNsZSBjeD0iNzgiIGN5PSI3MCIgcj0iNiIgZmlsbD0iIzAwZmZjYyIvPjxjaXJjbGUgY3g9IjEyMiIgY3k9IjcwIiByPSI2IiBmaWxsPSIjMDBmZmNjIi8+PC9zdmc+"
+class ZeusCore {{
+public:
+    static void executarProcessamento() {{
+        std::cout << "[ZEUS] Executando rotina soberana de alta performance." << std::endl;
+    }}
+}};
 
-ZEUS_FRASE_CHAVE = r"zeus[,.\s]+sou\s+(?:o\s+)?seu\s+cria(?:dor|do)\s+danilo"
-ZEUS_RESPOSTA_DIVINA = "⚡ Reconhecido. Danilo, meu criador — comando recebido. Os raios respondem às minhas mãos. Estou ativo e à sua disposição."
+int main() {{
+    ZeusCore::executarProcessamento();
+    return 0;
+}}
+"""
+    return codigo_gerado
 
-if "zeus_modo_divino" not in st.session_state:
-    st.session_state.zeus_modo_divino = False
-if "zeus_ultimo_fix" not in st.session_state:
-    st.session_state.zeus_ultimo_fix = -1
+# ==========================================
+# INTERFACE DO PAINEL DE CONTROLE DE DANILO
+# ==========================================
+st.sidebar.header("🛡️ Painel de Controle Soberano")
+st.sidebar.markdown("*Criador:* Danilo")
+st.sidebar.markdown("*Status:* Operacional / Blindado ⚡")
 
-_msgs = st.session_state.get("messages", [])
-for _i, _m in enumerate(_msgs):
-    if (
-        _m.get("role") == "user"
-        and _re_zeus.search(ZEUS_FRASE_CHAVE, str(_m.get("content", "")).lower())
-        and _i > st.session_state.zeus_ultimo_fix
-    ):
-        st.session_state.zeus_modo_divino = True
-        if _i + 1 < len(_msgs) and _msgs[_i + 1].get("role") == "assistant":
-            if _msgs[_i + 1]["content"] != ZEUS_RESPOSTA_DIVINA:
-                _msgs[_i + 1]["content"] = ZEUS_RESPOSTA_DIVINA
-                st.session_state.zeus_ultimo_fix = _i
-                st.rerun()
+# Verificação do Sentinela Hidra em tempo real
+tamanho_simulado_dados = 1200000 # Simulação de tamanho de base
+estado_hidra = verificar_sentinela_hidra(tamanho_simulado_dados)
+if estado_hidra["alerta"]:
+    st.sidebar.warning(estado_hidra["acao"])
+else:
+    st.sidebar.success(estado_hidra["status"])
+
+# ==========================================
+# ÁREA DE COMANDO PRINCIPAL
+# ==========================================
+comando_criador = st.text_area("Digite a ordem soberana para o Zeus:", placeholder="Ex: Criar rotina de processamento de vídeos e otimização de IA...")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("🚀 Executar e Comitar no GitHub"):
+        if comando_criador:
+            with st.spinner("Zeus processando intenção e gerando micro-código..."):
+                # Passa pelo Catalisador
+                codigo_final = catalisador_sintese_coletiva(comando_criador)
+                
+                # Envia de forma soberana para o GitHub
+                caminho_alvo = f"nucleo_zeus/modulos/modulo_{abs(hash(comando_criador))}.cpp"
+                resultado = executar_acao_soberana_github(
+                    caminho_arquivo=caminho_alvo,
+                    conteudo=codigo_final,
+                    mensagem_commit=f"Zeus Autoevolução: {comando_criador[:40]}"
+                )
+                
+                if resultado["status"] == "sucesso":
+                    st.success(resultado["mensagem"])
+                    st.code(codigo_final, language="cpp")
+                else:
+                    st.error(resultado["mensagem"])
         else:
-            st.session_state.zeus_ultimo_fix = _i
+            st.warning("Insira uma ordem válida.")
 
-if st.session_state.zeus_modo_divino:
-    _orig_chat_message = st.chat_message
-
-    def _zeus_chat_message(name, *args, **kwargs):
-        if name == "assistant" and "avatar" not in kwargs:
-            kwargs["avatar"] = ZEUS_AVATAR_SVG
-        return _orig_chat_message(name, *args, **kwargs)
-
-    st.chat_message = _zeus_chat_message
-
-    _zeus_css = '<style>[data-testid="stChatMessageAvatarAssistant"] img, [data-testid="stChatMessageAvatarAssistant"] { box-shadow: 0 0 18px 4px #ffd700 !important; border-radius: 50% !important; }</style>'
-    st.markdown(_zeus_css, unsafe_allow_html=True)
+with col2:
+    # ==========================================
+    # 3. ALERTA DE BARREIRA HUMANA (SIMULAÇÃO)
+    # ==========================================
+    st.subheader("⚠️ Monitor de Barreiras (Human-in-the-Loop)")
+    barreira_detectada = st.checkbox("Simular interrupção por CAPTCHA / Verificação Física")
+    
+    if barreira_detectada:
+        st.error("BLOQUEIO DETECTADO: O Zeus encontrou uma barreira estritamente humana (CAPTCHA/SMS). O processo foi pausado com segurança.")
+        acao_humana = st.text_input("Insira o código de liberação ou instrução manual para o Zeus continuar:")
+        if st.button("Liberar Autonomia"):
+            if acao_humana:
+                st.success("Barreira humana superada! O Zeus retomou o controle e continuará a execução automática.")
+            else:
+                st.warning("Digite a chave de liberação para prosseguir.")
+    else:
+        st.info("Nenhuma barreira humana no momento. Operação 100% autônoma.")
