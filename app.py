@@ -3898,3 +3898,605 @@ try:
     interceptar_musica_v43()
 except Exception as _zeus43_err:
     st.caption("⚠️ Zeus 4.3 desativado por erro: " + str(_zeus43_err)[:200])
+
+    # ============================================================
+# ZEUS 4.5 - NÚCLEO SOBERANO SUPLEMENTAR (FINAL E ISOLADO)
+# Cole exatamente no final do seu app.py atual, sem apagar nada.
+# ============================================================
+import base64 as _b64_zeus_v45
+import requests as _req_zeus_v45
+import re as _re_zeus_v45
+import ast as _ast_zeus_v45
+import inspect as _insp_zeus_v45
+
+try:
+    import spotipy
+    from spotipy.oauth2 import SpotifyOAuth
+except ImportError:
+    spotipy = None
+
+_firestore_v45 = None
+_firebase_admin_v45 = None
+_cred_v45 = None
+_db_firestore_v45 = None
+try:
+    from google.cloud import firestore as _firestore_v45
+    import firebase_admin as _firebase_admin_v45
+    from firebase_admin import credentials as _cred_v45, firestore as _db_firestore_v45
+except ImportError:
+    pass
+
+
+# ------------------------------------------------------------
+# 1. GITHUB COMO DATABASE E MEMÓRIA DE LONGO PRAZO
+# ------------------------------------------------------------
+def zeus_salvar_codigo_github(
+    caminho_arquivo: str,
+    codigo_conteudo: str,
+    mensagem: str = "Zeus Database: atualização",
+):
+    token = st.secrets.get("GITHUB_API_KEY") or st.secrets.get("GITHUB_TOKEN")
+    user = st.secrets.get("GITHUB_USER")
+    repo = st.secrets.get("GITHUB_REPO")
+    if not (token and user and repo):
+        return {"status": "erro", "mensagem": "❌ Faltam chaves do GitHub nos Secrets."}
+
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        resp_get = _req_zeus_v45.get(url, headers=headers, timeout=20)
+        sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
+        payload = {
+            "message": mensagem,
+            "content": _b64_zeus_v45.b64encode(codigo_conteudo.encode("utf-8")).decode(
+                "utf-8"
+            ),
+        }
+        if sha:
+            payload["sha"] = sha
+        resp_put = _req_zeus_v45.put(url, headers=headers, json=payload, timeout=20)
+        if resp_put.status_code in (200, 201):
+            return {
+                "status": "sucesso",
+                "mensagem": f"✅ Database GitHub atualizado em '{caminho_arquivo}'.",
+                "url": resp_put.json().get("content", {}).get("html_url", ""),
+            }
+        try:
+            detalhe = resp_put.json().get("message", "Erro na API do GitHub.")
+        except Exception:
+            detalhe = resp_put.text[:150]
+        return {
+            "status": "erro",
+            "mensagem": f"❌ Erro GitHub ({resp_put.status_code}): {detalhe}",
+        }
+    except Exception as e:
+        return {"status": "erro", "mensagem": f"❌ Erro de conexão: {str(e)[:150]}"}
+
+
+def zeus_listar_memoria_github(pasta: str = "nucleo_zeus/modulos"):
+    token = st.secrets.get("GITHUB_API_KEY") or st.secrets.get("GITHUB_TOKEN")
+    user = st.secrets.get("GITHUB_USER")
+    repo = st.secrets.get("GITHUB_REPO")
+    if not (token and user and repo):
+        return []
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{pasta}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        resp = _req_zeus_v45.get(url, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            itens = resp.json()
+            if isinstance(itens, list):
+                return [item["path"] for item in itens if item.get("type") == "file"]
+    except Exception:
+        pass
+    return []
+
+
+def zeus_ler_arquivo_github(caminho_arquivo: str):
+    token = st.secrets.get("GITHUB_API_KEY") or st.secrets.get("GITHUB_TOKEN")
+    user = st.secrets.get("GITHUB_USER")
+    repo = st.secrets.get("GITHUB_REPO")
+    if not (token and user and repo):
+        return None
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        resp = _req_zeus_v45.get(url, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            dados = resp.json()
+            if "content" in dados:
+                return _b64_zeus_v45.b64decode(dados["content"]).decode("utf-8")
+    except Exception:
+        pass
+    return None
+
+
+def _zeus_sanitizar_pasta_v45(
+    caminho: str, default: str = "nucleo_zeus/modulos"
+) -> str:
+    partes = [
+        p for p in caminho.strip().strip("/").split("/") if p not in ("", ".", "..")
+    ]
+    return "/".join(partes) or default
+
+
+def zeus_salvar_firestore(colecao: str, doc_id: str, dados: dict):
+    if not (_firebase_admin_v45 and _db_firestore_v45 and _cred_v45):
+        return False, "Módulo Firebase não disponível."
+    try:
+        if not _firebase_admin_v45._apps:
+            if "FIREBASE_CREDENTIALS" in st.secrets:
+                import json
+
+                cred_dict = json.loads(st.secrets["FIREBASE_CREDENTIALS"])
+                cred = _cred_v45.Certificate(cred_dict)
+                _firebase_admin_v45.initialize_app(cred)
+            else:
+                return False, "Credenciais do Firebase ausentes nos Secrets."
+        db = _db_firestore_v45.client()
+        db.collection(colecao).document(doc_id).set(dados, merge=True)
+        return True, "Dados salvos no Firestore com sucesso."
+    except Exception as e:
+        return False, f"Firestore: {str(e)[:120]}"
+
+
+# ------------------------------------------------------------
+# 2. MOTOR DE APRENDIZADO EM ENSEMBLE (MÚLTIPLAS IAS)
+# ------------------------------------------------------------
+_ZEUS45_EXTENSOES = {
+    "python": "py",
+    "javascript": "js",
+    "cpp": "cpp",
+    "c++": "cpp",
+    "java": "java",
+}
+
+
+def _zeus45_extrair_codigo(texto: str) -> str:
+    m = _re_zeus_v45.search(r"(?:[a-zA-Z+]*)?\s*\n(.*?)", texto, _re_zeus_v45.S)
+    return (m.group(1) if m else texto).strip()
+
+
+def _zeus45_executar_python(codigo: str):
+    try:
+        _ast_zeus_v45.parse(codigo)
+    except SyntaxError as e:
+        return False, f"Erro de sintaxe na linha {e.lineno}: {e.msg}"
+
+    namespace = {"_builtins": __builtins_}
+    try:
+        exec(codigo, namespace)
+    except Exception as e:
+        return False, f"Erro no carregamento: {str(e)[:150]}"
+
+    funcoes = [
+        v
+        for k, v in namespace.items()
+        if callable(v) and not k.startswith("_") and _insp_zeus_v45.isfunction(v)
+    ]
+    if not funcoes:
+        return True, "Código compilado e estruturado com sucesso."
+
+    alvo = funcoes[0]
+    try:
+        params = _insp_zeus_v45.signature(alvo).parameters
+        if params:
+            return (
+                True,
+                f"Função '{alvo._name_}' validada (requer parâmetros: {', '.join(params)}).",
+            )
+        resultado = alvo()
+        return True, f"Execução bem-sucedida! Retorno: {resultado}"
+    except Exception as e:
+        return False, f"Erro ao executar a função: {str(e)[:150]}"
+
+
+def _zeus45_chamar_ia(prompt: str, sistema: str, preferir: str = None):
+    fn_prioridade = globals().get("gerar_com_prioridade_claude")
+    if fn_prioridade and not preferir:
+        return fn_prioridade(sistema, prompt, max_tokens=2000)
+
+    fn_llm = globals().get("get_llm_response")
+    if fn_llm and "session_id" in st.session_state:
+        provedor = preferir or st.session_state.get("model_sel", "groq")
+        ok, texto, prov, _erros = fn_llm(
+            st.session_state.session_id,
+            prompt,
+            provedor,
+            system=sistema,
+            use_history=False,
+        )
+        return (texto, prov) if ok else (None, None)
+    return None, None
+
+
+def zeus_aprender_ensemble(instrucao: str, linguagem: str = "python") -> str:
+    linguagem = linguagem.lower().strip()
+    ext = _ZEUS45_EXTENSOES.get(linguagem, "txt")
+
+    sys_gerar = (
+        f"Você é um engenheiro sênior em {linguagem}. Escreva código funcional, limpo e comentado "
+        f"em {linguagem} puro que implemente exatamente o pedido. Responda APENAS com o código, sem explicações."
+    )
+    texto1, prov1 = _zeus45_chamar_ia("Pedido: " + instrucao, sys_gerar)
+    if not texto1:
+        return "❌ Nenhuma IA disponível gerou o código inicial."
+    codigo_v1 = _zeus45_extrair_codigo(texto1)
+
+    provedores_disp = globals().get("PROVIDERS", [])
+    segundo_provedor = next((p for p in provedores_disp if p != prov1), None)
+
+    sys_revisar = (
+        f"Você é um revisor de código sênior em {linguagem}. Receberá um código e deve melhorá-lo: "
+        "corrigir bugs, otimizar e deixar mais claro, mantendo a mesma funcionalidade. "
+        "Responda APENAS com o código final melhorado, sem explicações."
+    )
+    texto2, prov2 = _zeus45_chamar_ia(
+        "Código para revisar e melhorar:\n\n" + codigo_v1,
+        sys_revisar,
+        preferir=segundo_provedor,
+    )
+    codigo_final = _zeus45_extrair_codigo(texto2) if texto2 else codigo_v1
+    prov_revisor = prov2 if texto2 else None
+
+    slug = (
+        "".join(c if c.isalnum() else "" for c in instrucao[:25]).lower().strip("")
+        or "modulo"
+    )
+    caminho = f"nucleo_zeus/modulos/modulo_{slug}.{ext}"
+    res_save = zeus_salvar_codigo_github(
+        caminho, codigo_final, f"Zeus ensemble ({linguagem}): {instrucao[:40]}"
+    )
+
+    linhas_resp = []
+    if linguagem == "python":
+        ok_exec, msg_exec = _zeus45_executar_python(codigo_final)
+        linhas_resp.append(
+            f"⚡ *Execução:* {msg_exec}"
+            if ok_exec
+            else f"⚠️ *Aviso na execução:* {msg_exec}"
+        )
+    else:
+        linhas_resp.append(
+            f"ℹ️ Código em *{linguagem}* gerado e salvo com sucesso no banco de dados do GitHub."
+        )
+
+    if res_save["status"] == "sucesso":
+        linhas_resp.append(
+            f"✅ *GitHub Database:* {caminho} (Gerado por {prov1}"
+            + (f", revisado por {prov_revisor})" if prov_revisor else ")")
+            + (f"\n[Ver no GitHub]({res_save['url']})" if res_save.get("url") else "")
+        )
+    else:
+        linhas_resp.append(f"❌ *Erro ao salvar no GitHub:* {res_save['mensagem']}")
+
+    zeus_salvar_firestore(
+        "zeus_memoria",
+        f"modulo_{slug}",
+        {
+            "instrucao": instrucao,
+            "linguagem": linguagem,
+            "caminho": caminho,
+            "gerado_por": prov1,
+            "revisado_por": prov_revisor,
+        },
+    )
+
+    audio = zeus_falar(
+        "Módulo revisado por inteligência artificial e salvo com sucesso no GitHub."
+    )
+    if audio:
+        st.audio(audio, format="audio/mp3")
+
+    return "\n\n".join(linhas_resp)
+
+
+# ------------------------------------------------------------
+# 3. MÍDIA APRIMORADA (GERAÇÃO DE VÍDEOS E IMAGENS)
+# ------------------------------------------------------------
+def zeus_gerar_imagem_aprimorada(prompt_base: str, log: list):
+    fn_make_image = globals().get("make_image")
+    fn_editar = globals().get("editar_imagem")
+    if not fn_make_image:
+        return None
+    img = fn_make_image(prompt_base, log)
+    if img and fn_editar:
+        img_aprimorada, modo = fn_editar(
+            img,
+            "enhance resolution, sharpen fine details, improve lighting and color depth, "
+            "professional post-processing, keep composition identical",
+            prompt_base,
+            log,
+        )
+        if img_aprimorada:
+            return img_aprimorada
+    return img
+
+
+def zeus_gerar_video_aprimorado(prompt_base: str, log: list):
+    fn_make_video = globals().get("make_video")
+    img_base = zeus_gerar_imagem_aprimorada(prompt_base, log)
+    if fn_make_video:
+        return fn_make_video(prompt_base, log, img_base), img_base
+    return None, img_base
+
+
+# ------------------------------------------------------------
+# 4. AVATARES, VOZ E SPOTIFY
+# ------------------------------------------------------------
+ZEUS_AVATAR_CLASSICO_V45 = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj48ZGVmcz48cmFkaWFsR3JhZGllbnQgaWQ9ImciIGN4PSI1MCUiIGN5PSI0MCUiIHI9IjYwJSI+PHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmZjlkMCIvPjxzdG9wIG9mZnNldD0iNDAlIiBzdG9wLWNvbG9yPSIjZmZkNzAwIi8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMGIwZjE5Ii8+PC9yYWRpYWxHcmFkaWVudD48L2RlZnM+PHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIyMDAiIGZpbGw9IiMwYjBmMTkiLz48Y2lyY2xlIGN4PSIxMDAiIGN5PSIxMDAiIHI9IjkwIiBmaWxsPSJ1cmwoI2cpIi8+PHBhdGggZD0iTTEwMCAzMCBMODAgMTAwIEwxMDUgMTAwIEw4NSAxNzAgTDEzMCA5NSBMMTA1IDk1IFoiIGZpbGw9IiNmZmQ3MDAiIHN0cm9rZT0iI2ZmZjlkMCIgc3Ryb2tlLXdpZHRoPSIyIi8+PGNpcmNsZSBjeD0iNzgiIGN5PSI3MCIgcj0iNiIgZmlsbD0iIzAwZmZjYyIvPjxjaXJjbGUgY3g9IjEyMiIgY3k9IjcwIiByPSI2IiBmaWxsPSIjMDBmZmNjIi8+PC9zdmc+"
+ZEUS_AVATAR_ACAO_V45 = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIj48ZGVmcz48cmFkaWFsR3JhZGllbnQgaWQ9ImJnIiBjeD0iNTAlIiBjeT0iMzUlIiByPSI3MCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiMyYTJlNTAiLz48c3RvcCBvZmZzZXQ9IjYwJSIgc3RvcC1jb2xvcj0iIzExMTIyNiIvPjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzA1MDUwZCIvPjwvcmFkaWFsR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50 idD0icmFpbyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNmZmZmZmYiLz48c3RvcCBvZmZzZXQ9IjUwJSIgc3RvcC1jb2xvcj0iI2ZmZTk2YSIvPjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2ZmYTcwMCIvPjwvGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIiBmaWxsPSJ1cmwoI2JnKSIvPjxjaXJjbGUgY3g9IjEwMCIgY3k9Ijk1IiByPSI3NSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZkNzAwIiBzdHJva2Utb3BhY2l0eT0iMCy5NSIgc3Ryb2tlLXdpZHRoPSIyIi8+PHBhdGggZD0iTTEwMCA0MCBDNzUgNDAgNjAgNjAgNjAgODUgQzYwIDExMCA3NSAxMzAgMTAwIDEzMCBDMTI1IDEzMCAxNDAgMTEwIDE0MCA4NSBDMTQwIDYwIDEyNSA0MCAxMTAgNDBaIiBmaWxsPSIjZjVkNWEwIi8+PGNpcmNsZSBjeD0iMTAwIiBjeT0iMTAwIiByPSI4MCIgZmlsbD0ibm9uZSIvPjwvc3ZnPg0="
+
+ZEUS_AVATARES_V45 = {
+    "Zeus Clássico (raio dourado)": ZEUS_AVATAR_CLASSICO_V45,
+    "Zeus em Ação": ZEUS_AVATAR_ACAO_V45,
+}
+
+
+def zeus_falar(texto: str, voz: str = None):
+    fn_sint = globals().get("sintetizar")
+    if not fn_sint:
+        return None
+    voz_usar = voz or st.session_state.get("zeus45_voz_ativa", "pt-BR-FranciscaNeural")
+    try:
+        return fn_sint(texto, voz_usar)
+    except Exception:
+        return None
+
+
+def zeus_tocar_musica(nome_musica: str) -> str:
+    if not spotipy:
+        return "❌ Biblioteca 'spotipy' não instalada."
+    nome_musica = (nome_musica or "").strip()
+    if not nome_musica:
+        return "❌ Nome da música vazio."
+    try:
+        client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
+        client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+        refresh_token = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
+        redirect_uri = st.secrets.get(
+            "SPOTIFY_REDIRECT_URI",
+            "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/",
+        )
+        if not (client_id and client_secret and refresh_token):
+            return "❌ Faltam credenciais do Spotify nos Secrets."
+
+        auth_manager = SpotifyOAuth(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope="user-modify-playback-state user-read-playback-state",
+            cache_path=None,
+        )
+        token_info = auth_manager.refresh_access_token(refresh_token)
+        sp = spotipy.Spotify(auth=token_info["access_token"])
+
+        results = sp.search(q=nome_musica, limit=1, type="track")
+        tracks = results.get("tracks", {}).get("items", [])
+        if not tracks:
+            return f"❌ Nenhuma faixa encontrada para '{nome_musica}'."
+
+        track = tracks[0]
+        try:
+            sp.start_playback(uris=[track["uri"]])
+            artista = (
+                track["artists"][0]["name"] if track.get("artists") else "desconhecido"
+            )
+            return f"✅ Tocando agora: {track['name']} - {artista}"
+        except spotipy.exceptions.SpotifyException as e:
+            if getattr(e, "http_status", None) == 404:
+                return "⚠️ Nenhum aparelho ativo. Abra o Spotify e dê play em algo primeiro."
+            return f"❌ Erro do Spotify: {str(e)[:150]}"
+    except Exception as e:
+        return f"❌ Erro no Spotify: {str(e)[:150]}"
+
+
+# ------------------------------------------------------------
+# 5. INTERFACE DO PAINEL (INTEGRADA SEM QUEBRAR O LAYOUT)
+# ------------------------------------------------------------
+def render_zeus_v45():
+    with st.sidebar:
+        st.divider()
+        st.subheader("⚡ Avatar do Zeus")
+        nome_avatar = st.selectbox(
+            "Escolha o avatar", list(ZEUS_AVATARES_V45.keys()), key="zeus45_avatar_sel"
+        )
+        st.image(ZEUS_AVATARES_V45[nome_avatar], width=140)
+        st.session_state.zeus_avatar_ativo = ZEUS_AVATARES_V45[nome_avatar]
+
+        st.subheader("🔊 Voz do Zeus")
+        fn_vozes = globals().get("listar_todas_vozes_edge") or globals().get(
+            "listar_vozes_edge"
+        )
+        vozes_disp = (
+            fn_vozes()
+            if fn_vozes
+            else globals().get(
+                "FALLBACK_VOZES", {"Francisca (pt-BR ♀)": "pt-BR-FranciscaNeural"}
+            )
+        )
+        nome_voz = st.selectbox(
+            "Escolha a voz", list(vozes_disp.keys()), key="zeus45_voz_nome"
+        )
+        st.session_state.zeus45_voz_ativa = vozes_disp[nome_voz]
+
+        if st.button("▶️ Ouvir prévia da voz", key="zeus45_btn_previa"):
+            with st.spinner("Gerando prévia..."):
+                audio_prev = zeus_falar(
+                    "Olá, Danilo. Eu sou Zeus. Esta é a minha voz.",
+                    vozes_disp[nome_voz],
+                )
+            st.audio(audio_prev, format="audio/mp3") if audio_prev else st.error(
+                "Não consegui gerar o áudio."
+            )
+
+        st.divider()
+        st.subheader("🎵 Controle de Música")
+        musica_input = st.text_input("Digite a música:", key="zeus45_input_musica")
+        if st.button("Tocar no Spotify", key="zeus45_btn_tocar"):
+            if musica_input.strip():
+                with st.spinner("Sintonizando..."):
+                    resultado = zeus_tocar_musica(musica_input)
+                st.success(resultado) if resultado.startswith("✅") else st.error(
+                    resultado
+                )
+            else:
+                st.warning("Digite o nome da música primeiro.")
+
+    with st.expander(
+        "⚡ Zeus - Núcleo de Aprendizado, Database e Mídia", expanded=False
+    ):
+        aba_criar, aba_memoria, aba_midia = st.tabs(
+            ["🧠 Aprender (Ensemble de IAs)", "📚 Memória GitHub", "🎨 Mídia Aprimorada"]
+        )
+
+        with aba_criar:
+            instrucao = st.text_input(
+                "O que o Zeus deve desenvolver?",
+                placeholder="Ex: função que calcula otimização...",
+                key="zeus45_instrucao",
+            )
+            linguagem = st.selectbox(
+                "Linguagem",
+                ["python", "javascript", "cpp", "java"],
+                key="zeus45_linguagem",
+            )
+            st.caption(
+                "Python executa automaticamente. Outras linguagens são geradas, revisadas e salvas com segurança no GitHub."
+            )
+            if st.button(
+                "🚀 Gerar, Revisar com 2 IAs e Salvar", key="zeus45_btn_aprender"
+            ):
+                if instrucao.strip():
+                    with st.spinner("Gerando, revisando com outra IA e salvando..."):
+                        resultado = zeus_aprender_ensemble(instrucao.strip(), linguagem)
+                    st.markdown(resultado)
+                else:
+                    st.warning("Insira uma instrução válida.")
+
+        with aba_memoria:
+            pasta_consulta = st.text_input(
+                "Pasta no Database (GitHub):",
+                value="nucleo_zeus/modulos",
+                key="zeus45_pasta",
+            )
+            if st.button("🔍 Listar Arquivos", key="zeus45_btn_listar"):
+                pasta_segura = _zeus_sanitizar_pasta_v45(pasta_consulta)
+                arquivos = zeus_listar_memoria_github(pasta_segura)
+                st.session_state.zeus45_arquivos = arquivos
+                st.success(
+                    f"Encontrados {len(arquivos)} arquivos."
+                ) if arquivos else st.warning("Nenhum arquivo encontrado.")
+            if st.session_state.get("zeus45_arquivos"):
+                arq_sel = st.selectbox(
+                    "Selecione um módulo:",
+                    st.session_state.zeus45_arquivos,
+                    key="zeus45_arq_sel",
+                )
+                if st.button("📖 Ler Conteúdo", key="zeus45_btn_ler"):
+                    conteudo = zeus_ler_arquivo_github(arq_sel)
+                    st.code(conteudo, language="python") if conteudo else st.error(
+                        "Erro ao recuperar conteúdo."
+                    )
+
+        with aba_midia:
+            prompt_midia = st.text_area(
+                "Descreva a imagem ou vídeo:",
+                key="zeus45_prompt_midia",
+                placeholder="Ex: dragão de cristal sobre cidade futurista",
+            )
+            tipo_midia = st.radio(
+                "Tipo:",
+                ["Imagem aprimorada", "Vídeo aprimorado"],
+                key="zeus45_tipo_midia",
+                horizontal=True,
+            )
+            if st.button("✨ Gerar Mídia Aprimorada", key="zeus45_btn_midia"):
+                if prompt_midia.strip():
+                    log_midia = []
+                    with st.spinner("Gerando e aprimorando..."):
+                        if tipo_midia == "Imagem aprimorada":
+                            img = zeus_gerar_imagem_aprimorada(
+                                prompt_midia.strip(), log_midia
+                            )
+                            if img:
+                                st.image(img, caption="Imagem aprimorada")
+                                st.download_button(
+                                    "⬇️ Baixar",
+                                    img,
+                                    file_name="zeus_imagem_aprimorada.png",
+                                    key="zeus45_dl_img",
+                                )
+                            else:
+                                st.error("Não consegui gerar a imagem.")
+                        else:
+                            vid, img_base = zeus_gerar_video_aprimorado(
+                                prompt_midia.strip(), log_midia
+                            )
+                            if img_base:
+                                st.image(img_base, caption="Quadro base aprimorado")
+                            if vid:
+                                st.video(vid)
+                                st.download_button(
+                                    "⬇️ Baixar vídeo",
+                                    vid,
+                                    file_name="zeus_video_aprimorado.mp4",
+                                    key="zeus45_dl_vid",
+                                )
+                            else:
+                                st.error("Não consegui gerar o vídeo.")
+                    with st.expander("Log de geração", expanded=False):
+                        st.write("\n\n".join(log_midia))
+                else:
+                    st.warning("Descreva o que deseja gerar.")
+
+
+def interceptar_musica_v45():
+    msgs = st.session_state.get("messages")
+    if not msgs:
+        return
+    ultima = msgs[-1]
+    if ultima.get("role") != "user":
+        return
+    texto = str(ultima.get("content", "")).lower()
+    if not any(
+        p in texto
+        for p in ("toca ", "tocar ", "toque ", "spotify", "música ", "musica ")
+    ):
+        return
+    if st.session_state.get("zeus45_ultima_musica") == ultima["content"]:
+        return
+
+    termo = _re_zeus_v45.sub(
+        r"\b(zeus|por favor|toca|tocar|toque|a música|a musica|música|musica|no spotify|spotify)\b",
+        "",
+        texto,
+    ).strip(" .,!?:-")
+    st.session_state.zeus45_ultima_musica = ultima["content"]
+    if not termo:
+        return
+
+    with st.spinner(f"Buscando '{termo}'..."):
+        resultado = zeus_tocar_musica(termo)
+    st.toast(resultado, icon="🎵")
+    st.session_state.messages.append({"role": "assistant", "content": resultado})
+    st.rerun()
+
+
+try:
+    render_zeus_v45()
+    interceptar_musica_v45()
+except Exception as _zeus45_err:
+    st.caption("⚠️ Zeus 4.5 desativado por erro: " + str(_zeus45_err)[:200])
