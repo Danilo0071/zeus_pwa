@@ -132,17 +132,10 @@ PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra", "
 KEYS = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "claude": "ANTHROPIC_API_KEY", "huggingface": "HUGGINGFACE_API_KEY", "github": "GITHUB_API_KEY", "deepinfra": "DEEPINFRA_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
 MODEL_SECRET = {"groq": "GROQ_MODEL", "gemini": "GEMINI_MODEL", "claude": "ANTHROPIC_MODEL", "huggingface": "HF_MODEL", "github": "GITHUB_MODEL", "deepinfra": "DEEPINFRA_MODEL", "openrouter": "OPENROUTER_MODEL"}
 MODELS = {
-    "groq": ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"],
-    "gemini": ["gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash"],
-    "claude": ["claude-3-5-haiku-20241022", "claude-haiku-5-5", "claude-sonnet-5-5"],
-    "huggingface": ["meta-llama/Llama-3.3-70B-Instruct", "Qwen/Qwen2.5-72B-Instruct"],
-    "github": ["openai/gpt-4.1-mini", "openai/gpt-4o-mini"],
-    "deepinfra": ["cognitivecomputations/dolphin-2.9-llama3-8b", "cognitivecomputations/dolphin-2.6-mixtral-8x7b", "meta-llama/Llama-3.3-70B-Instruct", "deepseek-ai/DeepSeek-V3"],
     "openrouter": ["google/gemini-2.5-flash", "openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"],
+}
+
 TRANSIENT = (500, 502, 503, 504, 529)
-
-
-def _normalize(msgs):
     """Garante papéis alternados começando por 'user'."""
     out = []
     for m in msgs:
