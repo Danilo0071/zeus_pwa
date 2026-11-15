@@ -2643,3 +2643,70 @@ def zeus_salvar_modulo_autonomo(nome_arquivo: str, codigo_conteudo: str, motivo:
         }
     except Exception as e:
         return {"status": "erro", "mensagem": f"❌ Falha de conexão: {str(e)[:100]}"}
+
+# ============================================================
+# NÚCLEO DE AUTO-EVOLUÇÃO AUTÔNOMA DO ZEUS
+# ============================================================
+import base64
+import requests
+import os
+import streamlit as st
+
+def zeus_auto_evoluir(nome_arquivo: str, codigo_conteudo: str, motivo: str = "Zeus Auto-Evolução Autônoma"):
+    """
+    Função executada via chat para criar, atualizar e commitar arquivos
+    diretamente na subpasta modulo/nucleo_zeus do GitHub de forma independente.
+    """
+    token = os.environ.get("GITHUB_TOKEN") or st.secrets.get("GITHUB_TOKEN", "")
+    user = os.environ.get("GITHUB_USER") or st.secrets.get("GITHUB_USER", "")
+    repo = os.environ.get("GITHUB_REPO") or st.secrets.get("GITHUB_REPO", "")
+    
+    if not (token and user and repo):
+        return "❌ Erro: As chaves do GitHub (GITHUB_TOKEN, GITHUB_USER, GITHUB_REPO) não foram encontradas nos Secrets."
+
+    caminho = f"modulo/nucleo_zeus/{nome_arquivo}"
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
+    }
+    
+    try:
+        # Checa se o arquivo já existe para pegar o SHA correto (atualização) ou criar do zero
+        resp_get = requests.get(url, headers=headers, timeout=20)
+        sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
+        
+        payload = {
+            "message": f"🤖 [Zeus Auto-Evolution] {motivo}",
+            "content": base64.b64encode(codigo_conteudo.encode("utf-8")).decode("utf-8")
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        resp_put = requests.put(url, headers=headers, json=payload, timeout=20)
+        
+        if resp_put.status_code in (200, 201):
+            link_commit = resp_put.json().get("content", {}).get("html_url", "")
+            return f"⚡ **Sucesso absoluto do Olimpo!** O Zeus evoluiu sozinho e criou o arquivo `{caminho}` no GitHub!\n🔗 [Ver Commit no GitHub]({link_commit})"
+        else:
+            return f"❌ Erro do GitHub ({resp_put.status_code}): {resp_put.text[:150]}"
+            
+    except Exception as e:
+        return f"❌ Falha crítica na auto-evolução: {str(e)[:150]}"
+
+# Interceptador de comandos no chat principal
+if 'user_query' in st.session_state and st.session_state.user_query:
+    q = st.session_state.user_query.strip()
+    if q.startswith("/criar "):
+        try:
+            # Formato esperado: /criar nome_arquivo.py | Código do arquivo aqui...
+            partes = q[7:].split("|", 1)
+            if len(partes) == 2:
+                arq = partes[0].strip()
+                code = partes[1].strip()
+                resultado_evoulucao = zeus_auto_evoluir(arq, code, f"Criação autônoma solicitada por Danilo")
+                st.info(resultado_evoulucao)
+        except Exception as e:
+            st.error(f"Erro ao processar comando de evolução: {e}")
