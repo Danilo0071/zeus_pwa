@@ -2490,3 +2490,46 @@ with st.expander("📜 Histórico da conversa"):
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+
+# ============================================================
+# CONEXÃO AUTOMÁTICA: NÚCLEO ZEUS (PUXADO DA SUBPASTA)
+# ============================================================
+try:
+    from modulo.nucleo_zeus.core import ZEUS_CORE_HTML
+    
+    # Insere o Zeus na caixinha de avatares lateral
+    if 'AVATAR_MAP' in globals():
+        AVATAR_MAP["⚡ Zeus // Olimpo Cibernético (Deuses & Raios)"] = "zeus_core_zeus"
+    
+    # Interliga a renderização do Zeus na tela do app
+    if 'renderizar_avatar' in globals():
+        _render_original = renderizar_avatar
+        def _render_com_zeus_core(avatar_key):
+            if avatar_key == "zeus_core_zeus":
+                import streamlit.components.v1 as components
+                import tempfile, os, hashlib, streamlit as st
+                
+                @st.cache_resource
+                def _render_zc(html: str, hsh: str):
+                    p = os.path.join(tempfile.gettempdir(), f"zc_{hsh}")
+                    os.makedirs(p, exist_ok=True)
+                    with open(os.path.join(p, "index.html"), "w", encoding="utf-8") as f:
+                        f.write(html)
+                    return components.declare_component(f"zc_{hsh}", path=p)
+                
+                comp = _render_zc(ZEUS_CORE_HTML, hashlib.md5(ZEUS_CORE_HTML.encode()).hexdigest()[:8])
+                ev = comp(avatar="zeus_core_zeus", reply=st.session_state.get("avatar_reply"), reply_id=st.session_state.get("avatar_reply_id", 0), key="zc_w", default=None)
+                
+                if ev and isinstance(ev, dict) and ev.get("id") != st.session_state.get("last_event_id"):
+                    st.session_state.last_event_id = ev["id"]
+                    t = ev.get("text")
+                    if t and 'processar_prompt' in globals():
+                        resp = processar_prompt(t)
+                        st.session_state.avatar_reply = resp
+                        st.session_state.avatar_reply_id = ev["id"]
+                        st.rerun()
+            else:
+                _render_original(avatar_key)
+        renderizar_avatar = _render_com_zeus_core
+except Exception as e:
+    pass
