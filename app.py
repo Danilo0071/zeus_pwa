@@ -2752,8 +2752,7 @@ def zf_tocar_musica(nome_musica: str) -> str:
             return f"Erro do Spotify: {str(e)[:150]}"
     except Exception as e:
         return f"Erro no Spotify: {str(e)[:150]}"
-
-# zeus_evolucao.py
+# zeus_pwa/zeus_evolucao.py
 import os
 import json
 import base64
@@ -2828,7 +2827,6 @@ def executar_ciclo_evolucao():
     if not token or not repo:
         raise RuntimeError("Variáveis GITHUB_TOKEN e GITHUB_REPO são obrigatórias nos Secrets do Streamlit.")
         
-    print("Iniciando ciclo de auto-evolução do Zeus...")
     logs = _coletar_logs_recentes()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     nome_arquivo_relatorio = f"relatorio_{timestamp}.md"
@@ -2848,7 +2846,6 @@ Data/Hora: {timestamp}
         mensagem=f"Zeus: auto-evolução registrada em {timestamp}",
         sha=sha
     )
-    print(f"Sucesso! Relatório gravado em {nome_arquivo_relatorio}")
 
 def renderizar_painel_auto_evolucao():
     import streamlit as st
@@ -2861,6 +2858,5 @@ def renderizar_painel_auto_evolucao():
                 st.success("✅ Sucesso! O Zeus executou o ciclo e gravou o relatório lá no GitHub!")
             except Exception as e:
                 st.error(f"❌ Erro na execução: {e}")
-
 import zeus_evolucao
 zeus_evolucao.renderizar_painel_auto_evolucao()
