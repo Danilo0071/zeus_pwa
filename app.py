@@ -141,13 +141,13 @@ def _normalize(msgs):
     """Garante papéis alternados começando por 'user'."""
     out = []
     for m in msgs:
+        if out and out[-1]["role"] == m["role"]:
             out[-1]["content"] += "\n" + m["content"]
         else:
             out.append({"role": m["role"], "content": m["content"]})
     while out and out[0]["role"] != "user":
         out.pop(0)
     return out
-
 
 def _try_models(candidates, fn):
     last = ""
