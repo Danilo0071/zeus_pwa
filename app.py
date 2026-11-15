@@ -8063,7 +8063,7 @@ def zeus_aprender_ensemble(instrucao: str, linguagem: str = "python") -> str:
         linhas_resp.append(
             f"⚡ *Execução:* {msg_exec}"
             if ok_exec
-            else f"��️ *Aviso na execução:* {msg_exec}"
+            else f"  ️ *Aviso na execução:* {msg_exec}"
         )
     else:
         ok_exec = None
@@ -9003,84 +9003,3 @@ try:
     interceptar_musica_v45()
 except Exception as _zeus45_err:
     st.caption("⚠️ Zeus 4.5 desativado por erro: " + str(_zeus45_err)[:200])
-
-# ============================================================
-# ZEUS FINAL - NÚCLEO CONSOLIDADO (CORRIGIDO)
-# ============================================================
-import base64 as _b64_zf
-import requests as _req_zf
-import re as _re_zf
-import ast as _ast_zf
-import inspect as _insp_zf
-
-try:
-    import spotipy
-    from spotipy.oauth2 import SpotifyOAuth
-except ImportError:
-    spotipy = None
-
-_ZF_PASTA_RAIZ = "zilsy"
-_ZF_PASTA_MODULOS = _ZF_PASTA_RAIZ + "/modulos"
-
-
-def zf_salvar_codigo_github(
-    caminho_arquivo: str, codigo_conteudo: str, mensagem: str = "Zeus: atualização"
-):
-    token = st.secrets.get("GITHUB_API_KEY") or st.secrets.get("GITHUB_TOKEN")
-    user = st.secrets.get("GITHUB_USER")
-    repo = st.secrets.get("GITHUB_REPO")
-    if not (token and user and repo):
-        return {"status": "erro", "mensagem": "Faltam chaves do GitHub."}
-
-    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho_arquivo}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-    }
-    try:
-        resp_get = _req_zf.get(url, headers=headers, timeout=15)
-        sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
-        payload = {
-            "message": mensagem,
-            "content": _b64_zf.b64encode(codigo_conteudo.encode("utf-8")).decode(
-                "utf-8"
-            ),
-        }
-        if sha:
-            payload["sha"] = sha
-        resp_put = _req_zf.put(url, headers=headers, json=payload, timeout=20)
-        if resp_put.status_code in (200, 201):
-            return {"status": "sucesso", "mensagem": f"Salvo em {caminho_arquivo}"}
-        return {"status": "erro", "mensagem": f"Erro GitHub {resp_put.status_code}"}
-    except Exception as e:
-        return {"status": "erro", "mensagem": str(e)[:100]}
-
-
-def zf_aprender_ensemble(instrucao: str, linguagem: str = "python") -> str:
-    slug = (
-        "".join(c if c.isalnum() else "" for c in instrucao[:25]).lower().strip("")
-        or "modulo"
-    )
-    caminho = f"{ZF_PASTA_MODULOS}/modulo{slug}.py"
-    codigo_exemplo = f"# Módulo gerado por Zeus\ndef {slug}():\n    return 'Sucesso!'"
-    msg_commit = f"Zeus ensemble ({linguagem}): {instrucao[:40]}"
-    res = zf_salvar_codigo_github(caminho, codigo_exemplo, msg_commit)
-    return f"Módulo salvo em {caminho} - Status: {res['status']}"
-
-
-ZF_AVATAR_SUPREMO = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMDAgMzAwIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzA1MDUwOCIvPjwvc3ZnPg=="
-ZF_AVATARES = {"Zeus Supremo": ZF_AVATAR_SUPREMO}
-
-
-def zf_render_painel():
-    with st.expander("Zeus - Núcleo Zilsy", expanded=False):
-        instrucao = st.text_input("Instrução:", key="zf_instrucao_limpo")
-        if st.button("Executar Zeus", key="zf_btn_exec_limpo"):
-            if instrucao:
-                st.success(zf_aprender_ensemble(instrucao))
-
-
-try:
-    zf_render_painel()
-except Exception as e:
-    st.caption(f"Zeus carregado: {str(e)[:80]}")
