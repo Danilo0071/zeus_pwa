@@ -28,6 +28,7 @@ import time
 import zipfile
 
 import requests
+
 try:
     from openai import OpenAI  # cliente OpenAI (usado para DeepInfra)
 except ImportError:
@@ -48,10 +49,22 @@ except Exception:
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
-st.set_page_config(page_title="Zeus 3.0", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="Zeus 3.0",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 THEMES = {
-    "Cyberpunk": {"bg": "#0b0f19", "panel": "#121826", "primary": "#00ffcc", "secondary": "#0077ff", "text": "#00ffcc", "border": "#00ffcc33"},
+    "Cyberpunk": {
+        "bg": "#0b0f19",
+        "panel": "#121826",
+        "primary": "#00ffcc",
+        "secondary": "#0077ff",
+        "text": "#00ffcc",
+        "border": "#00ffcc33",
+    },
 }
 
 
@@ -67,22 +80,29 @@ THEME_CSS = """
 def inject_theme(theme_name: str):
     t = THEMES.get(theme_name, THEMES["Cyberpunk"])
     css = THEME_CSS
-    for token, chave in (("__BG__", "bg"), ("__TEXT__", "text"), ("__PANEL__", "panel"), ("__PRIMARY__", "primary"), ("__BORDER__", "border")):
+    for token, chave in (
+        ("__BG__", "bg"),
+        ("__TEXT__", "text"),
+        ("__PANEL__", "panel"),
+        ("__PRIMARY__", "primary"),
+        ("__BORDER__", "border"),
+    ):
         css = css.replace(token, t[chave])
     st.markdown(css, unsafe_allow_html=True)
 
 
-
-
 def inject_theme_classico(theme_name: str):
     t = THEMES.get(theme_name, THEMES["Cyberpunk"])
-    st.markdown(f"""
+    st.markdown(
+        f"""
         <style>
             .stApp {{ background-color: {t['bg']}; color: {t['text']}; font-family: 'Courier New', monospace; }}
             [data-testid="stSidebar"] {{ background-color: {t['panel']}; }}
             h1, h2, h3 {{ color: {t['primary']} !important; text-shadow: 0 0 10px {t['border']}; }}
         </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 # ============================================================
@@ -94,8 +114,11 @@ DB_FILE = "zeus_chat.db"
 def init_db():
     try:
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-        conn.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
-        conn.commit(); conn.close()
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)"
+        )
+        conn.commit()
+        conn.close()
     except Exception:
         pass
 
@@ -103,8 +126,12 @@ def init_db():
 def add_message(session_id, role, content):
     try:
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-        conn.execute("INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)", (session_id, role, content))
-        conn.commit(); conn.close()
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+            (session_id, role, content),
+        )
+        conn.commit()
+        conn.close()
     except Exception:
         pass
 
@@ -112,7 +139,10 @@ def add_message(session_id, role, content):
 def get_recent_context(session_id, limit=6):
     try:
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-        rows = conn.execute("SELECT role, content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?", (session_id, limit)).fetchall()
+        rows = conn.execute(
+            "SELECT role, content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
         conn.close()
         return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
     except Exception:
@@ -152,17 +182,55 @@ def _secret(key: str, default: str = "") -> str:
 # ============================================================
 SYS_PROMPT = "Você é Zeus, uma IA cyberpunk futurista e assistente sênior. Responda em português, de forma objetiva e com um tom tecnológico. Respostas curtas, pois serão faladas em voz alta."
 
-PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra", "openrouter"]
-KEYS = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "claude": "ANTHROPIC_API_KEY", "huggingface": "HUGGINGFACE_API_KEY", "github": "GITHUB_API_KEY", "deepinfra": "DEEPINFRA_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
-MODEL_SECRET = {"groq": "GROQ_MODEL", "gemini": "GEMINI_MODEL", "claude": "ANTHROPIC_MODEL", "huggingface": "HF_MODEL", "github": "GITHUB_MODEL", "deepinfra": "DEEPINFRA_MODEL", "openrouter": "OPENROUTER_MODEL"}
+PROVIDERS = [
+    "groq",
+    "gemini",
+    "claude",
+    "huggingface",
+    "github",
+    "deepinfra",
+    "openrouter",
+]
+KEYS = {
+    "groq": "GROQ_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "claude": "ANTHROPIC_API_KEY",
+    "huggingface": "HUGGINGFACE_API_KEY",
+    "github": "GITHUB_API_KEY",
+    "deepinfra": "DEEPINFRA_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+MODEL_SECRET = {
+    "groq": "GROQ_MODEL",
+    "gemini": "GEMINI_MODEL",
+    "claude": "ANTHROPIC_MODEL",
+    "huggingface": "HF_MODEL",
+    "github": "GITHUB_MODEL",
+    "deepinfra": "DEEPINFRA_MODEL",
+    "openrouter": "OPENROUTER_MODEL",
+}
 MODELS = {
     "groq": ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"],
-    "gemini": ["gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash"],
+    "gemini": [
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+        "gemini-3.5-flash",
+    ],
     "claude": ["claude-3-5-haiku-20241022", "claude-haiku-5-5", "claude-sonnet-5-5"],
     "huggingface": ["meta-llama/Llama-3.3-70B-Instruct", "Qwen/Qwen2.5-72B-Instruct"],
     "github": ["openai/gpt-4.1-mini", "openai/gpt-4o-mini"],
-    "deepinfra": ["cognitivecomputations/dolphin-2.9-llama3-8b", "cognitivecomputations/dolphin-2.6-mixtral-8x7b", "meta-llama/Llama-3.3-70B-Instruct", "deepseek-ai/DeepSeek-V3"],
-    "openrouter": ["google/gemini-2.5-flash", "openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"],
+    "deepinfra": [
+        "cognitivecomputations/dolphin-2.9-llama3-8b",
+        "cognitivecomputations/dolphin-2.6-mixtral-8x7b",
+        "meta-llama/Llama-3.3-70B-Instruct",
+        "deepseek-ai/DeepSeek-V3",
+    ],
+    "openrouter": [
+        "google/gemini-2.5-flash",
+        "openai/gpt-4o-mini",
+        "meta-llama/llama-3.3-70b-instruct",
+    ],
 }
 TRANSIENT = (500, 502, 503, 504, 529)
 
@@ -203,7 +271,12 @@ def _try_models(candidates, fn):
 
 
 def _groq_payload(model, msgs, system=None):
-    p = {"model": model, "messages": [{"role": "system", "content": system or SYS_PROMPT}] + msgs, "temperature": 0.4, "max_tokens": 700}
+    p = {
+        "model": model,
+        "messages": [{"role": "system", "content": system or SYS_PROMPT}] + msgs,
+        "temperature": 0.4,
+        "max_tokens": 700,
+    }
     if model.startswith("openai/gpt-oss"):
         p["reasoning_effort"] = "low"  # responde bem mais rápido
     return p
@@ -212,9 +285,13 @@ def _groq_payload(model, msgs, system=None):
 def _call_groq(api_key, model, msgs, system=None):
     r = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
         json=_groq_payload(model, msgs, system),
-        timeout=60)
+        timeout=60,
+    )
     if r.status_code == 200:
         return 200, (r.json()["choices"][0]["message"].get("content") or "").strip()
     return r.status_code, r.text
@@ -223,21 +300,41 @@ def _call_groq(api_key, model, msgs, system=None):
 def _call_claude(api_key, model, msgs, system=None):
     r = requests.post(
         "https://api.anthropic.com/v1/messages",
-        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
-        json={"model": model, "max_tokens": 1024, "system": system or SYS_PROMPT, "messages": msgs},
-        timeout=60)
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "max_tokens": 1024,
+            "system": system or SYS_PROMPT,
+            "messages": msgs,
+        },
+        timeout=60,
+    )
     if r.status_code == 200:
         return 200, "".join(b.get("text", "") for b in r.json()["content"])
     return r.status_code, r.text
 
 
 def _call_gemini(api_key, model, msgs, system=None, ver="v1"):
-    contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]} for m in msgs]
+    contents = [
+        {
+            "role": "user" if m["role"] == "user" else "model",
+            "parts": [{"text": m["content"]}],
+        }
+        for m in msgs
+    ]
     r = requests.post(
         f"https://generativelanguage.googleapis.com/{ver}/models/{model}:generateContent",
         headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        json={"systemInstruction": {"parts": [{"text": system or SYS_PROMPT}]}, "contents": contents},
-        timeout=60)
+        json={
+            "systemInstruction": {"parts": [{"text": system or SYS_PROMPT}]},
+            "contents": contents,
+        },
+        timeout=60,
+    )
     if r.status_code == 200:
         parts = r.json()["candidates"][0]["content"]["parts"]
         return 200, "".join(p.get("text", "") for p in parts)
@@ -249,32 +346,55 @@ def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=No
     if extra_headers:
         headers.update(extra_headers)
     r = requests.post(
-        url, headers=headers,
-        json={"model": model, "messages": [{"role": "system", "content": system or SYS_PROMPT}] + msgs,
-              "temperature": 0.4, "max_tokens": 700},
-        timeout=60)
+        url,
+        headers=headers,
+        json={
+            "model": model,
+            "messages": [{"role": "system", "content": system or SYS_PROMPT}] + msgs,
+            "temperature": 0.4,
+            "max_tokens": 700,
+        },
+        timeout=60,
+    )
     if r.status_code == 200:
         return 200, (r.json()["choices"][0]["message"].get("content") or "").strip()
     return r.status_code, r.text
 
 
 def _call_huggingface(api_key, model, msgs, system=None):
-    return _call_openai_compat("https://router.huggingface.co/v1/chat/completions", api_key, model, msgs, system)
+    return _call_openai_compat(
+        "https://router.huggingface.co/v1/chat/completions",
+        api_key,
+        model,
+        msgs,
+        system,
+    )
 
 
 def _call_github(api_key, model, msgs, system=None):
-    return _call_openai_compat("https://models.github.ai/inference/chat/completions", api_key, model, msgs, system,
-                               {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+    return _call_openai_compat(
+        "https://models.github.ai/inference/chat/completions",
+        api_key,
+        model,
+        msgs,
+        system,
+        {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+    )
 
 
 def _call_deepinfra(api_key, model, msgs, system=None):
-    base = (_secret("DEEPINFRA_BASE_URL") or "https://api.deepinfra.com/v1/openai").rstrip("/")
+    base = (
+        _secret("DEEPINFRA_BASE_URL") or "https://api.deepinfra.com/v1/openai"
+    ).rstrip("/")
     if OpenAI is not None:
         try:
             client = OpenAI(api_key=api_key, base_url=base, timeout=60)
             resp = client.chat.completions.create(
-                model=model, temperature=0.4, max_tokens=700,
-                messages=[{"role": "system", "content": system or SYS_PROMPT}] + msgs)
+                model=model,
+                temperature=0.4,
+                max_tokens=700,
+                messages=[{"role": "system", "content": system or SYS_PROMPT}] + msgs,
+            )
             return 200, (resp.choices[0].message.content or "").strip()
         except Exception as e:
             return (getattr(e, "status_code", None) or 500), str(e)
@@ -282,7 +402,14 @@ def _call_deepinfra(api_key, model, msgs, system=None):
 
 
 def _call_openrouter(api_key, model, msgs, system=None):
-    return _call_openai_compat("https://openrouter.ai/api/v1/chat/completions", api_key, model, msgs, system, {"X-Title": "Zeus 3.0"})
+    return _call_openai_compat(
+        "https://openrouter.ai/api/v1/chat/completions",
+        api_key,
+        model,
+        msgs,
+        system,
+        {"X-Title": "Zeus 3.0"},
+    )
 
 
 def _call_gemini_auto(api_key, model, msgs, system=None):
@@ -294,8 +421,15 @@ def _call_gemini_auto(api_key, model, msgs, system=None):
     return code, texto
 
 
-CALLERS = {"groq": _call_groq, "gemini": _call_gemini_auto, "claude": _call_claude,
-           "huggingface": _call_huggingface, "github": _call_github, "deepinfra": _call_deepinfra, "openrouter": _call_openrouter}
+CALLERS = {
+    "groq": _call_groq,
+    "gemini": _call_gemini_auto,
+    "claude": _call_claude,
+    "huggingface": _call_huggingface,
+    "github": _call_github,
+    "deepinfra": _call_deepinfra,
+    "openrouter": _call_openrouter,
+}
 
 
 def _resumo(text):
@@ -309,7 +443,10 @@ def _resumo(text):
 
 def get_llm_response(session_id, prompt, model_choice, system=None, use_history=True):
     """Retorna (ok, texto, provedor_usado, lista_de_erros)."""
-    msgs = _normalize((get_recent_context(session_id) if use_history else []) + [{"role": "user", "content": prompt}])
+    msgs = _normalize(
+        (get_recent_context(session_id) if use_history else [])
+        + [{"role": "user", "content": prompt}]
+    )
     order = [model_choice] + [p for p in PROVIDERS if p != model_choice]
     erros = []
     for prov in order:
@@ -320,7 +457,9 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
         override = _secret(MODEL_SECRET[prov])
         candidates = [override] if override else MODELS[prov]
         try:
-            ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
+            ok, text = _try_models(
+                candidates, lambda m: CALLERS[prov](api_key, m, msgs, system)
+            )
         except Exception as e:
             ok, text = False, f"erro de conexão: {e}"
         if ok:
@@ -339,7 +478,11 @@ def processar_prompt(prompt):
     st.session_state.messages.append({"role": "assistant", "content": response})
     if ok:
         add_message(sid, "assistant", response)
-        st.session_state.last_info = f"✅ Respondeu: {prov}" + (f" (falhou: {'; '.join(erros)})" if erros else "") + (" · 🌐 web: " + fonte_web if fonte_web else "")
+        st.session_state.last_info = (
+            f"✅ Respondeu: {prov}"
+            + (f" (falhou: {'; '.join(erros)})" if erros else "")
+            + (" · 🌐 web: " + fonte_web if fonte_web else "")
+        )
     else:
         st.session_state.last_info = "❌ " + " | ".join(erros)
     return response
@@ -362,9 +505,14 @@ def transcrever_audio(audio_bytes: bytes, mime: str = ""):
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {api_key}"},
             files={"file": (f"audio.{ext}", audio_bytes, base)},
-            data={"model": "whisper-large-v3-turbo", "language": "pt", "temperature": "0",
-                  "prompt": "Conversa em português do Brasil com o assistente Zeus."},
-            timeout=60)
+            data={
+                "model": "whisper-large-v3-turbo",
+                "language": "pt",
+                "temperature": "0",
+                "prompt": "Conversa em português do Brasil com o assistente Zeus.",
+            },
+            timeout=60,
+        )
         if r.status_code != 200:
             return "", f"Transcrição falhou ({r.status_code}): {r.text[:120]}"
         texto = r.json().get("text", "").strip()
@@ -391,8 +539,11 @@ VOLUME_ATUAL = "+0%"
 
 async def _edge_synth(texto, voz, rate):
     import edge_tts
+
     chunks = []
-    async for c in edge_tts.Communicate(texto, voz, rate=rate, volume=VOLUME_ATUAL, pitch=PITCH_ATUAL).stream():
+    async for c in edge_tts.Communicate(
+        texto, voz, rate=rate, volume=VOLUME_ATUAL, pitch=PITCH_ATUAL
+    ).stream():
         if c["type"] == "audio":
             chunks.append(c["data"])
     return b"".join(chunks)
@@ -405,7 +556,10 @@ def sintetizar(texto, voz, rate=1.0):
         return None
     pct = f"{int(round((rate - 1) * 100)):+d}%"
     try:
-        return asyncio.run(asyncio.wait_for(_edge_synth(texto, voz, pct), timeout=25)) or None
+        return (
+            asyncio.run(asyncio.wait_for(_edge_synth(texto, voz, pct), timeout=25))
+            or None
+        )
     except Exception as e:
         st.session_state.tts_erro = str(e)[:150]
         return None
@@ -423,12 +577,15 @@ FALLBACK_VOZES = {
 def listar_vozes_edge():
     try:
         import edge_tts
+
         todas = asyncio.run(edge_tts.list_voices())
         pt = [v for v in todas if v["Locale"].lower().startswith("pt-")]
         vozes = {}
         for v in pt:
             nome = v["ShortName"].split("-", 2)[-1].replace("Neural", "")
-            vozes[f"{nome} ({v['Locale']} {'♀' if v['Gender'] == 'Female' else '♂'})"] = v["ShortName"]
+            vozes[
+                f"{nome} ({v['Locale']} {'♀' if v['Gender'] == 'Female' else '♂'})"
+            ] = v["ShortName"]
         return vozes or FALLBACK_VOZES
     except Exception:
         return FALLBACK_VOZES
@@ -441,10 +598,39 @@ def listar_vozes_edge():
 # Secrets opcionais: GOOGLE_API_KEY + GOOGLE_CSE_ID (Programmable Search).
 # ============================================================
 WEB_TRIGGERS = (
-    "hoje", "agora", "atual", "atualmente", "últimas", "ultimas", "notícia", "noticia", "recente",
-    "pesquise", "pesquisa", "busque", "procure", "google", "internet", "na web", "cotação", "cotacao",
-    "dólar", "dolar", "preço", "preco", "clima", "previsão", "previsao", "resultado", "placar",
-    "quem ganhou", "quem é o atual", "lançamento", "lancamento", "versão mais nova", "ao vivo",
+    "hoje",
+    "agora",
+    "atual",
+    "atualmente",
+    "últimas",
+    "ultimas",
+    "notícia",
+    "noticia",
+    "recente",
+    "pesquise",
+    "pesquisa",
+    "busque",
+    "procure",
+    "google",
+    "internet",
+    "na web",
+    "cotação",
+    "cotacao",
+    "dólar",
+    "dolar",
+    "preço",
+    "preco",
+    "clima",
+    "previsão",
+    "previsao",
+    "resultado",
+    "placar",
+    "quem ganhou",
+    "quem é o atual",
+    "lançamento",
+    "lancamento",
+    "versão mais nova",
+    "ao vivo",
 )
 
 
@@ -452,13 +638,24 @@ def _search_google_cse(q, n=5):
     key, cx = _secret("GOOGLE_API_KEY"), _secret("GOOGLE_CSE_ID")
     if not (key and cx):
         return ""
-    r = requests.get("https://www.googleapis.com/customsearch/v1",
-                     params={"key": key, "cx": cx, "q": q, "num": n, "hl": "pt"}, timeout=20)
+    r = requests.get(
+        "https://www.googleapis.com/customsearch/v1",
+        params={"key": key, "cx": cx, "q": q, "num": n, "hl": "pt"},
+        timeout=20,
+    )
     if r.status_code != 200:
         return ""
     linhas = []
     for i in r.json().get("items", []):
-        linhas.append("- " + i.get("title", "") + ": " + i.get("snippet", "") + " (" + i.get("link", "") + ")")
+        linhas.append(
+            "- "
+            + i.get("title", "")
+            + ": "
+            + i.get("snippet", "")
+            + " ("
+            + i.get("link", "")
+            + ")"
+        )
     return "\n".join(linhas)
 
 
@@ -466,17 +663,31 @@ def _search_gemini_google(q):
     api_key = _secret("GEMINI_API_KEY")
     if not api_key:
         return ""
-    modelos = [m for m in [_secret("GEMINI_SEARCH_MODEL")] if m] + ["gemini-2.5-flash", "gemini-flash-latest"]
+    modelos = [m for m in [_secret("GEMINI_SEARCH_MODEL")] if m] + [
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+    ]
     for model in modelos:
         try:
             r = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
                 json={
-                    "contents": [{"role": "user", "parts": [{"text": "Pesquise no Google e responda em português com fatos atuais, datas e números: " + q}]}],
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [
+                                {
+                                    "text": "Pesquise no Google e responda em português com fatos atuais, datas e números: "
+                                    + q
+                                }
+                            ],
+                        }
+                    ],
                     "tools": [{"google_search": {}}],
                 },
-                timeout=45)
+                timeout=45,
+            )
             if r.status_code != 200:
                 continue
             cand = r.json()["candidates"][0]
@@ -503,7 +714,15 @@ def _search_ddg(q, n=5):
             res = list(d.text(q, max_results=n))
         linhas = []
         for x in res:
-            linhas.append("- " + x.get("title", "") + ": " + x.get("body", "") + " (" + x.get("href", "") + ")")
+            linhas.append(
+                "- "
+                + x.get("title", "")
+                + ": "
+                + x.get("body", "")
+                + " ("
+                + x.get("href", "")
+                + ")"
+            )
         return "\n".join(linhas)
     except Exception:
         return ""
@@ -511,18 +730,34 @@ def _search_ddg(q, n=5):
 
 def _search_wiki(q, n=4):
     try:
-        r = requests.get("https://pt.wikipedia.org/w/api.php", params={
-            "action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": n}, timeout=20)
+        r = requests.get(
+            "https://pt.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": q,
+                "format": "json",
+                "srlimit": n,
+            },
+            timeout=20,
+        )
         itens = r.json()["query"]["search"]
-        return "\n".join("- " + i["title"] + ": " + re.sub(r"<[^>]+>", "", i["snippet"]) for i in itens)
+        return "\n".join(
+            "- " + i["title"] + ": " + re.sub(r"<[^>]+>", "", i["snippet"])
+            for i in itens
+        )
     except Exception:
         return ""
 
 
 def web_search(q, n=5):
     """Retorna (texto, fonte_usada). Texto vazio se nada funcionar."""
-    for nome, fn in (("Google CSE", _search_google_cse), ("Google (Gemini)", _search_gemini_google),
-                     ("DuckDuckGo", _search_ddg), ("Wikipédia", _search_wiki)):
+    for nome, fn in (
+        ("Google CSE", _search_google_cse),
+        ("Google (Gemini)", _search_gemini_google),
+        ("DuckDuckGo", _search_ddg),
+        ("Wikipédia", _search_wiki),
+    ):
         try:
             txt = fn(q)
         except Exception:
@@ -539,7 +774,9 @@ def precisa_web(prompt):
     if modo == "Sempre":
         return True
     low = prompt.lower()
-    return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low))
+    return any(t in low for t in WEB_TRIGGERS) or bool(
+        re.search(r"\b20(2[4-9]|3[0-9])\b", low)
+    )
 
 
 def enriquecer_com_web(prompt):
@@ -550,8 +787,17 @@ def enriquecer_com_web(prompt):
     if not ctx_web:
         return prompt, ""
     hoje = time.strftime("%d/%m/%Y")
-    novo = ("[DADOS DA INTERNET em " + hoje + ", via " + fonte + "]\n" + ctx_web[:3500] + "\n[FIM DOS DADOS]\n\n"
-            "Use os dados acima se forem úteis e diga que vieram da internet. Pergunta do usuário: " + prompt)
+    novo = (
+        "[DADOS DA INTERNET em "
+        + hoje
+        + ", via "
+        + fonte
+        + "]\n"
+        + ctx_web[:3500]
+        + "\n[FIM DOS DADOS]\n\n"
+        "Use os dados acima se forem úteis e diga que vieram da internet. Pergunta do usuário: "
+        + prompt
+    )
     return novo, fonte
 
 
@@ -559,7 +805,13 @@ def enriquecer_com_web(prompt):
 # GERAÇÃO DE MÍDIA (imagem, edição de foto e vídeo) com fallback em cascata
 # ============================================================
 def _mime_img(b):
-    return "image/png" if b[:4] == b"\x89PNG" else "image/webp" if b[8:12] == b"WEBP" else "image/jpeg"
+    return (
+        "image/png"
+        if b[:4] == b"\x89PNG"
+        else "image/webp"
+        if b[8:12] == b"WEBP"
+        else "image/jpeg"
+    )
 
 
 def _to_bytes(obj):
@@ -567,6 +819,7 @@ def _to_bytes(obj):
     if isinstance(obj, (bytes, bytearray)):
         return bytes(obj)
     import io
+
     buf = io.BytesIO()
     obj.save(buf, format="PNG")
     return buf.getvalue()
@@ -574,13 +827,17 @@ def _to_bytes(obj):
 
 def _hf_client(timeout=120):
     from huggingface_hub import InferenceClient
+
     return InferenceClient(api_key=_secret("HUGGINGFACE_API_KEY"), timeout=timeout)
 
 
 def _img_hf(prompt):
     if not _secret("HUGGINGFACE_API_KEY"):
         raise RuntimeError("sem chave")
-    modelos = [m for m in [_secret("HF_IMAGE_MODEL")] if m] + ["black-forest-labs/FLUX.1-schnell", "stabilityai/stable-diffusion-xl-base-1.0"]
+    modelos = [m for m in [_secret("HF_IMAGE_MODEL")] if m] + [
+        "black-forest-labs/FLUX.1-schnell",
+        "stabilityai/stable-diffusion-xl-base-1.0",
+    ]
     erros = []
     try:
         client = _hf_client(120)
@@ -593,10 +850,15 @@ def _img_hf(prompt):
         erros.append("falta huggingface_hub no requirements.txt")
     for model in modelos:  # rota REST antiga, como reserva
         try:
-            r = requests.post(f"https://router.huggingface.co/hf-inference/models/{model}",
-                              headers={"Authorization": "Bearer " + _secret("HUGGINGFACE_API_KEY")},
-                              json={"inputs": prompt}, timeout=120)
-            if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
+            r = requests.post(
+                f"https://router.huggingface.co/hf-inference/models/{model}",
+                headers={"Authorization": "Bearer " + _secret("HUGGINGFACE_API_KEY")},
+                json={"inputs": prompt},
+                timeout=120,
+            )
+            if r.status_code == 200 and r.headers.get("content-type", "").startswith(
+                "image"
+            ):
                 return r.content
             erros.append(f"REST {model.split('/')[-1]} ({r.status_code})")
         except Exception as e:
@@ -609,10 +871,15 @@ def _gemini_image_call(parts):
     if not key:
         raise RuntimeError("sem chave")
     model = _secret("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
-    r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                      headers={"Content-Type": "application/json", "x-goog-api-key": key},
-                      json={"contents": [{"parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}},
-                      timeout=120)
+    r = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        headers={"Content-Type": "application/json", "x-goog-api-key": key},
+        json={
+            "contents": [{"parts": parts}],
+            "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+        },
+        timeout=120,
+    )
     if r.status_code != 200:
         raise RuntimeError(f"({r.status_code}) {r.text[:100]}")
     for part in r.json()["candidates"][0]["content"]["parts"]:
@@ -628,12 +895,18 @@ def _img_gemini(prompt):
 
 def _img_pollinations(prompt):
     from urllib.parse import quote
+
     ultimo = ""
     for tentativa in range(2):
-        r = requests.get("https://image.pollinations.ai/prompt/" + quote(prompt[:600]),
-                         params={"width": 1024, "height": 1024, "nologo": "true", "model": "flux"},
-                         headers={"User-Agent": "Mozilla/5.0 (Zeus/3.0)"}, timeout=120)
-        if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
+        r = requests.get(
+            "https://image.pollinations.ai/prompt/" + quote(prompt[:600]),
+            params={"width": 1024, "height": 1024, "nologo": "true", "model": "flux"},
+            headers={"User-Agent": "Mozilla/5.0 (Zeus/3.0)"},
+            timeout=120,
+        )
+        if r.status_code == 200 and r.headers.get("content-type", "").startswith(
+            "image"
+        ):
             return r.content
         ultimo = f"({r.status_code})"
         if r.status_code == 429 and tentativa == 0:
@@ -651,15 +924,27 @@ def _img_deepinfra(prompt):
     erros = []
     if OpenAI is not None:
         try:
-            client = OpenAI(api_key=key, base_url="https://api.deepinfra.com/v1/openai", timeout=120)
+            client = OpenAI(
+                api_key=key, base_url="https://api.deepinfra.com/v1/openai", timeout=120
+            )
             resp = client.images.generate(model=modelo, prompt=prompt)
             return base64.b64decode(resp.data[0].b64_json)
         except Exception as e:
             erros.append("cliente OpenAI: " + str(e)[:100])
-    for body in ({"prompt": prompt, "size": "1024x1024", "n": 1, "model": modelo}, {"prompt": prompt, "size": "1024x1024", "n": 1}):
+    for body in (
+        {"prompt": prompt, "size": "1024x1024", "n": 1, "model": modelo},
+        {"prompt": prompt, "size": "1024x1024", "n": 1},
+    ):
         try:
-            r = requests.post("https://api.deepinfra.com/v1/openai/images/generations",
-                              headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, json=body, timeout=120)
+            r = requests.post(
+                "https://api.deepinfra.com/v1/openai/images/generations",
+                headers={
+                    "Authorization": "Bearer " + key,
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=120,
+            )
             if r.status_code == 200:
                 return base64.b64decode(r.json()["data"][0]["b64_json"])
             erros.append(f"REST ({r.status_code}) {r.text[:60]}")
@@ -672,12 +957,16 @@ OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
 
 def _or_headers(key):
-    return {"Authorization": "Bearer " + key, "Content-Type": "application/json", "X-Title": "Zeus 3.0"}
+    return {
+        "Authorization": "Bearer " + key,
+        "Content-Type": "application/json",
+        "X-Title": "Zeus 3.0",
+    }
 
 
 def _or_extrair_imagem(js):
     msg = js["choices"][0]["message"]
-    for im in (msg.get("images") or []):
+    for im in msg.get("images") or []:
         url = (im.get("image_url") or {}).get("url") or im.get("url", "")
         if url.startswith("data:"):
             return base64.b64decode(url.split(",", 1)[1])
@@ -693,16 +982,31 @@ def _img_openrouter(prompt):
     modelo = _secret("OPENROUTER_IMAGE_MODEL") or "google/gemini-2.5-flash-image"
     erros = []
     try:
-        r = requests.post(OPENROUTER_BASE + "/images", headers=_or_headers(key), json={"model": modelo, "prompt": prompt}, timeout=120)
+        r = requests.post(
+            OPENROUTER_BASE + "/images",
+            headers=_or_headers(key),
+            json={"model": modelo, "prompt": prompt},
+            timeout=120,
+        )
         if r.status_code == 200:
             return base64.b64decode(r.json()["data"][0]["b64_json"])
         erros.append(f"/images ({r.status_code}) {r.text[:70]}")
     except Exception as e:
         erros.append("/images: " + str(e)[:60])
-    r = requests.post(OPENROUTER_BASE + "/chat/completions", headers=_or_headers(key),
-                      json={"model": modelo, "messages": [{"role": "user", "content": prompt}], "modalities": ["image", "text"]}, timeout=120)
+    r = requests.post(
+        OPENROUTER_BASE + "/chat/completions",
+        headers=_or_headers(key),
+        json={
+            "model": modelo,
+            "messages": [{"role": "user", "content": prompt}],
+            "modalities": ["image", "text"],
+        },
+        timeout=120,
+    )
     if r.status_code != 200:
-        raise RuntimeError(" | ".join(erros + [f"chat ({r.status_code}) {r.text[:70]}"]))
+        raise RuntimeError(
+            " | ".join(erros + [f"chat ({r.status_code}) {r.text[:70]}"])
+        )
     try:
         return _or_extrair_imagem(r.json())
     except Exception as e:
@@ -715,22 +1019,48 @@ def _edit_openrouter(img, prompt):
         raise RuntimeError("sem chave")
     modelo = _secret("OPENROUTER_IMAGE_MODEL") or "google/gemini-2.5-flash-image"
     uri = "data:" + _mime_img(img) + ";base64," + base64.b64encode(img).decode()
-    r = requests.post(OPENROUTER_BASE + "/chat/completions", headers=_or_headers(key), json={
-        "model": modelo, "modalities": ["image", "text"],
-        "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": uri}}]}]},
-        timeout=180)
+    r = requests.post(
+        OPENROUTER_BASE + "/chat/completions",
+        headers=_or_headers(key),
+        json={
+            "model": modelo,
+            "modalities": ["image", "text"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": uri}},
+                    ],
+                }
+            ],
+        },
+        timeout=180,
+    )
     if r.status_code != 200:
         raise RuntimeError(f"({r.status_code}) {r.text[:100]}")
     return _or_extrair_imagem(r.json())
 
 
 def _vis_openrouter(k, b, m, p):
-    return _vis_openai(OPENROUTER_BASE + "/chat/completions", k, _secret("OPENROUTER_VISION_MODEL") or "google/gemini-2.5-flash",
-                       b, m, p, extra={"X-Title": "Zeus 3.0"})
+    return _vis_openai(
+        OPENROUTER_BASE + "/chat/completions",
+        k,
+        _secret("OPENROUTER_VISION_MODEL") or "google/gemini-2.5-flash",
+        b,
+        m,
+        p,
+        extra={"X-Title": "Zeus 3.0"},
+    )
 
 
-IMAGE_CASCADE = [("DeepInfra", _img_deepinfra), ("OpenRouter", _img_openrouter), ("Hugging Face", _img_hf), ("Gemini", _img_gemini),
-                 ("Pollinations (sem chave)", _img_pollinations)]
+IMAGE_CASCADE = [
+    ("DeepInfra", _img_deepinfra),
+    ("OpenRouter", _img_openrouter),
+    ("Hugging Face", _img_hf),
+    ("Gemini", _img_gemini),
+    ("Pollinations (sem chave)", _img_pollinations),
+]
 
 
 def make_image(prompt, log):
@@ -746,13 +1076,26 @@ def make_image(prompt, log):
 
 # ---- edição de foto (a IA recebe a foto de verdade) ----
 def _edit_gemini(img, prompt):
-    return _gemini_image_call([{"text": prompt}, {"inline_data": {"mime_type": _mime_img(img), "data": base64.b64encode(img).decode()}}])
+    return _gemini_image_call(
+        [
+            {"text": prompt},
+            {
+                "inline_data": {
+                    "mime_type": _mime_img(img),
+                    "data": base64.b64encode(img).decode(),
+                }
+            },
+        ]
+    )
 
 
 def _edit_hf(img, prompt):
     if not _secret("HUGGINGFACE_API_KEY"):
         raise RuntimeError("sem chave")
-    modelos = [m for m in [_secret("HF_EDIT_MODEL")] if m] + ["black-forest-labs/FLUX.1-Kontext-dev", "Qwen/Qwen-Image-Edit"]
+    modelos = [m for m in [_secret("HF_EDIT_MODEL")] if m] + [
+        "black-forest-labs/FLUX.1-Kontext-dev",
+        "Qwen/Qwen-Image-Edit",
+    ]
     client = _hf_client(180)
     erros = []
     for model in modelos:
@@ -768,10 +1111,18 @@ def _edit_deepinfra(img, prompt):
     if not key:
         raise RuntimeError("sem chave")
     model = _secret("DEEPINFRA_EDIT_MODEL") or "black-forest-labs/FLUX.1-Kontext-dev"
-    r = requests.post("https://api.deepinfra.com/v1/images/edits",
-                      headers={"Authorization": "Bearer " + key},
-                      files={"image": ("foto.jpg", img, _mime_img(img))},
-                      data={"prompt": prompt, "model": model, "n": "1", "response_format": "b64_json"}, timeout=180)
+    r = requests.post(
+        "https://api.deepinfra.com/v1/images/edits",
+        headers={"Authorization": "Bearer " + key},
+        files={"image": ("foto.jpg", img, _mime_img(img))},
+        data={
+            "prompt": prompt,
+            "model": model,
+            "n": "1",
+            "response_format": "b64_json",
+        },
+        timeout=180,
+    )
     if r.status_code != 200:
         raise RuntimeError(f"({r.status_code}) {r.text[:100]}")
     d = r.json()["data"][0]
@@ -782,9 +1133,12 @@ def _edit_deepinfra(img, prompt):
     raise RuntimeError("DeepInfra não devolveu imagem")
 
 
-EDIT_CASCADE = [("DeepInfra (edita a sua foto)", _edit_deepinfra), ("OpenRouter (edita a sua foto)", _edit_openrouter),
-                ("Gemini (edita a sua foto)", _edit_gemini),
-                ("Hugging Face (edita a sua foto)", _edit_hf)]
+EDIT_CASCADE = [
+    ("DeepInfra (edita a sua foto)", _edit_deepinfra),
+    ("OpenRouter (edita a sua foto)", _edit_openrouter),
+    ("Gemini (edita a sua foto)", _edit_gemini),
+    ("Hugging Face (edita a sua foto)", _edit_hf),
+]
 
 
 def editar_imagem(img, prompt_edicao, descricao, log):
@@ -827,7 +1181,11 @@ def make_video(prompt, log, img=None):
         log.append("✅ Vídeo (texto→vídeo): " + model)
         return _to_bytes(out)
     except Exception as e:
-        log.append("❌ Vídeo texto→vídeo: " + str(e)[:160] + " (modelo pode exigir plano pago; troque com HF_VIDEO_MODEL)")
+        log.append(
+            "❌ Vídeo texto→vídeo: "
+            + str(e)[:160]
+            + " (modelo pode exigir plano pago; troque com HF_VIDEO_MODEL)"
+        )
     return None
 
 
@@ -836,8 +1194,12 @@ def make_video(prompt, log, img=None):
 # ============================================================
 def _llm(prompt, system, log, etapa):
     ok, texto, prov, erros = get_llm_response(
-        st.session_state.session_id, prompt, st.session_state.get("model_sel", "groq"),
-        system=system, use_history=False)
+        st.session_state.session_id,
+        prompt,
+        st.session_state.get("model_sel", "groq"),
+        system=system,
+        use_history=False,
+    )
     if ok:
         extra = " (fallback: " + "; ".join(erros) + ")" if erros else ""
         log.append("✅ " + etapa + ": " + str(prov) + extra)
@@ -849,34 +1211,62 @@ def _llm(prompt, system, log, etapa):
 def run_pipeline(pedido, quer_img, quer_vid):
     log = []
     contexto, fonte = web_search(pedido)
-    log.append("🔎 Busca (" + fonte + "): ok" if contexto else "⚪ Busca: sem resultados, seguindo sem dados da web")
+    log.append(
+        "🔎 Busca (" + fonte + "): ok"
+        if contexto
+        else "⚪ Busca: sem resultados, seguindo sem dados da web"
+    )
     resumo = ""
     if contexto:
-        resumo = _llm("Pedido: " + pedido + "\n\nContexto da web:\n" + contexto[:4000],
-                      "Você é um pesquisador. Resuma em português, em até 8 linhas objetivas, os fatos úteis do contexto para atender ao pedido. Não invente nada.",
-                      log, "Resumo da pesquisa")
-    sys_b = ("Você é engenheiro de prompts para IAs de mídia. Responda EXATAMENTE em 2 linhas, sem mais nada:\n"
-             "IMAGEM: <prompt detalhado em inglês: sujeito, estilo, iluminação, composição, cores, câmera>\n"
-             "VIDEO: <prompt em inglês descrevendo ação e movimento de câmera em 5 segundos>")
-    bruto = _llm("Pedido: " + pedido + "\n\nFatos:\n" + resumo, sys_b, log, "Prompt otimizado")
+        resumo = _llm(
+            "Pedido: " + pedido + "\n\nContexto da web:\n" + contexto[:4000],
+            "Você é um pesquisador. Resuma em português, em até 8 linhas objetivas, os fatos úteis do contexto para atender ao pedido. Não invente nada.",
+            log,
+            "Resumo da pesquisa",
+        )
+    sys_b = (
+        "Você é engenheiro de prompts para IAs de mídia. Responda EXATAMENTE em 2 linhas, sem mais nada:\n"
+        "IMAGEM: <prompt detalhado em inglês: sujeito, estilo, iluminação, composição, cores, câmera>\n"
+        "VIDEO: <prompt em inglês descrevendo ação e movimento de câmera em 5 segundos>"
+    )
+    bruto = _llm(
+        "Pedido: " + pedido + "\n\nFatos:\n" + resumo, sys_b, log, "Prompt otimizado"
+    )
     m_img = re.search(r"IMAGEM:\s*(.+)", bruto or "")
     m_vid = re.search(r"VIDEO:\s*(.+)", bruto or "")
     prompt_img = m_img.group(1).strip() if m_img else pedido
     prompt_vid = m_vid.group(1).strip() if m_vid else prompt_img
     img = make_image(prompt_img, log) if quer_img else None
     vid = make_video(prompt_vid, log) if quer_vid else None
-    return {"log": log, "resumo": resumo, "prompt_img": prompt_img, "prompt_vid": prompt_vid, "img": img, "vid": vid}
+    return {
+        "log": log,
+        "resumo": resumo,
+        "prompt_img": prompt_img,
+        "prompt_vid": prompt_vid,
+        "img": img,
+        "vid": vid,
+    }
 
 
 def render_pipeline_ui():
-    with st.expander("🔗 Pipeline Multi-IA (busca → prompt otimizado → imagem/vídeo)", expanded=False):
-        pedido = st.text_area("O que você quer criar?", key="pipe_req", placeholder="Ex.: um dragão de cristal sobre uma cidade futurista em 2026")
+    with st.expander(
+        "🔗 Pipeline Multi-IA (busca → prompt otimizado → imagem/vídeo)", expanded=False
+    ):
+        pedido = st.text_area(
+            "O que você quer criar?",
+            key="pipe_req",
+            placeholder="Ex.: um dragão de cristal sobre uma cidade futurista em 2026",
+        )
         c1, c2 = st.columns(2)
         quer_img = c1.checkbox("🖼️ Gerar imagem", value=True, key="pipe_img")
-        quer_vid = c2.checkbox("🎬 Gerar vídeo (experimental)", value=False, key="pipe_vid")
+        quer_vid = c2.checkbox(
+            "🎬 Gerar vídeo (experimental)", value=False, key="pipe_vid"
+        )
         if st.button("🚀 Executar pipeline", key="pipe_run") and pedido.strip():
             with st.spinner("Encadeando IAs..."):
-                st.session_state.pipe_res = run_pipeline(pedido.strip(), quer_img, quer_vid)
+                st.session_state.pipe_res = run_pipeline(
+                    pedido.strip(), quer_img, quer_vid
+                )
         res = st.session_state.get("pipe_res")
         if res:
             if res["resumo"]:
@@ -888,7 +1278,9 @@ def render_pipeline_ui():
                 st.image(res["img"], caption="Imagem gerada")
             if res["vid"]:
                 st.video(res["vid"])
-            with st.expander("Log do pipeline e fallbacks", expanded=not (res["img"] or res["vid"])):
+            with st.expander(
+                "Log do pipeline e fallbacks", expanded=not (res["img"] or res["vid"])
+            ):
                 st.write("\n\n".join(res["log"]))
 
 
@@ -899,30 +1291,62 @@ def _vis_openai(url, key, model, img_b64, mime, prompt, extra=None):
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
     if extra:
         headers.update(extra)
-    r = requests.post(url, headers=headers, json={
-        "model": model, "max_tokens": 700,
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": "data:" + mime + ";base64," + img_b64}}]}]}, timeout=60)
+    r = requests.post(
+        url,
+        headers=headers,
+        json={
+            "model": model,
+            "max_tokens": 700,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:" + mime + ";base64," + img_b64},
+                        },
+                    ],
+                }
+            ],
+        },
+        timeout=60,
+    )
     if r.status_code != 200:
         raise RuntimeError(f"({r.status_code}) {r.text[:90]}")
     return (r.json()["choices"][0]["message"].get("content") or "").strip()
 
 
 def _vis_groq(k, b, m, p):
-    return _vis_openai("https://api.groq.com/openai/v1/chat/completions", k,
-                       _secret("GROQ_VISION_MODEL") or "meta-llama/llama-4-scout-17b-16e-instruct", b, m, p)
+    return _vis_openai(
+        "https://api.groq.com/openai/v1/chat/completions",
+        k,
+        _secret("GROQ_VISION_MODEL") or "meta-llama/llama-4-scout-17b-16e-instruct",
+        b,
+        m,
+        p,
+    )
 
 
 def _gemini_generate(key, payload, modelos=None):
-    modelos = modelos or ([x for x in [_secret("GEMINI_VISION_MODEL")] if x] + ["gemini-2.5-flash", "gemini-flash-latest"])
+    modelos = modelos or (
+        [x for x in [_secret("GEMINI_VISION_MODEL")] if x]
+        + ["gemini-2.5-flash", "gemini-flash-latest"]
+    )
     ultimo = ""
     for model in modelos:
         for ver in ("v1", "v1beta"):
-            r = requests.post(f"https://generativelanguage.googleapis.com/{ver}/models/{model}:generateContent",
-                              headers={"Content-Type": "application/json", "x-goog-api-key": key}, json=payload, timeout=90)
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/{ver}/models/{model}:generateContent",
+                headers={"Content-Type": "application/json", "x-goog-api-key": key},
+                json=payload,
+                timeout=90,
+            )
             if r.status_code == 200:
-                return "".join(x.get("text", "") for x in r.json()["candidates"][0]["content"]["parts"]).strip()
+                return "".join(
+                    x.get("text", "")
+                    for x in r.json()["candidates"][0]["content"]["parts"]
+                ).strip()
             ultimo = f"({r.status_code}) {r.text[:90]}"
             if r.status_code in (401, 403, 429):
                 raise RuntimeError(ultimo)
@@ -935,52 +1359,129 @@ def analisar_imagem(img_b64, mime, pergunta):
     if not key:
         return "❌ GEMINI_API_KEY ausente."
     try:
-        return _gemini_generate(key, {"contents": [{"role": "user", "parts": [
-            {"text": pergunta}, {"inline_data": {"mime_type": mime, "data": img_b64}}]}]})
+        return _gemini_generate(
+            key,
+            {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": pergunta},
+                            {"inline_data": {"mime_type": mime, "data": img_b64}},
+                        ],
+                    }
+                ]
+            },
+        )
     except Exception as e:
         return "❌ Erro na análise: " + str(e)[:200]
 
 
 def _vis_gemini(k, b, m, p):
-    return _gemini_generate(k, {"contents": [{"role": "user", "parts": [
-        {"text": p}, {"inline_data": {"mime_type": m, "data": b}}]}]})
+    return _gemini_generate(
+        k,
+        {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": p},
+                        {"inline_data": {"mime_type": m, "data": b}},
+                    ],
+                }
+            ]
+        },
+    )
 
 
 def _vis_claude(k, b, m, p):
     model = _secret("ANTHROPIC_MODEL") or "claude-haiku-5-5"
-    r = requests.post("https://api.anthropic.com/v1/messages",
-                      headers={"x-api-key": k, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
-                      json={"model": model, "max_tokens": 900, "messages": [{"role": "user", "content": [
-                          {"type": "image", "source": {"type": "base64", "media_type": m, "data": b}},
-                          {"type": "text", "text": p}]}]}, timeout=60)
+    r = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": k,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "max_tokens": 900,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": m, "data": b},
+                        },
+                        {"type": "text", "text": p},
+                    ],
+                }
+            ],
+        },
+        timeout=60,
+    )
     if r.status_code != 200:
         raise RuntimeError(f"({r.status_code}) {r.text[:90]}")
     return "".join(x.get("text", "") for x in r.json()["content"]).strip()
 
 
 def _vis_hf(k, b, m, p):
-    return _vis_openai("https://router.huggingface.co/v1/chat/completions", k,
-                       _secret("HF_VISION_MODEL") or "Qwen/Qwen2.5-VL-7B-Instruct", b, m, p)
+    return _vis_openai(
+        "https://router.huggingface.co/v1/chat/completions",
+        k,
+        _secret("HF_VISION_MODEL") or "Qwen/Qwen2.5-VL-7B-Instruct",
+        b,
+        m,
+        p,
+    )
 
 
 def _vis_github(k, b, m, p):
-    return _vis_openai("https://models.github.ai/inference/chat/completions", k,
-                       _secret("GITHUB_VISION_MODEL") or "openai/gpt-4.1-mini", b, m, p,
-                       extra={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+    return _vis_openai(
+        "https://models.github.ai/inference/chat/completions",
+        k,
+        _secret("GITHUB_VISION_MODEL") or "openai/gpt-4.1-mini",
+        b,
+        m,
+        p,
+        extra={
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
 
 
 def _vis_deepinfra(k, b, m, p):
-    modelos = [x for x in [_secret("DEEPINFRA_VISION_MODEL")] if x] + ["Qwen/Qwen2.5-VL-32B-Instruct", "meta-llama/Llama-3.2-11B-Vision-Instruct"]
+    modelos = [x for x in [_secret("DEEPINFRA_VISION_MODEL")] if x] + [
+        "Qwen/Qwen2.5-VL-32B-Instruct",
+        "meta-llama/Llama-3.2-11B-Vision-Instruct",
+    ]
     ultimo = None
     for model in modelos:
         try:
-            return _vis_openai("https://api.deepinfra.com/v1/openai/chat/completions", k, model, b, m, p)
+            return _vis_openai(
+                "https://api.deepinfra.com/v1/openai/chat/completions",
+                k,
+                model,
+                b,
+                m,
+                p,
+            )
         except Exception as e:
             ultimo = e
     raise ultimo
 
 
-VISION_CASCADE = {"deepinfra": _vis_deepinfra, "openrouter": _vis_openrouter, "groq": _vis_groq, "gemini": _vis_gemini, "claude": _vis_claude, "huggingface": _vis_hf, "github": _vis_github}
+VISION_CASCADE = {
+    "deepinfra": _vis_deepinfra,
+    "openrouter": _vis_openrouter,
+    "groq": _vis_groq,
+    "gemini": _vis_gemini,
+    "claude": _vis_claude,
+    "huggingface": _vis_hf,
+    "github": _vis_github,
+}
 
 
 def ask_vision(img_bytes, comando):
@@ -1040,32 +1541,65 @@ MOVIMENTOS_VIDEO = {
 
 def executar_estudio(img, comando, acao, estilo="Automático", movimento="Automático"):
     log = []
-    extra_estilo, extra_mov = ESTILOS_FOTO.get(estilo, ""), MOVIMENTOS_VIDEO.get(movimento, "")
-    res = {"orig": img, "acao": acao, "desc": "", "prompt_edit": "", "prompt_vid": "", "img": None, "modo_img": "", "vid": None, "log": log}
+    extra_estilo, extra_mov = ESTILOS_FOTO.get(estilo, ""), MOVIMENTOS_VIDEO.get(
+        movimento, ""
+    )
+    res = {
+        "orig": img,
+        "acao": acao,
+        "desc": "",
+        "prompt_edit": "",
+        "prompt_vid": "",
+        "img": None,
+        "modo_img": "",
+        "vid": None,
+        "log": log,
+    }
     if acao == "Descrever":
         txt, prov, vlog = ask_vision(img, comando or "Descreva o que você vê.")
         log.extend(vlog)
         res["desc"] = txt or ""
         return res
     # 1) visão: a IA enxerga a foto
-    desc, prov, vlog = ask_vision(img, "Describe this photo in detail in English (people, clothing, pose, background, colors, lighting, framing). Max 8 lines.")
+    desc, prov, vlog = ask_vision(
+        img,
+        "Describe this photo in detail in English (people, clothing, pose, background, colors, lighting, framing). Max 8 lines.",
+    )
     log.extend(vlog)
     res["desc"] = desc or ""
     # 2) IA de texto transforma pedido + descrição em comandos para as IAs de mídia
-    sys_p = ("You are a prompt engineer for image-editing and video AIs. Reply EXACTLY 2 lines, nothing else:\n"
-             "EDIT: <instruction to edit the ORIGINAL photo as requested, keeping the person's identity, pose and composition>\n"
-             "VIDEO: <5-second motion prompt: subtle animation and camera movement for this photo>")
-    bruto = _llm("Photo description:\n" + (desc or "(unavailable)") + "\n\nUser request (Portuguese): " + (comando or "melhore esta foto")
-                 + ("\n\nRequired visual style: " + extra_estilo if extra_estilo else "")
-                 + ("\n\nCamera motion for the video: " + extra_mov if extra_mov else ""),
-                 sys_p, log, "Comando para as IAs de imagem")
+    sys_p = (
+        "You are a prompt engineer for image-editing and video AIs. Reply EXACTLY 2 lines, nothing else:\n"
+        "EDIT: <instruction to edit the ORIGINAL photo as requested, keeping the person's identity, pose and composition>\n"
+        "VIDEO: <5-second motion prompt: subtle animation and camera movement for this photo>"
+    )
+    bruto = _llm(
+        "Photo description:\n"
+        + (desc or "(unavailable)")
+        + "\n\nUser request (Portuguese): "
+        + (comando or "melhore esta foto")
+        + ("\n\nRequired visual style: " + extra_estilo if extra_estilo else "")
+        + ("\n\nCamera motion for the video: " + extra_mov if extra_mov else ""),
+        sys_p,
+        log,
+        "Comando para as IAs de imagem",
+    )
     m_e = re.search(r"EDIT:\s*(.+)", bruto or "")
     m_v = re.search(r"VIDEO:\s*(.+)", bruto or "")
-    res["prompt_edit"] = m_e.group(1).strip() if m_e else ((comando or "enhance this photo, keep identity") + (", " + extra_estilo if extra_estilo else ""))
+    res["prompt_edit"] = (
+        m_e.group(1).strip()
+        if m_e
+        else (
+            (comando or "enhance this photo, keep identity")
+            + (", " + extra_estilo if extra_estilo else "")
+        )
+    )
     res["prompt_vid"] = m_v.group(1).strip() if m_v else res["prompt_edit"]
     # 3) IA de imagem recebe a foto + comando
     if acao in ("Editar foto", "Editar foto + vídeo"):
-        res["img"], res["modo_img"] = editar_imagem(img, res["prompt_edit"], desc or "", log)
+        res["img"], res["modo_img"] = editar_imagem(
+            img, res["prompt_edit"], desc or "", log
+        )
     # 4) IA de vídeo anima a foto (original ou editada)
     if acao in ("Criar vídeo", "Editar foto + vídeo"):
         res["vid"] = make_video(res["prompt_vid"], log, res["img"] or img)
@@ -1082,12 +1616,28 @@ def mostrar_estudio_res(res):
     if res.get("img"):
         c1, c2 = st.columns(2)
         c1.image(res["orig"], caption="Original")
-        legenda = "Foto editada" if res["modo_img"] == "editada" else "Recriada a partir da descrição (nenhuma IA conseguiu editar a original)"
+        legenda = (
+            "Foto editada"
+            if res["modo_img"] == "editada"
+            else "Recriada a partir da descrição (nenhuma IA conseguiu editar a original)"
+        )
         c2.image(res["img"], caption=legenda)
-        c2.download_button("⬇️ Baixar foto", res["img"], file_name="zeus_foto.png", mime="image/png", key="dl_estudio_img")
+        c2.download_button(
+            "⬇️ Baixar foto",
+            res["img"],
+            file_name="zeus_foto.png",
+            mime="image/png",
+            key="dl_estudio_img",
+        )
     if res.get("vid"):
         st.video(res["vid"])
-        st.download_button("⬇️ Baixar vídeo", res["vid"], file_name="zeus_video.mp4", mime="video/mp4", key="dl_estudio_vid")
+        st.download_button(
+            "⬇️ Baixar vídeo",
+            res["vid"],
+            file_name="zeus_video.mp4",
+            mime="video/mp4",
+            key="dl_estudio_vid",
+        )
     pediu_midia = res.get("acao") != "Descrever"
     falhou = pediu_midia and not (res.get("img") or res.get("vid"))
     with st.expander("Log das IAs (erros e fallbacks)", expanded=falhou):
@@ -1097,7 +1647,11 @@ def mostrar_estudio_res(res):
 def render_estudio_ui():
     tem = bool(st.session_state.get("estudio_res"))
     with st.expander("🎨 Estúdio Multi-IA (foto → editar → vídeo)", expanded=tem):
-        up = st.file_uploader("📁 Enviar uma foto (ou use a câmera do menu lateral)", type=["jpg", "jpeg", "png", "webp"], key="estudio_up")
+        up = st.file_uploader(
+            "📁 Enviar uma foto (ou use a câmera do menu lateral)",
+            type=["jpg", "jpeg", "png", "webp"],
+            key="estudio_up",
+        )
         if up is not None:
             dados = up.getvalue()
             h = hashlib.md5(dados).hexdigest()
@@ -1109,14 +1663,24 @@ def render_estudio_ui():
             st.image(foto, caption="Foto ativa", width=220)
         else:
             st.info("Tire uma foto na câmera lateral ou envie uma aqui.")
-        comando = st.text_input("O que fazer com a foto?", value="Melhore esta foto deixando-a mais nítida e com visual cyberpunk", key="estudio_cmd")
+        comando = st.text_input(
+            "O que fazer com a foto?",
+            value="Melhore esta foto deixando-a mais nítida e com visual cyberpunk",
+            key="estudio_cmd",
+        )
         acao = st.radio("Ação", ACOES, index=1, key="estudio_acao", horizontal=True)
         col_a, col_b = st.columns(2)
-        estilo = col_a.selectbox("🎨 Estilo da foto", list(ESTILOS_FOTO.keys()), key="estudio_estilo")
-        movimento = col_b.selectbox("🎬 Movimento do vídeo", list(MOVIMENTOS_VIDEO.keys()), key="estudio_mov")
+        estilo = col_a.selectbox(
+            "🎨 Estilo da foto", list(ESTILOS_FOTO.keys()), key="estudio_estilo"
+        )
+        movimento = col_b.selectbox(
+            "🎬 Movimento do vídeo", list(MOVIMENTOS_VIDEO.keys()), key="estudio_mov"
+        )
         if st.button("🚀 Executar", key="estudio_run", disabled=not foto):
             with st.spinner("As IAs estão conversando entre si..."):
-                st.session_state.estudio_res = executar_estudio(foto, comando, acao, estilo, movimento)
+                st.session_state.estudio_res = executar_estudio(
+                    foto, comando, acao, estilo, movimento
+                )
             st.rerun()
         res = st.session_state.get("estudio_res")
         if res:
@@ -1126,7 +1690,9 @@ def render_estudio_ui():
 def render_camera_sidebar():
     st.subheader("📷 Câmera direta")
     foto = st.camera_input("Tirar foto", key="cam_foto", label_visibility="collapsed")
-    comando = st.text_input("Comando para a foto", value="Descreva o que você vê.", key="cam_cmd")
+    comando = st.text_input(
+        "Comando para a foto", value="Descreva o que você vê.", key="cam_cmd"
+    )
     acao = st.selectbox("Ação", ACOES, key="cam_acao")
     if foto is not None:
         dados = foto.getvalue()
@@ -1134,15 +1700,21 @@ def render_camera_sidebar():
         nova = h != st.session_state.get("cam_last")
         if nova:
             st.session_state.foto_bytes = dados
-        if nova or st.button("▶ Rodar de novo", key="cam_run", use_container_width=True):
+        if nova or st.button(
+            "▶ Rodar de novo", key="cam_run", use_container_width=True
+        ):
             st.session_state.cam_last = h
             with st.spinner("As IAs estão trabalhando na foto..."):
                 res = executar_estudio(dados, comando, acao)
             st.session_state.estudio_res = res
             if acao == "Descrever" and res.get("desc"):
                 sid = st.session_state.session_id
-                st.session_state.messages.append({"role": "user", "content": "📷 " + comando})
-                st.session_state.messages.append({"role": "assistant", "content": res["desc"]})
+                st.session_state.messages.append(
+                    {"role": "user", "content": "📷 " + comando}
+                )
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": res["desc"]}
+                )
                 add_message(sid, "user", "📷 " + comando)
                 add_message(sid, "assistant", res["desc"])
     res = st.session_state.get("estudio_res")
@@ -1154,7 +1726,9 @@ def render_camera_sidebar():
 
 def render_visao_gerar_sidebar():
     st.subheader("👁️ Analisar imagem")
-    arq = st.file_uploader("Enviar imagem", type=["png", "jpg", "jpeg", "webp"], key="side_up")
+    arq = st.file_uploader(
+        "Enviar imagem", type=["png", "jpg", "jpeg", "webp"], key="side_up"
+    )
     if arq is not None:
         dados = arq.getvalue()
         h = hashlib.md5(dados).hexdigest()
@@ -1162,13 +1736,21 @@ def render_visao_gerar_sidebar():
             st.session_state.side_up_last = h
             st.session_state.foto_bytes = dados  # também vira a foto ativa do Estúdio
         st.image(dados, use_container_width=True)
-        pergunta = st.text_input("Pergunta sobre a imagem", value="Descreva esta imagem.", key="side_q")
-        if st.button("🔍 Analisar imagem", key="side_analisar", use_container_width=True):
+        pergunta = st.text_input(
+            "Pergunta sobre a imagem", value="Descreva esta imagem.", key="side_q"
+        )
+        if st.button(
+            "🔍 Analisar imagem", key="side_analisar", use_container_width=True
+        ):
             with st.spinner("Analisando..."):
-                resp = analisar_imagem(base64.b64encode(dados).decode("utf-8"), _mime_img(dados), pergunta)
+                resp = analisar_imagem(
+                    base64.b64encode(dados).decode("utf-8"), _mime_img(dados), pergunta
+                )
             st.session_state.side_analise = resp
             sid = st.session_state.session_id
-            st.session_state.messages.append({"role": "user", "content": "🖼️ " + pergunta})
+            st.session_state.messages.append(
+                {"role": "user", "content": "🖼️ " + pergunta}
+            )
             st.session_state.messages.append({"role": "assistant", "content": resp})
             add_message(sid, "user", "🖼️ " + pergunta)
             add_message(sid, "assistant", resp)
@@ -1178,17 +1760,30 @@ def render_visao_gerar_sidebar():
     st.subheader("🎨 Gerar imagem")
     estilo_g = st.selectbox("Estilo", list(ESTILOS_FOTO.keys()), key="side_estilo")
     prompt_img = st.text_input("Prompt da imagem", key="side_prompt")
-    if st.button("✨ Gerar", key="side_gerar", use_container_width=True) and prompt_img.strip():
+    if (
+        st.button("✨ Gerar", key="side_gerar", use_container_width=True)
+        and prompt_img.strip()
+    ):
         glog = []
         with st.spinner("Gerando imagem..."):
-            img = make_image(prompt_img.strip() + (", " + ESTILOS_FOTO[estilo_g] if ESTILOS_FOTO.get(estilo_g) else ""), glog)
+            img = make_image(
+                prompt_img.strip()
+                + (", " + ESTILOS_FOTO[estilo_g] if ESTILOS_FOTO.get(estilo_g) else ""),
+                glog,
+            )
         st.session_state.side_img = (img, glog)
     resg = st.session_state.get("side_img")
     if resg:
         img, glog = resg
         if img:
             st.image(img)
-            st.download_button("⬇️ Baixar imagem", img, file_name="zeus_imagem.png", mime="image/png", key="dl_side_img")
+            st.download_button(
+                "⬇️ Baixar imagem",
+                img,
+                file_name="zeus_imagem.png",
+                mime="image/png",
+                key="dl_side_img",
+            )
         else:
             st.error("Não consegui gerar a imagem. Veja o log.")
         with st.expander("Log da geração", expanded=not img):
@@ -1217,12 +1812,22 @@ def listar_todas_vozes_edge():
     """Todas as vozes neurais do Edge (português primeiro). Multilíngues falam português com sotaque."""
     try:
         import edge_tts
+
         todas = asyncio.run(edge_tts.list_voices())
-        ordenadas = sorted(todas, key=lambda x: (not x["ShortName"].startswith("pt-"), x["Locale"], x["ShortName"]))
+        ordenadas = sorted(
+            todas,
+            key=lambda x: (
+                not x["ShortName"].startswith("pt-"),
+                x["Locale"],
+                x["ShortName"],
+            ),
+        )
         vozes = {}
         for v in ordenadas:
             nome = v["ShortName"].split("-", 2)[-1].replace("Neural", "")
-            vozes[f"{nome} ({v['Locale']} {'♀' if v['Gender'] == 'Female' else '♂'})"] = v["ShortName"]
+            vozes[
+                f"{nome} ({v['Locale']} {'♀' if v['Gender'] == 'Female' else '♂'})"
+            ] = v["ShortName"]
         return vozes or FALLBACK_VOZES_EXTRA
     except Exception:
         return FALLBACK_VOZES_EXTRA
@@ -1235,13 +1840,53 @@ def listar_todas_vozes_edge():
 # ============================================================
 TRANSITORIOS = (429, 500, 502, 503, 504, 529)
 SKILLS_IMPORTS_OK = {
-    "math", "re", "json", "datetime", "random", "statistics", "collections", "itertools", "functools",
-    "textwrap", "string", "unicodedata", "decimal", "fractions", "base64", "hashlib", "typing", "urllib",
-    "requests", "time", "html", "uuid", "calendar", "operator", "heapq", "bisect", "copy", "dataclasses", "enum",
+    "math",
+    "re",
+    "json",
+    "datetime",
+    "random",
+    "statistics",
+    "collections",
+    "itertools",
+    "functools",
+    "textwrap",
+    "string",
+    "unicodedata",
+    "decimal",
+    "fractions",
+    "base64",
+    "hashlib",
+    "typing",
+    "urllib",
+    "requests",
+    "time",
+    "html",
+    "uuid",
+    "calendar",
+    "operator",
+    "heapq",
+    "bisect",
+    "copy",
+    "dataclasses",
+    "enum",
 }
 SKILLS_NOMES_PROIBIDOS = {
-    "eval", "exec", "compile", "open", "__import__", "input", "breakpoint", "globals", "locals", "vars",
-    "getattr", "setattr", "delattr", "exit", "quit", "memoryview",
+    "eval",
+    "exec",
+    "compile",
+    "open",
+    "__import__",
+    "input",
+    "breakpoint",
+    "globals",
+    "locals",
+    "vars",
+    "getattr",
+    "setattr",
+    "delattr",
+    "exit",
+    "quit",
+    "memoryview",
 }
 SYS_HABILIDADE = (
     "Você é um engenheiro Python sênior. Escreva funções Python puras e seguras que implementem o pedido. "
@@ -1265,15 +1910,29 @@ def validar_codigo_habilidade(codigo):
     except SyntaxError as e:
         return False, f"erro de sintaxe na linha {e.lineno}: {e.msg}"
     for no in arvore.body:
-        if isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Import, ast.ImportFrom)):
+        if isinstance(
+            no, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Import, ast.ImportFrom)
+        ):
             continue
-        if isinstance(no, ast.Expr) and isinstance(getattr(no, "value", None), ast.Constant):
+        if isinstance(no, ast.Expr) and isinstance(
+            getattr(no, "value", None), ast.Constant
+        ):
             continue  # docstring
-        if (isinstance(no, ast.Assign) and all(isinstance(t, ast.Name) for t in no.targets)
-                and isinstance(no.value, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set))):
+        if (
+            isinstance(no, ast.Assign)
+            and all(isinstance(t, ast.Name) for t in no.targets)
+            and isinstance(
+                no.value, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set)
+            )
+        ):
             continue  # constantes simples
-        return False, "só são permitidos imports, funções e constantes no nível principal"
-    if not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in arvore.body):
+        return (
+            False,
+            "só são permitidos imports, funções e constantes no nível principal",
+        )
+    if not any(
+        isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in arvore.body
+    ):
         return False, "nenhuma função encontrada no código"
     for no in ast.walk(arvore):
         if isinstance(no, ast.Import):
@@ -1301,16 +1960,28 @@ def _claude_raw(sistema, pedido, max_tokens):
         try:
             r = requests.post(
                 "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": modelo, "max_tokens": max_tokens, "system": sistema,
-                      "messages": [{"role": "user", "content": pedido}]},
-                timeout=120)
+                headers={
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": modelo,
+                    "max_tokens": max_tokens,
+                    "system": sistema,
+                    "messages": [{"role": "user", "content": pedido}],
+                },
+                timeout=120,
+            )
         except Exception as e:
             return 503, "erro de conexão: " + str(e)[:100]
         if r.status_code == 200:
             return 200, "".join(b.get("text", "") for b in r.json()["content"])
         ultimo = (r.status_code, r.text[:200])
-        if r.status_code not in (400, 404):  # 400/404 = modelo indisponível: tenta o próximo
+        if r.status_code not in (
+            400,
+            404,
+        ):  # 400/404 = modelo indisponível: tenta o próximo
             break
     return ultimo
 
@@ -1320,15 +1991,23 @@ def _gemini_plano_b(sistema, pedido):
     if not key:
         return None
     try:
-        return _gemini_generate(key, {"contents": [{"role": "user", "parts": [{"text": sistema + "\n\n" + pedido}]}]},
-                                modelos=MODELS["gemini"])
+        return _gemini_generate(
+            key,
+            {
+                "contents": [
+                    {"role": "user", "parts": [{"text": sistema + "\n\n" + pedido}]}
+                ]
+            },
+            modelos=MODELS["gemini"],
+        )
     except Exception:
         return None
 
 
 def gerar_com_prioridade_claude(sistema, pedido, max_tokens=2500):
     """Claude PRIMEIRO. Se estiver ocupado (429/503...), entra na fila e tenta de novo
-    (até 3 vezes, esperando 60 s). Depois, Gemini como plano B. Retorna (texto, provedor) ou (None, None)."""
+    (até 3 vezes, esperando 60 s). Depois, Gemini como plano B. Retorna (texto, provedor) ou (None, None).
+    """
     fila = st.session_state.setdefault("fila_habilidades", [])
     fila.append(pedido)
     aviso = st.empty()
@@ -1342,7 +2021,9 @@ def gerar_com_prioridade_claude(sistema, pedido, max_tokens=2500):
             aviso.warning("⏳ Claude ocupado. Entrando na fila de espera...")
             st.session_state.fila_habilidades = fila
             if tentativa < 3:
-                st.caption(f"Pedidos na fila: {len(fila)} · tentativa {tentativa}/3 · nova tentativa em 60 s")
+                st.caption(
+                    f"Pedidos na fila: {len(fila)} · tentativa {tentativa}/3 · nova tentativa em 60 s"
+                )
                 time.sleep(60)
         aviso.info("🔁 Claude indisponível. Usando o Gemini como plano B...")
         texto = _gemini_plano_b(sistema, pedido)
@@ -1368,15 +2049,20 @@ def _recarregar_skills():
 def listar_habilidades():
     try:
         mod = importlib.import_module("zeus_skills")
-        return {n: f for n, f in inspect.getmembers(mod, inspect.isfunction)
-                if not n.startswith("_") and f.__module__ == mod.__name__}
+        return {
+            n: f
+            for n, f in inspect.getmembers(mod, inspect.isfunction)
+            if not n.startswith("_") and f.__module__ == mod.__name__
+        }
     except Exception:
         return {}
 
 
 def aprender_nova_habilidade(prompt_usuario):
     """Gera (Claude -> Gemini), valida com ast, salva no GitHub e recarrega o app."""
-    texto, prov = gerar_com_prioridade_claude(SYS_HABILIDADE, "Pedido: " + prompt_usuario)
+    texto, prov = gerar_com_prioridade_claude(
+        SYS_HABILIDADE, "Pedido: " + prompt_usuario
+    )
     if not texto:
         st.error("❌ Não foi possível gerar o código agora. Tente novamente mais tarde.")
         return False
@@ -1387,11 +2073,19 @@ def aprender_nova_habilidade(prompt_usuario):
         with st.expander("Ver o código recusado"):
             st.code(codigo, language="python")
         return False
-    st.session_state.ultima_habilidade = {"pedido": prompt_usuario, "codigo": codigo, "provedor": prov}
+    st.session_state.ultima_habilidade = {
+        "pedido": prompt_usuario,
+        "codigo": codigo,
+        "provedor": prov,
+    }
     if salvar_no_github is None:
-        st.error("❌ github_manager.py não encontrado ao lado do app.py. Use a pasta completa do projeto.")
+        st.error(
+            "❌ github_manager.py não encontrado ao lado do app.py. Use a pasta completa do projeto."
+        )
         return False
-    ok2, msg2 = salvar_no_github(codigo, "Zeus: nova habilidade - " + prompt_usuario[:60])
+    ok2, msg2 = salvar_no_github(
+        codigo, "Zeus: nova habilidade - " + prompt_usuario[:60]
+    )
     if not ok2:
         st.error("❌ Não consegui salvar no GitHub: " + msg2)
         return False
@@ -1427,7 +2121,9 @@ def _parse_arquivos(texto):
             try:
                 ast.parse(conteudo)
             except SyntaxError as e:
-                avisos.append(f"{caminho}: erro de sintaxe na linha {e.lineno} ({e.msg})")
+                avisos.append(
+                    f"{caminho}: erro de sintaxe na linha {e.lineno} ({e.msg})"
+                )
         arquivos[caminho] = conteudo.rstrip() + "\n"
     return arquivos, avisos
 
@@ -1448,14 +2144,23 @@ def criar_projeto_zip(descricao):
         return None
     arquivos, avisos = _parse_arquivos(texto)
     if not arquivos:
-        st.error("❌ A IA não devolveu arquivos no formato esperado. Tente reformular o pedido.")
+        st.error(
+            "❌ A IA não devolveu arquivos no formato esperado. Tente reformular o pedido."
+        )
         return None
-    pasta = re.sub(r"[^a-z0-9]+", "_", descricao.lower()).strip("_")[:30] or "projeto_zeus"
-    return {"pasta": pasta, "arquivos": arquivos, "avisos": avisos, "provedor": prov,
-            "zip": montar_zip(pasta, arquivos)}
+    pasta = (
+        re.sub(r"[^a-z0-9]+", "_", descricao.lower()).strip("_")[:30] or "projeto_zeus"
+    )
+    return {
+        "pasta": pasta,
+        "arquivos": arquivos,
+        "avisos": avisos,
+        "provedor": prov,
+        "zip": montar_zip(pasta, arquivos),
+    }
 
 
-SECRETS_EXEMPLO = '''GROQ_API_KEY = "cole_aqui"
+SECRETS_EXEMPLO = """GROQ_API_KEY = "cole_aqui"
 GEMINI_API_KEY = "cole_aqui"
 ANTHROPIC_API_KEY = "cole_aqui"
 HUGGINGFACE_API_KEY = "cole_aqui"
@@ -1464,7 +2169,7 @@ GITHUB_USER = "seu_usuario"
 GITHUB_REPO = "seu_repositorio"
 DEEPINFRA_API_KEY = "cole_aqui"
 OPENROUTER_API_KEY = "cole_aqui"
-'''
+"""
 
 
 def exportar_zeus_zip():
@@ -1498,52 +2203,100 @@ def _chamar_habilidade(fn, texto):
 
 def render_evolucao_ui():
     with st.expander("🧬 Auto-Evolução e Criador de Pastas (ZIP)", expanded=False):
-        aba1, aba2, aba3 = st.tabs(["🧬 Nova habilidade", "📦 Criar projeto (ZIP)", "📥 Baixar o Zeus"])
+        aba1, aba2, aba3 = st.tabs(
+            ["🧬 Nova habilidade", "📦 Criar projeto (ZIP)", "📥 Baixar o Zeus"]
+        )
         with aba1:
-            pedido = st.text_area("O que o Zeus deve aprender a fazer?", key="evo_pedido",
-                                  placeholder="Ex.: uma função que converte reais para dólar dado o valor e a cotação")
+            pedido = st.text_area(
+                "O que o Zeus deve aprender a fazer?",
+                key="evo_pedido",
+                placeholder="Ex.: uma função que converte reais para dólar dado o valor e a cotação",
+            )
             if st.button("🧬 Aprender habilidade", key="evo_run") and pedido.strip():
                 aprender_nova_habilidade(pedido.strip())
             ultima = st.session_state.get("ultima_habilidade")
             if ultima:
-                st.caption("Última habilidade gerada por " + str(ultima["provedor"]) + ": " + ultima["pedido"][:80])
+                st.caption(
+                    "Última habilidade gerada por "
+                    + str(ultima["provedor"])
+                    + ": "
+                    + ultima["pedido"][:80]
+                )
                 st.code(ultima["codigo"], language="python")
-                st.download_button("⬇️ Baixar pasta da habilidade (ZIP)",
-                                   montar_zip("zeus_habilidade", {"zeus_skills.py": ultima["codigo"] + "\n"}),
-                                   file_name="zeus_habilidade.zip", mime="application/zip", key="evo_dl_skill")
+                st.download_button(
+                    "⬇️ Baixar pasta da habilidade (ZIP)",
+                    montar_zip(
+                        "zeus_habilidade", {"zeus_skills.py": ultima["codigo"] + "\n"}
+                    ),
+                    file_name="zeus_habilidade.zip",
+                    mime="application/zip",
+                    key="evo_dl_skill",
+                )
             skills = listar_habilidades()
             if skills:
                 st.markdown("**Habilidades instaladas**")
                 nome = st.selectbox("Escolha", list(skills.keys()), key="evo_skill_sel")
-                st.caption((inspect.getdoc(skills[nome]) or "sem descrição") + " · " + str(inspect.signature(skills[nome])))
-                args = st.text_input("Argumentos (texto simples, lista JSON ou objeto JSON)", key="evo_args")
+                st.caption(
+                    (inspect.getdoc(skills[nome]) or "sem descrição")
+                    + " · "
+                    + str(inspect.signature(skills[nome]))
+                )
+                args = st.text_input(
+                    "Argumentos (texto simples, lista JSON ou objeto JSON)",
+                    key="evo_args",
+                )
                 if st.button("▶ Executar habilidade", key="evo_exec"):
                     try:
                         st.write(_chamar_habilidade(skills[nome], args))
                     except Exception as e:
                         st.error("Erro ao executar: " + str(e)[:200])
             if st.session_state.get("fila_habilidades"):
-                st.caption("Fila de espera: " + str(len(st.session_state.fila_habilidades)) + " pedido(s)")
+                st.caption(
+                    "Fila de espera: "
+                    + str(len(st.session_state.fila_habilidades))
+                    + " pedido(s)"
+                )
         with aba2:
-            desc = st.text_area("Descreva o projeto que o Zeus deve criar", key="proj_desc",
-                                placeholder="Ex.: app Streamlit de lista de tarefas com SQLite, com requirements e README")
+            desc = st.text_area(
+                "Descreva o projeto que o Zeus deve criar",
+                key="proj_desc",
+                placeholder="Ex.: app Streamlit de lista de tarefas com SQLite, com requirements e README",
+            )
             if st.button("📦 Gerar pasta do projeto", key="proj_run") and desc.strip():
                 with st.spinner("Criando a pasta do projeto..."):
                     st.session_state.projeto_zip = criar_projeto_zip(desc.strip())
             proj = st.session_state.get("projeto_zip")
             if proj:
-                st.success(f"Pasta '{proj['pasta']}' criada por {proj['provedor']} com {len(proj['arquivos'])} arquivo(s).")
+                st.success(
+                    f"Pasta '{proj['pasta']}' criada por {proj['provedor']} com {len(proj['arquivos'])} arquivo(s)."
+                )
                 for a in proj["avisos"]:
                     st.warning(a)
-                st.download_button("⬇️ Baixar a pasta (ZIP)", proj["zip"], file_name=proj["pasta"] + ".zip",
-                                   mime="application/zip", key="proj_dl")
-                ver = st.selectbox("Pré-visualizar arquivo", list(proj["arquivos"].keys()), key="proj_ver")
-                st.code(proj["arquivos"][ver], language=("python" if ver.endswith(".py") else None))
+                st.download_button(
+                    "⬇️ Baixar a pasta (ZIP)",
+                    proj["zip"],
+                    file_name=proj["pasta"] + ".zip",
+                    mime="application/zip",
+                    key="proj_dl",
+                )
+                ver = st.selectbox(
+                    "Pré-visualizar arquivo",
+                    list(proj["arquivos"].keys()),
+                    key="proj_ver",
+                )
+                st.code(
+                    proj["arquivos"][ver],
+                    language=("python" if ver.endswith(".py") else None),
+                )
         with aba3:
             st.write("Baixe o Zeus inteiro como pasta pronta para subir no GitHub.")
-            st.download_button("⬇️ Baixar zeus_projeto.zip", exportar_zeus_zip(), file_name="zeus_projeto.zip",
-                               mime="application/zip", key="zeus_dl")
-
+            st.download_button(
+                "⬇️ Baixar zeus_projeto.zip",
+                exportar_zeus_zip(),
+                file_name="zeus_projeto.zip",
+                mime="application/zip",
+                key="zeus_dl",
+            )
 
 
 def testar_chaves():
@@ -1556,10 +2309,17 @@ def testar_chaves():
             continue
         override = _secret(MODEL_SECRET[prov])
         try:
-            ok, texto = _try_models([override] if override else MODELS[prov], lambda m: CALLERS[prov](key, m, msgs))
+            ok, texto = _try_models(
+                [override] if override else MODELS[prov],
+                lambda m: CALLERS[prov](key, m, msgs),
+            )
         except Exception as e:
             ok, texto = False, "erro de conexão: " + str(e)
-        linhas.append(("✅ " + prov + ": funcionando") if ok else ("❌ " + prov + ": " + _resumo(texto)))
+        linhas.append(
+            ("✅ " + prov + ": funcionando")
+            if ok
+            else ("❌ " + prov + ": " + _resumo(texto))
+        )
     return linhas
 
 
@@ -2367,7 +3127,11 @@ def _avatar_component(_html_hash: str):
     return components.declare_component(f"zeus_avatar_{_html_hash}", path=pasta)
 
 
-AVATAR_MAP = {"Esfera 3D (Cyberpunk)": "sphere", "Olho Cibernético": "eye", "Robô Digital": "robot"}
+AVATAR_MAP = {
+    "Esfera 3D (Cyberpunk)": "sphere",
+    "Olho Cibernético": "eye",
+    "Robô Digital": "robot",
+}
 
 
 def render_avatar_voice(avatar_key, silence_s, stt_engine, tts_engine, voz, tts_rate):
@@ -2424,12 +3188,27 @@ if "messages" not in st.session_state:
 
 with st.sidebar:
     st.header("⚙️ Configuração")
-    theme_name = st.selectbox("🎨 Interface", list(THEMES.keys()), index=0, key="theme_sel")
-    avatar_type = st.selectbox("🤖 Avatar do Zeus", list(AVATAR_MAP.keys()), index=0, key="avatar_sel")
+    theme_name = st.selectbox(
+        "🎨 Interface", list(THEMES.keys()), index=0, key="theme_sel"
+    )
+    avatar_type = st.selectbox(
+        "🤖 Avatar do Zeus", list(AVATAR_MAP.keys()), index=0, key="avatar_sel"
+    )
     model_choice = st.selectbox("🧠 Modelo LLM", PROVIDERS, index=0, key="model_sel")
     st.subheader("🎙️ Voz")
-    stt_label = st.selectbox("👂 Reconhecimento", ["Whisper (Groq) — melhor no celular", "Navegador — mais rápido, menos preciso"], key="stt_sel")
-    tts_label = st.selectbox("🔊 Motor de voz", ["Neural (Edge) — voz natural", "Navegador — voz do aparelho"], key="tts_sel")
+    stt_label = st.selectbox(
+        "👂 Reconhecimento",
+        [
+            "Whisper (Groq) — melhor no celular",
+            "Navegador — mais rápido, menos preciso",
+        ],
+        key="stt_sel",
+    )
+    tts_label = st.selectbox(
+        "🔊 Motor de voz",
+        ["Neural (Edge) — voz natural", "Navegador — voz do aparelho"],
+        key="tts_sel",
+    )
     _vozes = listar_vozes_edge()
     voz_nome = st.selectbox("🗣️ Voz do Zeus", list(_vozes.keys()), key="voz_sel")
     tts_rate = st.slider("⚡ Velocidade da fala", 0.8, 1.5, 1.0, 0.05, key="rate_sel")
@@ -2437,12 +3216,26 @@ with st.sidebar:
     stt_key = "whisper" if stt_label.startswith("Whisper") else "browser"
     tts_key = "edge" if tts_label.startswith("Neural") else "browser"
     voz_edge = _vozes[voz_nome]
-    grupo_voz = st.selectbox("🌍 Mais vozes", ["Só português (padrão)", "Multilíngues (falam português)", "Todas as vozes (outros idiomas)"], key="grupo_voz")
+    grupo_voz = st.selectbox(
+        "🌍 Mais vozes",
+        [
+            "Só português (padrão)",
+            "Multilíngues (falam português)",
+            "Todas as vozes (outros idiomas)",
+        ],
+        key="grupo_voz",
+    )
     if grupo_voz != "Só português (padrão)":
         _todas = listar_todas_vozes_edge()
-        _filtro = {k_: v_ for k_, v_ in _todas.items() if "Multilingual" in v_} if grupo_voz.startswith("Multi") else _todas
+        _filtro = (
+            {k_: v_ for k_, v_ in _todas.items() if "Multilingual" in v_}
+            if grupo_voz.startswith("Multi")
+            else _todas
+        )
         if _filtro:
-            _nome_extra = st.selectbox("🗣️ Escolha a voz", list(_filtro.keys()), key="voz_extra_sel")
+            _nome_extra = st.selectbox(
+                "🗣️ Escolha a voz", list(_filtro.keys()), key="voz_extra_sel"
+            )
             voz_edge = _filtro[_nome_extra]
     _tom = st.slider("🎚️ Tom da voz (Hz)", -50, 50, 0, 5, key="tom_sel")
     _vol = st.slider("🔉 Volume da voz (%)", -50, 50, 0, 5, key="vol_sel")
@@ -2453,7 +3246,10 @@ with st.sidebar:
         if _mp3:
             st.audio(_mp3, format="audio/mp3")
         else:
-            st.warning("Não consegui gerar a voz neural: " + st.session_state.get("tts_erro", "erro desconhecido"))
+            st.warning(
+                "Não consegui gerar a voz neural: "
+                + st.session_state.get("tts_erro", "erro desconhecido")
+            )
     if st.button("🗑️ Limpar conversa"):
         st.session_state.messages = []
         st.session_state.avatar_reply = None
@@ -2481,7 +3277,9 @@ with st.sidebar:
 
 inject_theme(theme_name)
 st.title("⚡ ZEUS // CYBER-CORE")
-render_avatar_voice(AVATAR_MAP[avatar_type], silence_s, stt_key, tts_key, voz_edge, tts_rate)
+render_avatar_voice(
+    AVATAR_MAP[avatar_type], silence_s, stt_key, tts_key, voz_edge, tts_rate
+)
 render_pipeline_ui()
 render_estudio_ui()
 render_evolucao_ui()
@@ -2490,3 +3288,613 @@ with st.expander("📜 Histórico da conversa"):
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+
+            # ============================================================
+# ZEUS 4.3 - NÚCLEO CONSOLIDADO FINAL
+# (substitui TODOS os blocos "BLOCO SUPLEMENTAR ZEUS" anteriores:
+#  3.5, 3.9, 4.1, 4.2 - apague-os do app.py e cole só este)
+# ============================================================
+import base64 as _b64_zeus_v43
+import requests as _req_zeus_v43
+import re as _re_zeus_v43
+import ast as _ast_zeus_v43
+import inspect as _insp_zeus_v43
+
+try:
+    import spotipy
+    from spotipy.oauth2 import SpotifyOAuth
+except ImportError:
+    spotipy = None
+
+_firestore_v43 = None
+_firebase_admin_v43 = None
+_cred_v43 = None
+_db_firestore_v43 = None
+try:
+    from google.cloud import firestore as _firestore_v43
+    import firebase_admin as _firebase_admin_v43
+    from firebase_admin import credentials as _cred_v43, firestore as _db_firestore_v43
+except ImportError:
+    pass
+
+
+# ------------------------------------------------------------
+# 1. GITHUB COMO DATABASE
+# ------------------------------------------------------------
+def zeus_salvar_codigo_github(
+    caminho_arquivo: str, codigo_conteudo: str, mensagem: str = "Zeus: atualização"
+):
+    token = st.secrets.get("GITHUB_API_KEY") or st.secrets.get("GITHUB_TOKEN")
+    user = st.secrets.get("GITHUB_USER")
+    repo = st.secrets.get("GITHUB_REPO")
+    if not (token and user and repo):
+        return {"status": "erro", "mensagem": "❌ Faltam chaves do GitHub nos Secrets."}
+
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        resp_get = _req_zeus_v43.get(url, headers=headers, timeout=20)
+        sha = resp_get.json().get("sha") if resp_get.status_code == 200 else None
+        payload = {
+            "message": mensagem,
+            "content": _b64_zeus_v43.b64encode(codigo_conteudo.encode("utf-8")).decode(
+                "utf-8"
+            ),
+        }
+        if sha:
+            payload["sha"] = sha
+        resp_put = _req_zeus_v43.put(url, headers=headers, json=payload, timeout=20)
+        if resp_put.status_code in (200, 201):
+            return {
+                "status": "sucesso",
+                "mensagem": f"✅ Database GitHub atualizado em '{caminho_arquivo}'.",
+                "url": resp_put.json().get("content", {}).get("html_url", ""),
+            }
+        try:
+            detalhe = resp_put.json().get("message", "Erro na API do GitHub.")
+        except Exception:
+            detalhe = resp_put.text[:150]
+        return {
+            "status": "erro",
+            "mensagem": f"❌ Erro GitHub ({resp_put.status_code}): {detalhe}",
+        }
+    except Exception as e:
+        return {"status": "erro", "mensagem": f"❌ Erro de conexão: {str(e)[:150]}"}
+
+
+def zeus_listar_memoria_github(pasta: str = "nucleo_zeus/modulos"):
+    token = st.secrets.get("GITHUB_API_KEY") or st.secrets.get("GITHUB_TOKEN")
+    user = st.secrets.get("GITHUB_USER")
+    repo = st.secrets.get("GITHUB_REPO")
+    if not (token and user and repo):
+        return []
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{pasta}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        resp = _req_zeus_v43.get(url, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            itens = resp.json()
+            if isinstance(itens, list):
+                return [item["path"] for item in itens if item.get("type") == "file"]
+    except Exception:
+        pass
+    return []
+
+
+def zeus_ler_arquivo_github(caminho_arquivo: str):
+    token = st.secrets.get("GITHUB_API_KEY") or st.secrets.get("GITHUB_TOKEN")
+    user = st.secrets.get("GITHUB_USER")
+    repo = st.secrets.get("GITHUB_REPO")
+    if not (token and user and repo):
+        return None
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho_arquivo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        resp = _req_zeus_v43.get(url, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            dados = resp.json()
+            if "content" in dados:
+                return _b64_zeus_v43.b64decode(dados["content"]).decode("utf-8")
+    except Exception:
+        pass
+    return None
+
+
+def _zeus_sanitizar_pasta_v43(
+    caminho: str, default: str = "nucleo_zeus/modulos"
+) -> str:
+    partes = [
+        p for p in caminho.strip().strip("/").split("/") if p not in ("", ".", "..")
+    ]
+    return "/".join(partes) or default
+
+
+def zeus_salvar_firestore(colecao: str, doc_id: str, dados: dict):
+    if not (_firebase_admin_v43 and _db_firestore_v43 and _cred_v43):
+        return False, "Módulo Firebase não disponível."
+    try:
+        if not _firebase_admin_v43._apps:
+            if "FIREBASE_CREDENTIALS" in st.secrets:
+                import json
+
+                cred_dict = json.loads(st.secrets["FIREBASE_CREDENTIALS"])
+                cred = _cred_v43.Certificate(cred_dict)
+                _firebase_admin_v43.initialize_app(cred)
+            else:
+                return False, "Credenciais do Firebase ausentes nos Secrets."
+        db = _db_firestore_v43.client()
+        db.collection(colecao).document(doc_id).set(dados, merge=True)
+        return True, "Dados salvos no Firestore com sucesso."
+    except Exception as e:
+        return False, f"Firestore: {str(e)[:120]}"
+
+
+# ------------------------------------------------------------
+# 2. MOTOR DE APRENDIZADO EM ENSEMBLE (múltiplas IAs se revisam)
+#    Python: gera -> revisa com 2a IA -> executa -> salva
+#    Outras linguagens: gera -> revisa -> SALVA (sem execução automática)
+# ------------------------------------------------------------
+_ZEUS43_EXTENSOES = {
+    "python": "py",
+    "javascript": "js",
+    "cpp": "cpp",
+    "c++": "cpp",
+    "java": "java",
+}
+
+
+def _zeus43_extrair_codigo(texto: str) -> str:
+    m = _re_zeus_v43.search(r"(?:[a-zA-Z+]*)?\s*\n(.*?)", texto, _re_zeus_v43.S)
+    return (m.group(1) if m else texto).strip()
+
+
+def _zeus43_executar_python(codigo: str):
+    try:
+        _ast_zeus_v43.parse(codigo)
+    except SyntaxError as e:
+        return False, f"Erro de sintaxe na linha {e.lineno}: {e.msg}"
+
+    namespace = {"_builtins": __builtins_}
+    try:
+        exec(codigo, namespace)
+    except Exception as e:
+        return False, f"Erro no carregamento: {str(e)[:150]}"
+
+    funcoes = [
+        v
+        for k, v in namespace.items()
+        if callable(v) and not k.startswith("_") and _insp_zeus_v43.isfunction(v)
+    ]
+    if not funcoes:
+        return True, "Código compilado e estruturado com sucesso."
+
+    alvo = funcoes[0]
+    try:
+        params = _insp_zeus_v43.signature(alvo).parameters
+        if params:
+            return (
+                True,
+                f"Função '{alvo._name_}' validada (requer parâmetros: {', '.join(params)}).",
+            )
+        resultado = alvo()
+        return True, f"Execução bem-sucedida! Retorno: {resultado}"
+    except Exception as e:
+        return False, f"Erro ao executar a função: {str(e)[:150]}"
+
+
+def _zeus43_chamar_ia(prompt: str, sistema: str, preferir: str = None):
+    """Tenta usar gerar_com_prioridade_claude; senão get_llm_response forçando um provedor específico."""
+    fn_prioridade = globals().get("gerar_com_prioridade_claude")
+    if fn_prioridade and not preferir:
+        return fn_prioridade(sistema, prompt, max_tokens=2000)
+
+    fn_llm = globals().get("get_llm_response")
+    if fn_llm and "session_id" in st.session_state:
+        provedor = preferir or st.session_state.get("model_sel", "groq")
+        ok, texto, prov, _erros = fn_llm(
+            st.session_state.session_id,
+            prompt,
+            provedor,
+            system=sistema,
+            use_history=False,
+        )
+        return (texto, prov) if ok else (None, None)
+    return None, None
+
+
+def zeus_aprender_ensemble(instrucao: str, linguagem: str = "python") -> str:
+    """Gera código com uma IA, pede revisão/melhoria a uma segunda IA diferente, salva no GitHub.
+    Executa automaticamente apenas se linguagem == 'python'."""
+    linguagem = linguagem.lower().strip()
+    ext = _ZEUS43_EXTENSOES.get(linguagem, "txt")
+
+    sys_gerar = (
+        f"Você é um engenheiro sênior em {linguagem}. Escreva código funcional, limpo e comentado "
+        f"em {linguagem} puro que implemente exatamente o pedido. Responda APENAS com o código, sem explicações."
+    )
+    texto1, prov1 = _zeus43_chamar_ia("Pedido: " + instrucao, sys_gerar)
+    if not texto1:
+        return "❌ Nenhuma IA disponível gerou o código inicial."
+    codigo_v1 = _zeus43_extrair_codigo(texto1)
+
+    provedores_disp = globals().get("PROVIDERS", [])
+    segundo_provedor = next((p for p in provedores_disp if p != prov1), None)
+
+    sys_revisar = (
+        f"Você é um revisor de código sênior em {linguagem}. Receberá um código e deve melhorá-lo: "
+        "corrigir bugs, otimizar e deixar mais claro, mantendo a mesma funcionalidade. "
+        "Responda APENAS com o código final melhorado, sem explicações."
+    )
+    texto2, prov2 = _zeus43_chamar_ia(
+        "Código para revisar e melhorar:\n\n" + codigo_v1,
+        sys_revisar,
+        preferir=segundo_provedor,
+    )
+    codigo_final = _zeus43_extrair_codigo(texto2) if texto2 else codigo_v1
+    prov_revisor = prov2 if texto2 else None
+
+    slug = (
+        "".join(c if c.isalnum() else "" for c in instrucao[:25]).lower().strip("")
+        or "modulo"
+    )
+    caminho = f"nucleo_zeus/modulos/modulo_{slug}.{ext}"
+    res_save = zeus_salvar_codigo_github(
+        caminho, codigo_final, f"Zeus ensemble ({linguagem}): {instrucao[:40]}"
+    )
+
+    linhas_resp = []
+    if linguagem == "python":
+        ok_exec, msg_exec = _zeus43_executar_python(codigo_final)
+        linhas_resp.append(
+            f"⚡ *Execução:* {msg_exec}"
+            if ok_exec
+            else f"⚠️ *Aviso na execução:* {msg_exec}"
+        )
+    else:
+        ok_exec = None
+        linhas_resp.append(
+            f"ℹ️ Código em *{linguagem}* gerado e salvo. Execução automática disponível só para Python "
+            "(rodar C++/Java exigiria compilar e acessar o sistema operacional, o que não é feito aqui)."
+        )
+
+    if res_save["status"] == "sucesso":
+        linhas_resp.append(
+            f"✅ *GitHub:* {caminho} (gerado por {prov1}"
+            + (f", revisado por {prov_revisor})" if prov_revisor else ")")
+            + (f"\n[Ver no GitHub]({res_save['url']})" if res_save.get("url") else "")
+        )
+    else:
+        linhas_resp.append(f"❌ *Erro ao salvar:* {res_save['mensagem']}")
+
+    zeus_salvar_firestore(
+        "zeus_memoria",
+        f"modulo_{slug}",
+        {
+            "instrucao": instrucao,
+            "linguagem": linguagem,
+            "caminho": caminho,
+            "gerado_por": prov1,
+            "revisado_por": prov_revisor,
+        },
+    )
+
+    audio = zeus_falar(
+        "Módulo revisado por mais de uma inteligência artificial e salvo com sucesso."
+    )
+    if audio:
+        st.audio(audio, format="audio/mp3")
+
+    return "\n\n".join(linhas_resp)
+
+
+# ------------------------------------------------------------
+# 3. MÍDIA APRIMORADA (usa make_image/make_video/editar_imagem já existentes)
+# ------------------------------------------------------------
+def zeus_gerar_imagem_aprimorada(prompt_base: str, log: list):
+    """Gera a imagem base e aplica um passe extra de aprimoramento (nitidez, detalhe, iluminação)."""
+    fn_make_image = globals().get("make_image")
+    fn_editar = globals().get("editar_imagem")
+    if not fn_make_image:
+        return None
+    img = fn_make_image(prompt_base, log)
+    if img and fn_editar:
+        img_aprimorada, modo = fn_editar(
+            img,
+            "enhance resolution, sharpen fine details, improve lighting and color depth, "
+            "professional post-processing, keep composition identical",
+            prompt_base,
+            log,
+        )
+        if img_aprimorada:
+            return img_aprimorada
+    return img
+
+
+def zeus_gerar_video_aprimorado(prompt_base: str, log: list):
+    """Gera imagem aprimorada e a anima em vídeo."""
+    fn_make_video = globals().get("make_video")
+    img_base = zeus_gerar_imagem_aprimorada(prompt_base, log)
+    if fn_make_video:
+        return fn_make_video(prompt_base, log, img_base), img_base
+    return None, img_base
+
+
+# ------------------------------------------------------------
+# 4. AVATARES (reaproveitados da versão 4.2, mesma qualidade)
+# ------------------------------------------------------------
+ZEUS_AVATAR_CLASSICO_V43 = "data:image/svg+xml;base64,PLACEHOLDER_CLASSICO"
+ZEUS_AVATAR_ACAO_V43 = "data:image/svg+xml;base64,PLACEHOLDER_ACAO"
+
+ZEUS_AVATARES_V43 = {
+    "Zeus Clássico (raio dourado, pose estática)": ZEUS_AVATAR_CLASSICO_V43,
+    "Zeus em ação (lançando dois raios)": ZEUS_AVATAR_ACAO_V43,
+}
+
+
+def zeus_falar(texto: str, voz: str = None):
+    fn_sint = globals().get("sintetizar")
+    if not fn_sint:
+        return None
+    voz_usar = voz or st.session_state.get("zeus43_voz_ativa", "pt-BR-FranciscaNeural")
+    try:
+        return fn_sint(texto, voz_usar)
+    except Exception:
+        return None
+
+
+def zeus_tocar_musica(nome_musica: str) -> str:
+    if not spotipy:
+        return "❌ Biblioteca 'spotipy' não instalada."
+    nome_musica = (nome_musica or "").strip()
+    if not nome_musica:
+        return "❌ Nome da música vazio."
+    try:
+        client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
+        client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+        refresh_token = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
+        redirect_uri = st.secrets.get(
+            "SPOTIFY_REDIRECT_URI",
+            "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/",
+        )
+        if not (client_id and client_secret and refresh_token):
+            return "❌ Faltam credenciais do Spotify nos Secrets."
+
+        auth_manager = SpotifyOAuth(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope="user-modify-playback-state user-read-playback-state",
+            cache_path=None,
+        )
+        token_info = auth_manager.refresh_access_token(refresh_token)
+        sp = spotipy.Spotify(auth=token_info["access_token"])
+
+        results = sp.search(q=nome_musica, limit=1, type="track")
+        tracks = results.get("tracks", {}).get("items", [])
+        if not tracks:
+            return f"❌ Nenhuma faixa encontrada para '{nome_musica}'."
+
+        track = tracks[0]
+        try:
+            sp.start_playback(uris=[track["uri"]])
+            artista = (
+                track["artists"][0]["name"] if track.get("artists") else "desconhecido"
+            )
+            return f"✅ Tocando agora: {track['name']} - {artista}"
+        except spotipy.exceptions.SpotifyException as e:
+            if getattr(e, "http_status", None) == 404:
+                return "⚠️ Nenhum aparelho ativo. Abra o Spotify e dê play em algo primeiro."
+            return f"❌ Erro do Spotify: {str(e)[:150]}"
+    except Exception as e:
+        return f"❌ Erro no Spotify: {str(e)[:150]}"
+
+
+# ------------------------------------------------------------
+# 5. INTERFACE
+# ------------------------------------------------------------
+def render_zeus_v43():
+    with st.sidebar:
+        st.divider()
+        st.subheader("⚡ Avatar do Zeus")
+        nome_avatar = st.selectbox(
+            "Escolha o avatar", list(ZEUS_AVATARES_V43.keys()), key="zeus43_avatar_sel"
+        )
+        st.image(ZEUS_AVATARES_V43[nome_avatar], width=150)
+        st.session_state.zeus_avatar_ativo = ZEUS_AVATARES_V43[nome_avatar]
+
+        st.subheader("🔊 Voz do Zeus")
+        fn_vozes = globals().get("listar_todas_vozes_edge") or globals().get(
+            "listar_vozes_edge"
+        )
+        vozes_disp = (
+            fn_vozes()
+            if fn_vozes
+            else globals().get(
+                "FALLBACK_VOZES", {"Francisca (pt-BR ♀)": "pt-BR-FranciscaNeural"}
+            )
+        )
+        nome_voz = st.selectbox(
+            "Escolha a voz", list(vozes_disp.keys()), key="zeus43_voz_nome"
+        )
+        st.session_state.zeus43_voz_ativa = vozes_disp[nome_voz]
+
+        if st.button("▶️ Ouvir prévia da voz", key="zeus43_btn_previa"):
+            with st.spinner("Gerando prévia..."):
+                audio_prev = zeus_falar(
+                    "Olá, Danilo. Eu sou Zeus. Esta é a minha voz.",
+                    vozes_disp[nome_voz],
+                )
+            st.audio(audio_prev, format="audio/mp3") if audio_prev else st.error(
+                "Não consegui gerar o áudio."
+            )
+
+        st.divider()
+        st.subheader("🎵 Controle de Música")
+        musica_input = st.text_input("Digite a música:", key="zeus43_input_musica")
+        if st.button("Tocar no Spotify", key="zeus43_btn_tocar"):
+            if musica_input.strip():
+                with st.spinner("Sintonizando..."):
+                    resultado = zeus_tocar_musica(musica_input)
+                st.success(resultado) if resultado.startswith("✅") else st.error(
+                    resultado
+                )
+            else:
+                st.warning("Digite o nome da música primeiro.")
+
+    with st.expander(
+        "⚡ Zeus - Núcleo de Aprendizado, Database e Mídia", expanded=False
+    ):
+        aba_criar, aba_memoria, aba_midia = st.tabs(
+            ["🧠 Aprender (Ensemble de IAs)", "📚 Memória GitHub", "🎨 Mídia Aprimorada"]
+        )
+
+        with aba_criar:
+            instrucao = st.text_input(
+                "O que o Zeus deve desenvolver?",
+                placeholder="Ex: função que calcula sensação térmica...",
+                key="zeus43_instrucao",
+            )
+            linguagem = st.selectbox(
+                "Linguagem",
+                ["python", "javascript", "cpp", "java"],
+                key="zeus43_linguagem",
+            )
+            st.caption(
+                "Python executa automaticamente. Outras linguagens são geradas, revisadas e salvas, sem execução automática."
+            )
+            if st.button(
+                "🚀 Gerar, Revisar com 2 IAs e Salvar", key="zeus43_btn_aprender"
+            ):
+                if instrucao.strip():
+                    with st.spinner("Gerando, revisando com outra IA e salvando..."):
+                        resultado = zeus_aprender_ensemble(instrucao.strip(), linguagem)
+                    st.markdown(resultado)
+                else:
+                    st.warning("Insira uma instrução válida.")
+
+        with aba_memoria:
+            pasta_consulta = st.text_input(
+                "Pasta no Database (GitHub):",
+                value="nucleo_zeus/modulos",
+                key="zeus43_pasta",
+            )
+            if st.button("🔍 Listar Arquivos", key="zeus43_btn_listar"):
+                pasta_segura = _zeus_sanitizar_pasta_v43(pasta_consulta)
+                arquivos = zeus_listar_memoria_github(pasta_segura)
+                st.session_state.zeus43_arquivos = arquivos
+                st.success(
+                    f"Encontrados {len(arquivos)} arquivos."
+                ) if arquivos else st.warning("Nenhum arquivo encontrado.")
+            if st.session_state.get("zeus43_arquivos"):
+                arq_sel = st.selectbox(
+                    "Selecione um módulo:",
+                    st.session_state.zeus43_arquivos,
+                    key="zeus43_arq_sel",
+                )
+                if st.button("📖 Ler Conteúdo", key="zeus43_btn_ler"):
+                    conteudo = zeus_ler_arquivo_github(arq_sel)
+                    st.code(conteudo, language="python") if conteudo else st.error(
+                        "Erro ao recuperar conteúdo."
+                    )
+
+        with aba_midia:
+            prompt_midia = st.text_area(
+                "Descreva a imagem/vídeo:",
+                key="zeus43_prompt_midia",
+                placeholder="Ex: dragão de cristal sobre cidade futurista ao entardecer",
+            )
+            tipo_midia = st.radio(
+                "Tipo:",
+                ["Imagem aprimorada", "Vídeo aprimorado"],
+                key="zeus43_tipo_midia",
+                horizontal=True,
+            )
+            if st.button("✨ Gerar Mídia Aprimorada", key="zeus43_btn_midia"):
+                if prompt_midia.strip():
+                    log_midia = []
+                    with st.spinner("Gerando e aprimorando..."):
+                        if tipo_midia == "Imagem aprimorada":
+                            img = zeus_gerar_imagem_aprimorada(
+                                prompt_midia.strip(), log_midia
+                            )
+                            if img:
+                                st.image(img, caption="Imagem aprimorada")
+                                st.download_button(
+                                    "⬇️ Baixar",
+                                    img,
+                                    file_name="zeus_imagem_aprimorada.png",
+                                    key="zeus43_dl_img",
+                                )
+                            else:
+                                st.error("Não consegui gerar a imagem.")
+                        else:
+                            vid, img_base = zeus_gerar_video_aprimorado(
+                                prompt_midia.strip(), log_midia
+                            )
+                            if img_base:
+                                st.image(img_base, caption="Quadro base aprimorado")
+                            if vid:
+                                st.video(vid)
+                                st.download_button(
+                                    "⬇️ Baixar vídeo",
+                                    vid,
+                                    file_name="zeus_video_aprimorado.mp4",
+                                    key="zeus43_dl_vid",
+                                )
+                            else:
+                                st.error("Não consegui gerar o vídeo.")
+                    with st.expander("Log de geração", expanded=False):
+                        st.write("\n\n".join(log_midia))
+                else:
+                    st.warning("Descreva o que deseja gerar.")
+
+
+def interceptar_musica_v43():
+    msgs = st.session_state.get("messages")
+    if not msgs:
+        return
+    ultima = msgs[-1]
+    if ultima.get("role") != "user":
+        return
+    texto = str(ultima.get("content", "")).lower()
+    if not any(
+        p in texto
+        for p in ("toca ", "tocar ", "toque ", "spotify", "música ", "musica ")
+    ):
+        return
+    if st.session_state.get("zeus43_ultima_musica") == ultima["content"]:
+        return
+
+    termo = _re_zeus_v43.sub(
+        r"\b(zeus|por favor|toca|tocar|toque|a música|a musica|música|musica|no spotify|spotify)\b",
+        "",
+        texto,
+    ).strip(" .,!?:-")
+    st.session_state.zeus43_ultima_musica = ultima["content"]
+    if not termo:
+        return
+
+    with st.spinner(f"Buscando '{termo}'..."):
+        resultado = zeus_tocar_musica(termo)
+    st.toast(resultado, icon="🎵")
+    st.session_state.messages.append({"role": "assistant", "content": resultado})
+    st.rerun()
+
+
+try:
+    render_zeus_v43()
+    interceptar_musica_v43()
+except Exception as _zeus43_err:
+    st.caption("⚠️ Zeus 4.3 desativado por erro: " + str(_zeus43_err)[:200])
