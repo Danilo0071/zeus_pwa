@@ -572,16 +572,16 @@ def zeus_tocar_musica(nome_musica: str) -> str:
 
 
 def render_avatar_core(avatar_key):
-    pasta_atual = os.path.dirname(os.path.abspath(_file_))
-    caminho_html = os.path.join(pasta_atual, "avatar_zeus.html")
+    # Abre o arquivo HTML diretamente pelo nome, sem usar _file_
+    caminho_html = "avatar_zeus.html"
     
-    if caminho_html.exists():
-        html_content = caminho_html.read_text(encoding="utf-8")
+    try:
+        with open(caminho_html, "r", encoding="utf-8") as f:
+            html_content = f.read()
         components.html(html_content, height=650)
-    else:
-        st.error(
-            "⚠️ Arquivo avatar_zeus.html não encontrado no repositório. Verifique se você o criou."
-        )
+    except FileNotFoundError:
+        st.error("⚠️ Arquivo avatar_zeus.html não encontrado no repositório. Verifique se você o criou.")
+   
 
 
 AVATAR_MAP = {
