@@ -9003,3 +9003,21 @@ try:
     interceptar_musica_v45()
 except Exception as _zeus45_err:
     st.caption("⚠️ Zeus 4.5 desativado por erro: " + str(_zeus45_err)[:200])
+
+# ============================================================
+# PUXANDO O AVATAR OLÍMPICO DO ARQUIVO EXTERNO
+# ============================================================
+try:
+    import zeus_olimpico
+    import streamlit.components.v1 as components
+
+    # Se o arquivo zeus_olimpico.py tiver a variável ZEUS_OLIMPICO_HTML, ele desenha
+    if hasattr(zeus_olimpico, "ZEUS_OLIMPICO_HTML"):
+        components.html(zeus_olimpico.ZEUS_OLIMPICO_HTML, height=650)
+    else:
+        st.error(
+            "A variável ZEUS_OLIMPICO_HTML não foi encontrada dentro do arquivo zeus_olimpico.py"
+        )
+
+except Exception as e:
+    st.error(f"Não foi possível carregar o avatar: {e}")
