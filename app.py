@@ -136,12 +136,11 @@ MODELS = {
 }
 
 TRANSIENT = (500, 502, 503, 504, 529)
+
+def _normalize(msgs):
     """Garante papéis alternados começando por 'user'."""
     out = []
     for m in msgs:
-        if m["role"] not in ("user", "assistant") or not str(m["content"]).strip():
-            continue
-        if out and out[-1]["role"] == m["role"]:
             out[-1]["content"] += "\n" + m["content"]
         else:
             out.append({"role": m["role"], "content": m["content"]})
