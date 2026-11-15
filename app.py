@@ -26,7 +26,7 @@ import sys
 import tempfile
 import time
 import zipfile
-
+import zeus_olimpico
 import requests
 
 try:
@@ -9003,3 +9003,12 @@ try:
     interceptar_musica_v45()
 except Exception as _zeus45_err:
     st.caption("⚠️ Zeus 4.5 desativado por erro: " + str(_zeus45_err)[:200])
+
+# ============================================================
+# DESENHANDO O AVATAR NA TELA
+# ============================================================
+try:
+    import streamlit.components.v1 as components
+    components.html(zeus_olimpico.ZEUS_OLIMPICO_HTML, height=650)
+except Exception as e:
+    st.error(f"Erro ao carregar avatar: {e}"
