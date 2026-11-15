@@ -11564,3 +11564,11 @@ with st.sidebar:
     st.subheader("⚡ Testar Avatar Olimpo")
     if st.button("Mostrar Olimpo"):
         render_avatar_olimpo()
+
+# ============================================================
+# FORÇANDO A EXIBIÇÃO DO AVATAR OLIMPO NA TELA
+# ============================================================
+import streamlit.components.v1 as components
+
+# Desenha o seu robô dourado na tela
+components.html(zeus_olimpico.ZEUS_OLIMPICO_HTML, height=650)
