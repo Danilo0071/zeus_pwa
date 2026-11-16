@@ -223,3 +223,64 @@ def update_zeus_pwa_app(github_token: str) -> typing.Dict[str, typing.Any]:
         message="feat: atualiza app.py com metricas e evolucao de assertividade",
         branch="main",
     )
+
+
+import base64
+import requests
+from typing import Dict, Any, Optional
+
+GITHUB_API_URL = "https://api.github.com"
+REPO_NAME = "Danilo0071/zeus_pwa"
+
+
+def _get_file_sha(path: str, token: str) -> Optional[str]:
+    """Obtém o SHA de um arquivo existente no repositório GitHub, se houver."""
+    url = f"{GITHUB_API_URL}/repos/{REPO_NAME}/contents/{path}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    response = requests.get(url, headers=headers, timeout=10)
+    if response.status_code == 200:
+        data = response.json()
+        return data.get("sha")
+    return None
+
+
+def criar_ou_atualizar_arquivo(
+    path: str, content: str, commit_message: str, token: str
+) -> Dict[str, Any]:
+    """Cria ou atualiza um arquivo no repositório GitHub de forma autônoma."""
+    url = f"{GITHUB_API_URL}/repos/{REPO_NAME}/contents/{path}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    
+    encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    
+    payload = {
+        "message": commit_message,
+        "content": encoded_content,
+    }
+    
+    sha = _get_file_sha(path, token)
+    if sha:
+        payload["sha"] = sha
+
+    response = requests.put(url, headers=headers, json=payload, timeout=15)
+    
+    if response.status_code in (200, 201):
+        return {
+            "success": True,
+            "status_code": response.status_code,
+            "data": response.json()
+        }
+    
+    return {
+        "success": False,
+        "status_code": response.status_code,
+        "error": response.text
+    }
