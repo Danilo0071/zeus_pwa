@@ -2794,3 +2794,240 @@ try:
 except Exception as _rp_err:
     st.caption("⚠️ Painel de Relatórios desativado por erro: " + str(_rp_err)[:200])
 
+# ============================================================
+# PAINEL DE RELATÓRIOS - GitHub REST API (cole no final do app.py)
+# ============================================================
+import base64 as _rp_base64
+import traceback as _rp_traceback
+from datetime import datetime as _rp_datetime, timezone as _rp_timezone
+
+import requests as _rp_requests
+
+
+# ------------------------------------------------------------
+# 1. CREDENCIAIS
+# ------------------------------------------------------------
+def rp_get_secret(key: str, default: str = "") -> str:
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            val = st.secrets[key]
+            if val:
+                return str(val).strip()
+    except Exception:
+        pass
+    return os.environ.get(key, default).strip()
+
+
+def rp_carregar_config_github():
+    token = rp_get_secret("GITHUB_TOKEN") or rp_get_secret("GITHUB_API_KEY")
+    user = rp_get_secret("GITHUB_USER")
+    repo = rp_get_secret("GITHUB_REPO")
+    branch = rp_get_secret("GITHUB_BRANCH", "main")
+    if not (token and user and repo):
+        return None, None, None, None
+    return token, user, repo, branch
+
+
+# ------------------------------------------------------------
+# 2. CLIENTE REST DO GITHUB
+# ------------------------------------------------------------
+def _rp_gh_headers(token: str) -> dict:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def rp_gh_get_sha(caminho: str, token: str, user: str, repo: str, branch: str):
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
+    try:
+        resp = _rp_requests.get(url, headers=_rp_gh_headers(token), params={"ref": branch}, timeout=20)
+        if resp.status_code == 200:
+            return resp.json().get("sha")
+        return None
+    except _rp_requests.RequestException:
+        return None
+
+
+def rp_gh_put_file(caminho: str, conteudo: str, mensagem: str, token: str, user: str, repo: str, branch: str) -> dict:
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
+    sha = rp_gh_get_sha(caminho, token, user, repo, branch)
+
+    payload = {
+        "message": mensagem,
+        "content": _rp_base64.b64encode(conteudo.encode("utf-8")).decode("utf-8"),
+        "branch": branch,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    try:
+        resp = _rp_requests.put(url, headers=_rp_gh_headers(token), json=payload, timeout=30)
+    except _rp_requests.RequestException as e:
+        return {"ok": False, "mensagem": f"Falha de conexão: {e}", "url": None, "status_code": None}
+
+    if resp.status_code in (200, 201):
+        html_url = resp.json().get("content", {}).get("html_url")
+        return {"ok": True, "mensagem": "Commit realizado com sucesso.", "url": html_url, "status_code": resp.status_code}
+
+    try:
+        detalhe = resp.json().get("message", "Erro desconhecido da API do GitHub.")
+    except Exception:
+        detalhe = resp.text[:200]
+    return {"ok": False, "mensagem": f"({resp.status_code}) {detalhe}", "url": None, "status_code": resp.status_code}
+
+
+def rp_gh_list_root(token: str, user: str, repo: str, branch: str) -> list:
+    url = f"https://api.github.com/repos/{user}/{repo}/contents/"
+    try:
+        resp = _rp_requests.get(url, headers=_rp_gh_headers(token), params={"ref": branch}, timeout=20)
+        if resp.status_code == 200:
+            itens = resp.json()
+            if isinstance(itens, list):
+                return [i["name"] for i in itens if i.get("type") == "file"]
+    except _rp_requests.RequestException:
+        pass
+    return []
+
+
+# ------------------------------------------------------------
+# 3. COLETA DE LOGS E RELATÓRIO MARKDOWN
+# ------------------------------------------------------------
+def rp_registrar_evento(mensagem: str, nivel: str = "INFO"):
+    log = st.session_state.setdefault("rp_eventos_log", [])
+    log.append({
+        "timestamp": _rp_datetime.now(_rp_timezone.utc).isoformat(timespec="seconds"),
+        "nivel": nivel,
+        "mensagem": mensagem,
+    })
+    st.session_state["rp_eventos_log"] = log[-200:]
+
+
+def rp_coletar_logs_recentes(limite: int = 50) -> list:
+    log = st.session_state.get("rp_eventos_log", [])
+    return list(reversed(log))[:limite]
+
+
+def rp_gerar_relatorio_markdown(logs: list, titulo: str = "Relatório de Status do Projeto") -> str:
+    agora = _rp_datetime.now(_rp_timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    linhas = [
+        f"# {titulo}", "", f"**Gerado em:** {agora}", f"**Total de eventos no período:** {len(logs)}", "",
+        "## Resumo por nível", "",
+    ]
+    contagem = {}
+    for ev in logs:
+        contagem[ev["nivel"]] = contagem.get(ev["nivel"], 0) + 1
+    if contagem:
+        linhas.append("| Nível | Ocorrências |")
+        linhas.append("|---|---|")
+        for nivel, qtd in sorted(contagem.items()):
+            linhas.append(f"| {nivel} | {qtd} |")
+    else:
+        linhas.append("_Nenhum evento registrado neste período._")
+    linhas.append("")
+    linhas.append("## Eventos detalhados")
+    linhas.append("")
+    if logs:
+        linhas.append("| Timestamp (UTC) | Nível | Mensagem |")
+        linhas.append("|---|---|---|")
+        for ev in logs:
+            msg_escapada = ev["mensagem"].replace("|", "\\|").replace("\n", " ")
+            linhas.append(f"| {ev['timestamp']} | {ev['nivel']} | {msg_escapada} |")
+    else:
+        linhas.append("_Sem eventos para exibir._")
+    linhas.append("")
+    linhas.append("---")
+    linhas.append("_Relatório gerado automaticamente pelo painel administrativo._")
+    return "\n".join(linhas)
+
+
+# ------------------------------------------------------------
+# 4. CICLO COMPLETO
+# ------------------------------------------------------------
+def rp_executar_ciclo_relatorio(nome_arquivo: str = None) -> dict:
+    token, user, repo, branch = rp_carregar_config_github()
+    if not token:
+        return {"ok": False, "mensagem": "❌ Faltam credenciais do GitHub. Configure GITHUB_TOKEN (ou GITHUB_API_KEY), GITHUB_USER e GITHUB_REPO.",
+                "url": None, "arquivo": None, "relatorio_md": ""}
+
+    logs = rp_coletar_logs_recentes()
+    relatorio_md = rp_gerar_relatorio_markdown(logs)
+
+    if not nome_arquivo:
+        carimbo = _rp_datetime.now(_rp_timezone.utc).strftime("%Y%m%d_%H%M%S")
+        nome_arquivo = f"relatorio_{carimbo}.md"
+
+    resultado = rp_gh_put_file(
+        caminho=nome_arquivo, conteudo=relatorio_md, mensagem=f"Relatório automático: {nome_arquivo}",
+        token=token, user=user, repo=repo, branch=branch,
+    )
+
+    rp_registrar_evento(
+        f"Ciclo de relatório executado ({'sucesso' if resultado['ok'] else 'falha'}): {nome_arquivo}",
+        nivel="INFO" if resultado["ok"] else "ERRO",
+    )
+
+    return {"ok": resultado["ok"], "mensagem": resultado["mensagem"], "url": resultado.get("url"),
+            "arquivo": nome_arquivo, "relatorio_md": relatorio_md}
+
+
+# ------------------------------------------------------------
+# 5. INTERFACE
+# ------------------------------------------------------------
+def rp_render_painel_relatorios():
+    st.subheader("📊 Painel de Relatórios e Logs")
+
+    token, user, repo, branch = rp_carregar_config_github()
+    if token:
+        st.caption(f"Conectado a `{user}/{repo}` (branch `{branch}`).")
+    else:
+        st.warning("Credenciais do GitHub não configuradas. Defina `GITHUB_TOKEN`, `GITHUB_USER` e `GITHUB_REPO` "
+                    "em `.streamlit/secrets.toml` ou como variáveis de ambiente.")
+
+    with st.expander("➕ Registrar evento manual (para teste)", expanded=False):
+        msg_manual = st.text_input("Mensagem do evento", key="rp_msg_manual")
+        nivel_manual = st.selectbox("Nível", ["INFO", "AVISO", "ERRO"], key="rp_nivel_manual")
+        if st.button("Adicionar ao log", key="rp_btn_log_manual"):
+            if msg_manual.strip():
+                rp_registrar_evento(msg_manual.strip(), nivel_manual)
+                st.success("Evento registrado.")
+            else:
+                st.warning("Digite uma mensagem antes de registrar.")
+
+    total_eventos = len(st.session_state.get("rp_eventos_log", []))
+    st.caption(f"Eventos acumulados na sessão atual: {total_eventos}")
+
+    nome_arquivo = st.text_input(
+        "Nome do arquivo de relatório (opcional)",
+        placeholder="deixe em branco para gerar automaticamente com data/hora",
+        key="rp_nome_arquivo",
+    )
+
+    if st.button("🚀 Executar Ciclo de Relatório e Salvar no GitHub", key="rp_btn_executar", disabled=not token):
+        with st.spinner("Coletando logs, gerando relatório e enviando ao GitHub..."):
+            try:
+                resultado = rp_executar_ciclo_relatorio(nome_arquivo.strip() or None)
+            except Exception as e:
+                resultado = {"ok": False, "mensagem": f"Erro inesperado: {e}", "url": None, "relatorio_md": "", "arquivo": None}
+                st.session_state["rp_ultimo_traceback"] = _rp_traceback.format_exc()
+
+        if resultado["ok"]:
+            st.success(f"✅ Relatório `{resultado['arquivo']}` salvo com sucesso no repositório.")
+            if resultado.get("url"):
+                st.markdown(f"[🔗 Ver arquivo no GitHub]({resultado['url']})")
+        else:
+            st.error(f"❌ Falha ao executar o ciclo: {resultado['mensagem']}")
+            if st.session_state.get("rp_ultimo_traceback"):
+                with st.expander("Detalhes técnicos do erro"):
+                    st.code(st.session_state["rp_ultimo_traceback"])
+
+        with st.expander("📄 Pré-visualizar relatório gerado", expanded=False):
+            st.markdown(resultado.get("relatorio_md", "_Nenhum conteúdo gerado._"))
+
+
+try:
+    rp_render_painel_relatorios()
+except Exception as _rp_err:
+    st.caption("⚠️ Painel de Relatórios desativado por erro: " + str(_rp_err)[:200])
+
