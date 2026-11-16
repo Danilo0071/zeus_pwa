@@ -3031,3 +3031,163 @@ try:
 except Exception as _rp_err:
     st.caption("⚠️ Painel de Relatórios desativado por erro: " + str(_rp_err)[:200])
 
+# ============================================================
+# ENSEMBLE: CONSULTA A IA SECUNDÁRIA PARA REVISÃO DE CÓDIGO
+# A sugestão só é aplicada se você revisar e clicar em aprovar.
+# ============================================================
+import os as _ens_os
+
+import requests as _ens_requests
+
+
+def _ens_get_secret(key: str, default: str = "") -> str:
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            val = st.secrets[key]
+            if val:
+                return str(val).strip()
+    except Exception:
+        pass
+    return _ens_os.environ.get(key, default).strip()
+
+
+_ENS_SISTEMA_PADRAO = (
+    "Você é um revisor de código sênior. Analise o trecho enviado e responda com: "
+    "1) um resumo curto dos problemas encontrados, se houver; "
+    "2) o código corrigido/otimizado completo, dentro de um bloco de código. "
+    "Se o código já estiver bom, diga isso e devolva-o sem alterações."
+)
+
+
+def ens_consultar_groq(codigo_ou_prompt: str, sistema: str = _ENS_SISTEMA_PADRAO) -> dict:
+    """Consulta a API da Groq. Retorna {"ok": bool, "resposta": str}."""
+    key = _ens_get_secret("GROQ_API_KEY")
+    if not key:
+        return {"ok": False, "resposta": "GROQ_API_KEY não configurada nos Secrets."}
+    modelo = _ens_get_secret("GROQ_MODEL", "openai/gpt-oss-120b")
+    try:
+        r = _ens_requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={
+                "model": modelo,
+                "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": codigo_ou_prompt}],
+                "temperature": 0.3,
+                "max_tokens": 1500,
+            },
+            timeout=60,
+        )
+    except _ens_requests.RequestException as e:
+        return {"ok": False, "resposta": f"Falha de conexão: {e}"}
+
+    if r.status_code != 200:
+        return {"ok": False, "resposta": f"({r.status_code}) {r.text[:200]}"}
+    try:
+        return {"ok": True, "resposta": r.json()["choices"][0]["message"]["content"].strip()}
+    except Exception as e:
+        return {"ok": False, "resposta": f"Resposta inesperada da API: {e}"}
+
+
+def ens_consultar_deepseek(codigo_ou_prompt: str, sistema: str = _ENS_SISTEMA_PADRAO) -> dict:
+    """Consulta a API da DeepSeek (compatível com formato OpenAI). Retorna {"ok": bool, "resposta": str}."""
+    key = _ens_get_secret("DEEPSEEK_API_KEY")
+    if not key:
+        return {"ok": False, "resposta": "DEEPSEEK_API_KEY não configurada nos Secrets."}
+    modelo = _ens_get_secret("DEEPSEEK_MODEL", "deepseek-chat")
+    try:
+        r = _ens_requests.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={
+                "model": modelo,
+                "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": codigo_ou_prompt}],
+                "temperature": 0.3,
+                "max_tokens": 1500,
+            },
+            timeout=60,
+        )
+    except _ens_requests.RequestException as e:
+        return {"ok": False, "resposta": f"Falha de conexão: {e}"}
+
+    if r.status_code != 200:
+        return {"ok": False, "resposta": f"({r.status_code}) {r.text[:200]}"}
+    try:
+        return {"ok": True, "resposta": r.json()["choices"][0]["message"]["content"].strip()}
+    except Exception as e:
+        return {"ok": False, "resposta": f"Resposta inesperada da API: {e}"}
+
+
+_ENS_PROVEDORES = {
+    "Groq": ens_consultar_groq,
+    "DeepSeek": ens_consultar_deepseek,
+}
+
+
+def _ens_extrair_bloco_codigo(texto: str) -> str:
+    """Extrai o primeiro bloco ```...``` da resposta, se houver; senão devolve o texto inteiro."""
+    import re
+    m = re.search(r"```(?:[a-zA-Z]*)?\s*\n(.*?)```", texto, re.S)
+    return m.group(1).strip() if m else texto.strip()
+
+
+def render_ensemble_revisao():
+    with st.expander("🔍 Revisão Ensemble (consulta a IA secundária)", expanded=False):
+        provedor_nome = st.selectbox("Provedor de revisão", list(_ENS_PROVEDORES.keys()), key="ens_provedor")
+        entrada = st.text_area(
+            "Código ou prompt para revisão",
+            height=200,
+            key="ens_entrada",
+            placeholder="Cole aqui o trecho de código que deseja revisar/otimizar",
+        )
+
+        if st.button("🤖 Consultar Revisão", key="ens_btn_consultar"):
+            if not entrada.strip():
+                st.warning("Cole algo para revisar antes de consultar.")
+            else:
+                with st.spinner(f"Consultando {provedor_nome}..."):
+                    resultado = _ENS_PROVEDORES[provedor_nome](entrada.strip())
+                st.session_state["ens_ultimo_resultado"] = resultado
+                st.session_state["ens_ultima_entrada"] = entrada.strip()
+
+        resultado = st.session_state.get("ens_ultimo_resultado")
+        if resultado:
+            if resultado["ok"]:
+                st.success("Sugestão recebida:")
+                st.markdown(resultado["resposta"])
+
+                codigo_sugerido = _ens_extrair_bloco_codigo(resultado["resposta"])
+                st.markdown("**Código sugerido (extraído da resposta):**")
+                st.code(codigo_sugerido, language="python")
+
+                st.divider()
+                st.markdown("**Aplicar esta sugestão a um arquivo local**")
+                caminho_destino = st.text_input(
+                    "Caminho do arquivo onde salvar (relativo ao projeto)",
+                    placeholder="ex: zeus_skills.py ou sugestoes/revisao_01.py",
+                    key="ens_caminho_destino",
+                )
+                modo = st.radio("Modo", ["Criar novo arquivo", "Sobrescrever se existir"], key="ens_modo_aplicar", horizontal=True)
+                aprovar = st.checkbox("Revisei o código acima e aprovo aplicá-lo", key="ens_aprovar")
+
+                if st.button("✅ Aplicar Localmente", key="ens_btn_aplicar", disabled=not aprovar):
+                    if not caminho_destino.strip():
+                        st.warning("Informe o caminho do arquivo de destino.")
+                    else:
+                        try:
+                            existe = _ens_os.path.exists(caminho_destino.strip())
+                            if existe and modo == "Criar novo arquivo":
+                                st.error(f"O arquivo '{caminho_destino}' já existe. Escolha 'Sobrescrever' ou outro caminho.")
+                            else:
+                                with open(caminho_destino.strip(), "w", encoding="utf-8") as f:
+                                    f.write(codigo_sugerido + "\n")
+                                st.success(f"✅ Código aplicado em '{caminho_destino}'.")
+                        except Exception as e:
+                            st.error(f"❌ Erro ao escrever o arquivo: {e}")
+            else:
+                st.error(f"❌ {resultado['resposta']}")
+
+
+try:
+    render_ensemble_revisao()
+except Exception as _ens_err:
+    st.caption("⚠️ Revisão Ensemble desativada por erro: " + str(_ens_err)[:200])
