@@ -3803,3 +3803,343 @@ AVATAR_MAP = {
     "Robô Digital": "robot",
     "Zeus Mitológico (3D)": "zeus",
 }
+# ============================================================
+# CADASTRO MANUAL DE HABILIDADE + CARREGAMENTO DINÂMICO
+# Grava local → valida → publica no GitHub → Zeus executa de verdade
+# ============================================================
+import base64 as _hb_base64
+import importlib
+import importlib.util
+import os as _hb_os
+import re as _hb_re
+import subprocess as _hb_subprocess
+import sys as _hb_sys
+import types
+import requests as _hb_requests
+
+
+def _hb_get_secret(key: str, default: str = "") -> str:
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            val = st.secrets[key]
+            if val:
+                return str(val).strip()
+    except Exception:
+        pass
+    return (_hb_os.environ.get(key) or default).strip()
+
+
+def hb_slug(nome: str) -> str:
+    base = _hb_re.sub(r"[^a-zA-Z0-9_]+", "_", nome.strip()).strip("_").lower()
+    return base or "habilidade_sem_nome"
+
+
+def hb_gravar_arquivo_local(caminho: str, codigo: str) -> dict:
+    try:
+        pasta = _hb_os.path.dirname(caminho)
+        if pasta:
+            _hb_os.makedirs(pasta, exist_ok=True)
+        # Garante que habilidades seja um pacote
+        init_path = _hb_os.path.join(pasta or "habilidades", "__init__.py")
+        if not _hb_os.path.exists(init_path):
+            with open(init_path, "w", encoding="utf-8") as f:
+                f.write("# Pacote de habilidades do Zeus\n")
+        with open(caminho, "w", encoding="utf-8") as f:
+            f.write(codigo)
+        return {"ok": True, "mensagem": f"Arquivo gravado em '{caminho}'."}
+    except Exception as e:
+        return {"ok": False, "mensagem": f"Erro ao gravar: {e}"}
+
+
+def hb_validar_execucao(caminho: str, timeout_s: int = 12) -> dict:
+    try:
+        resultado = _hb_subprocess.run(
+            [_hb_sys.executable, caminho],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except _hb_subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": f"Execução excedeu {timeout_s}s e foi interrompida.",
+            "codigo_saida": None,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "stdout": "",
+            "stderr": f"Falha ao executar: {e}",
+            "codigo_saida": None,
+        }
+    return {
+        "ok": resultado.returncode == 0,
+        "stdout": resultado.stdout,
+        "stderr": resultado.stderr,
+        "codigo_saida": resultado.returncode,
+    }
+
+
+def hb_commitar_github(caminho_remoto: str, conteudo: str, mensagem: str) -> dict:
+    token = _hb_get_secret("GITHUB_API_KEY") or _hb_get_secret("GITHUB_TOKEN")
+    owner = _hb_get_secret("GITHUB_USER")
+    repo = _hb_get_secret("GITHUB_REPO")
+    branch = _hb_get_secret("GITHUB_BRANCH", "main")
+
+    if not (token and owner and repo):
+        return {
+            "ok": False,
+            "mensagem": "Faltam GITHUB_API_KEY (ou GITHUB_TOKEN), GITHUB_USER ou GITHUB_REPO nos Secrets.",
+            "url": None,
+        }
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{caminho_remoto}"
+
+    try:
+        r_get = _hb_requests.get(url, headers=headers, params={"ref": branch}, timeout=20)
+        sha = r_get.json().get("sha") if r_get.status_code == 200 else None
+    except _hb_requests.RequestException as e:
+        return {"ok": False, "mensagem": f"Falha ao consultar SHA: {e}", "url": None}
+
+    payload = {
+        "message": mensagem,
+        "content": _hb_base64.b64encode(conteudo.encode("utf-8")).decode("utf-8"),
+        "branch": branch,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    try:
+        r_put = _hb_requests.put(url, headers=headers, json=payload, timeout=30)
+    except _hb_requests.RequestException as e:
+        return {"ok": False, "mensagem": f"Falha de conexão no commit: {e}", "url": None}
+
+    if r_put.status_code in (200, 201):
+        return {
+            "ok": True,
+            "mensagem": "Commit e push realizados com sucesso.",
+            "url": r_put.json().get("content", {}).get("html_url"),
+        }
+    try:
+        detalhe = r_put.json().get("message", "erro desconhecido")
+    except Exception:
+        detalhe = r_put.text[:200]
+    return {"ok": False, "mensagem": f"({r_put.status_code}) {detalhe}", "url": None}
+
+
+# ------------------------------------------------------------
+# CARREGAMENTO DINÂMICO DE MÓDULOS (o que faz o Zeus executar)
+# ------------------------------------------------------------
+def _hb_garantir_pacote_habilidades():
+    pasta = "habilidades"
+    _hb_os.makedirs(pasta, exist_ok=True)
+    init = _hb_os.path.join(pasta, "__init__.py")
+    if not _hb_os.path.exists(init):
+        with open(init, "w", encoding="utf-8") as f:
+            f.write("# Pacote de habilidades do Zeus\n")
+
+
+def carregar_habilidades_dinamicas() -> dict:
+    """
+    Escaneia a pasta habilidades/, importa cada .py e retorna
+    um dicionário {nome_funcao: funcao}.
+    """
+    _hb_garantir_pacote_habilidades()
+    funcoes = {}
+
+    pasta = "habilidades"
+    if pasta not in sys.path:
+        sys.path.insert(0, _hb_os.getcwd())
+
+    for nome_arquivo in _hb_os.listdir(pasta):
+        if not nome_arquivo.endswith(".py") or nome_arquivo.startswith("_"):
+            continue
+        modulo_nome = f"habilidades.{nome_arquivo[:-3]}"
+        caminho = _hb_os.path.join(pasta, nome_arquivo)
+
+        try:
+            # Remove do cache se já existir (permite reload)
+            if modulo_nome in sys.modules:
+                del sys.modules[modulo_nome]
+
+            spec = importlib.util.spec_from_file_location(modulo_nome, caminho)
+            if spec is None or spec.loader is None:
+                continue
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[modulo_nome] = mod
+            spec.loader.exec_module(mod)
+
+            for nome, obj in vars(mod).items():
+                if callable(obj) and not nome.startswith("_") and isinstance(obj, types.FunctionType):
+                    # Evita sobrescrever se já existir no zeus_skills
+                    funcoes[nome] = obj
+        except Exception as e:
+            # Não quebra o app se um módulo estiver quebrado
+            st.session_state.setdefault("hb_erros_carga", []).append(f"{nome_arquivo}: {e}")
+
+    return funcoes
+
+
+def listar_todas_habilidades() -> dict:
+    """Junta as habilidades do zeus_skills + as da pasta habilidades/."""
+    todas = {}
+
+    # 1. As que já existem no sistema antigo
+    try:
+        if "listar_habilidades" in globals():
+            todas.update(listar_habilidades())
+    except Exception:
+        pass
+
+    # 2. As dinâmicas da pasta
+    try:
+        todas.update(carregar_habilidades_dinamicas())
+    except Exception:
+        pass
+
+    return todas
+
+
+def executar_habilidade_por_nome(nome_fn: str, *args, **kwargs):
+    """Permite o Zeus (ou a UI) chamar qualquer habilidade pelo nome."""
+    skills = listar_todas_habilidades()
+    fn = skills.get(nome_fn)
+    if fn is None:
+        return f"❌ Habilidade '{nome_fn}' não encontrada. Disponíveis: {', '.join(skills.keys()) or 'nenhuma'}"
+    try:
+        return fn(*args, **kwargs)
+    except TypeError as e:
+        return f"❌ Erro de argumentos em '{nome_fn}': {e}"
+    except Exception as e:
+        return f"❌ Erro ao executar '{nome_fn}': {e}"
+
+
+# ------------------------------------------------------------
+# INTERFACE
+# ------------------------------------------------------------
+def render_cadastro_habilidade():
+    with st.expander("🧩 Cadastrar Nova Habilidade (manual)", expanded=False):
+        st.caption(
+            "1. Cole o código → 2. Clique em **Validar** → "
+            "3. Se o teste estiver ok, clique em **Publicar no GitHub**. "
+            "Depois do redeploy o Zeus consegue executar a função."
+        )
+
+        nome = st.text_input("Nome da habilidade", key="hb_nome", placeholder="ex: calcular_imc")
+        codigo = st.text_area(
+            "Código Python da habilidade",
+            height=260,
+            key="hb_codigo",
+            placeholder=(
+                "def calcular_imc(peso, altura):\n"
+                "    return round(peso / (altura ** 2), 2)\n\n"
+                "if __name__ == '__main__':\n"
+                "    print(calcular_imc(70, 1.75))"
+            ),
+        )
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            if st.button("🧪 Validar (grava + executa)", key="hb_btn_validar"):
+                if not nome.strip() or not codigo.strip():
+                    st.warning("Preencha o nome e o código.")
+                else:
+                    arquivo = hb_slug(nome) + ".py"
+                    caminho_local = _hb_os.path.join("habilidades", arquivo)
+
+                    # Validação estática (se existir no app)
+                    if "validar_codigo_habilidade" in globals():
+                        ok_ast, msg_ast = validar_codigo_habilidade(codigo)
+                        if not ok_ast:
+                            st.error(f"❌ Validação estática falhou: {msg_ast}")
+                            st.stop()
+
+                    res_gravar = hb_gravar_arquivo_local(caminho_local, codigo)
+                    if not res_gravar["ok"]:
+                        st.error(res_gravar["mensagem"])
+                        st.stop()
+
+                    with st.spinner("Executando em processo separado..."):
+                        res_val = hb_validar_execucao(caminho_local)
+
+                    st.session_state.hb_ultimo_teste = {
+                        "nome": nome.strip(),
+                        "codigo": codigo,
+                        "caminho_local": caminho_local,
+                        "arquivo": arquivo,
+                        "ok": res_val["ok"],
+                        "stdout": res_val["stdout"],
+                        "stderr": res_val["stderr"],
+                        "codigo_saida": res_val["codigo_saida"],
+                    }
+
+                    if res_val["ok"]:
+                        st.success("✅ Código executou sem erro. Pode publicar.")
+                        # Já carrega localmente para testar na hora
+                        try:
+                            carregar_habilidades_dinamicas()
+                        except Exception:
+                            pass
+                    else:
+                        st.error(f"❌ Falhou na execução (código {res_val['codigo_saida']}).")
+
+        with col2:
+            if st.button("🚀 Publicar no GitHub", key="hb_btn_publicar"):
+                ultimo = st.session_state.get("hb_ultimo_teste")
+                if not ultimo or not ultimo.get("ok"):
+                    st.warning("Valide o código com sucesso antes de publicar.")
+                else:
+                    caminho_remoto = f"habilidades/{ultimo['arquivo']}"
+                    with st.spinner("Enviando para o GitHub..."):
+                        res = hb_commitar_github(
+                            caminho_remoto,
+                            ultimo["codigo"],
+                            f"Nova habilidade: {ultimo['nome']}",
+                        )
+                    if res["ok"]:
+                        st.success(f"✅ {res['mensagem']}")
+                        if res.get("url"):
+                            st.markdown(f"[🔗 Ver no GitHub]({res['url']})")
+                        st.info("Após o redeploy do Streamlit Cloud a habilidade fica permanente.")
+                    else:
+                        st.error(f"❌ {res['mensagem']}")
+
+        with col3:
+            if st.button("🔄 Recarregar habilidades agora", key="hb_btn_reload"):
+                skills = carregar_habilidades_dinamicas()
+                st.success(f"Carregadas {len(skills)} função(ões): {', '.join(skills.keys()) or 'nenhuma'}")
+
+        # Resultado do último teste
+        ultimo = st.session_state.get("hb_ultimo_teste")
+        if ultimo:
+            with st.expander("Saída da última validação", expanded=not ultimo["ok"]):
+                st.write(f"**Arquivo local:** `{ultimo['caminho_local']}`")
+                st.write(f"**Código de saída:** {ultimo['codigo_saida']}")
+                if ultimo.get("stdout"):
+                    st.markdown("**stdout:**")
+                    st.code(ultimo["stdout"])
+                if ultimo.get("stderr"):
+                    st.markdown("**stderr:**")
+                    st.code(ultimo["stderr"])
+
+        # Lista o que já está carregado
+        with st.expander("Habilidades disponíveis agora", expanded=False):
+            skills = listar_todas_habilidades()
+            if skills:
+                for nome_fn, fn in skills.items():
+                    st.write(f"• `{nome_fn}`")
+            else:
+                st.caption("Nenhuma habilidade carregada ainda.")
+
+
+try:
+    render_cadastro_habilidade()
+except Exception as _hb_err:
+    st.caption("⚠️ Cadastro de Habilidade desativado por erro: " + str(_hb_err)[:200])
