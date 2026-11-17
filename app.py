@@ -3277,24 +3277,6 @@ def zeus_run_script(script_path, timeout=120, extra_args=None, cwd=None):
         return result
 
 
-def _zeus_git(cmd_list, repo_dir, timeout=60):
-    """Helper interno: roda git sem travar e sem prompt interativo."""
-    env = {
-        **os.environ,
-        "GIT_TERMINAL_PROMPT": "0",
-        "GIT_EDITOR": "true",
-    }
-    completed = subprocess.run(
-        cmd_list,
-        cwd=str(repo_dir),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
-    return completed
-
-
 # ================= ZEUS MOTOR REAL (EXECUCAO + GIT) =================
 import os as _os
 import subprocess as _sp
