@@ -3624,3 +3624,108 @@ def renderizar_avatar_zeus():
 
 # Chame esta função onde quiser que o avatar apareça na tela
 renderizar_avatar_zeus()
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<style>
+  body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030308; font-family: 'Courier New', monospace; color: #00ffff; }
+  #three-box, #c2 { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+  .ui-overlay { position: absolute; top: 16px; left: 16px; z-index: 10; pointer-events: none; }
+  h1 { font-size: 1.4rem; margin: 0; text-shadow: 0 0 12px #00ffff; letter-spacing: 2px; }
+  p { font-size: 0.85rem; color: #ff00ff; margin: 6px 0 0 0; }
+  .chat-container { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); width: 94%; max-width: 650px; background: rgba(3,3,15,0.9); border: 1px solid #00ffff; border-radius: 8px; padding: 12px; z-index: 10; box-sizing: border-box; box-shadow: 0 0 20px rgba(0,255,255,0.2); }
+  .chat-history { height: 110px; overflow-y: auto; font-size: 0.85rem; margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .message { padding: 6px 10px; border-radius: 4px; max-width: 85%; }
+  .user-msg { background: rgba(255,0,255,0.15); border-left: 3px solid #ff00ff; color: #fff; align-self: flex-end; }
+  .ai-msg { background: rgba(0,255,255,0.15); border-left: 3px solid #00ffff; color: #00ffff; align-self: flex-start; }
+  .input-group { display: flex; gap: 6px; }
+  input[type="text"] { flex-grow: 1; background: rgba(0,0,0,0.7); border: 1px solid #00ffff; color: #00ffff; padding: 8px; border-radius: 4px; outline: none; }
+  button { background: linear-gradient(135deg, #00ffff, #ff00ff); border: none; color: #030308; font-weight: bold; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+<div id="three-box"></div>
+<canvas id="c2"></canvas>
+<div class="ui-overlay">
+  <h1 id="title">[ ZEUS 5.0 // CYBER-CORE ]</h1>
+  <p id="status">STATUS: ONLINE & SECURE</p>
+</div>
+<div class="chat-container">
+  <div class="chat-history" id="chatHistory"></div>
+  <div class="input-group">
+    <input type="text" id="userInput" placeholder="Comando neural..." />
+    <button id="sendBtn">Transmitir</button>
+  </div>
+</div>
+<script>
+function sendMsg(type, data) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data || {}), "*"); }
+sendMsg("streamlit:componentReady", {apiVersion: 1});
+sendMsg("streamlit:setFrameHeight", {height: 650});
+let avatar = "sphere", lastReplyId = 0, mouseX = 0, mouseY = 0;
+const box = document.getElementById("three-box"), cv = document.getElementById("c2"), ctx = cv.getContext("2d");
+window.addEventListener("mousemove", (e) => { mouseX = (e.clientX / window.innerWidth) * 2 - 1; mouseY = -(e.clientY / window.innerHeight) * 2 + 1; });
+window.addEventListener("message", function (e) {
+  if (!e.data || e.data.type !== "streamlit:render") return;
+  const a = e.data.args || {};
+  if (a.avatar && a.avatar !== avatar) { avatar = a.avatar; updateAvatarMode(); }
+  if (a.reply_id !== lastReplyId) { lastReplyId = a.reply_id; if (a.reply) addMessage(a.reply, "ai"); }
+});
+function updateAvatarMode() { box.style.display = (avatar === "sphere" || avatar === "gods_lightning") ? "block" : "none"; cv.style.display = (avatar === "sphere" || avatar === "gods_lightning") ? "none" : "block"; }
+function addMessage(text, sender) { const h = document.getElementById("chatHistory"); const d = document.createElement("div"); d.classList.add("message", sender === "user" ? "user-msg" : "ai-msg"); d.textContent = text; h.appendChild(d); h.scrollTop = h.scrollHeight; }
+document.getElementById("sendBtn").addEventListener("click", submitText);
+document.getElementById("userInput").addEventListener("keydown", function(e) { if(e.key === "Enter") submitText(); });
+function submitText() { const input = document.getElementById("userInput"); const val = input.value.trim(); if(!val) return; addMessage(val, "user"); input.value = ""; sendMsg("streamlit:setComponentValue", { value: { id: Date.now(), text: val }, dataType: "json" }); }
+const HAS3 = typeof THREE !== "undefined";
+let scene, camera, renderer, sphere, lightningGroup;
+if (HAS3) {
+  scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000); camera.position.z = 6;
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  box.appendChild(renderer.domElement);
+  sphere = new THREE.Mesh(new THREE.SphereGeometry(1.8, 32, 32), new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true }));
+  scene.add(sphere);
+  lightningGroup = new THREE.Group(); scene.add(lightningGroup);
+  for(let i=0; i<5; i++) {
+    const geom = new THREE.BufferGeometry();
+    const pts = [new THREE.Vector3(0,0,0), new THREE.Vector3((Math.random()-0.5)*4, (Math.random()-0.5)*4, (Math.random()-0.5)*4)];
+    geom.setFromPoints(pts);
+    const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0xffd700, linewidth: 3 }));
+    lightningGroup.add(line);
+  }
+}
+let lightningTimer = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  if (HAS3) {
+    renderer.setSize(box.clientWidth || 300, box.clientHeight || 300);
+    if (avatar === "sphere") {
+      sphere.visible = true; lightningGroup.visible = false;
+      sphere.rotation.y += 0.01 + mouseX * 0.05; sphere.rotation.x += mouseY * 0.05;
+      renderer.render(scene, camera);
+    } else if (avatar === "gods_lightning") {
+      sphere.visible = false; lightningGroup.visible = true;
+      lightningTimer++;
+      if (lightningTimer % 10 === 0) {
+        lightningGroup.children.forEach(line => {
+          const positions = line.geometry.attributes.position.array;
+          positions[3] = (Math.random() - 0.5) * 5 + mouseX * 2;
+          positions[4] = (Math.random() - 0.5) * 5 + mouseY * 2;
+          positions[5] = (Math.random() - 0.5) * 5;
+          line.geometry.attributes.position.needsUpdate = true;
+        });
+      }
+      lightningGroup.rotation.y += 0.02;
+      renderer.render(scene, camera);
+    } else {
+      box.style.display = "none"; ctx.fillStyle = "#030308"; ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.fillStyle = "#00ffff"; ctx.font = "20px monospace";
+      ctx.fillText(avatar === "eye" ? "[ OLHO CIBERNÉTICO ATIVO ]" : "[ NÚCLEO ROBÔ DIGITAL ]", 40, 60);
+    }
+  }
+}
+animate();
+</script>
+</body>
+</html>
