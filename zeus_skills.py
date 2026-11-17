@@ -500,3 +500,40 @@ def consultar_preco_cripto(dados_consulta: Dict[str, Any]) -> Dict[str, Any]:
             "status": "erro_conexao",
             "detalhe": str(e)
         }
+
+
+import urllib.request
+import json
+from typing import Dict, Any
+
+def consultar_preco_cripto(dados_consulta: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Consulta o preço em tempo real de ativos cripto usando endpoints públicos globais
+    alternativos, livres de restrições de IP.
+    Espera um dicionário com a chave 'par' (ex: 'bitcoin').
+    """
+    moeda = dados_consulta.get("par", "bitcoin").lower()
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={moeda}&vs_currencies=usd"
+    
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            
+        preco = data.get(moeda, {}).get("usd", 0)
+        
+        return {
+            "ativo": moeda.upper(),
+            "preco_usd": preco,
+            "status": "sucesso_soberano",
+            "fonte": "API Global Aberta"
+        }
+    except Exception as e:
+        return {
+            "ativo": moeda,
+            "status": "erro_conexao",
+            "detalhe": str(e)
+        }
