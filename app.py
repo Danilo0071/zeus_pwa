@@ -3399,3 +3399,44 @@ def zeus_aprender_e_commitar_habilidade(nome_habilidade: str, codigo_python: str
         if original_url:
             _zeus_run_cmd(["git", "remote", "set-url", "origin", original_url], repo_dir)
 # ==============================================================================
+
+# =====================================================================
+# INTERFACE DE AUTO-EVOLUÇÃO NO PAINEL STREAMLIT
+# =====================================================================
+import streamlit as st
+
+st.subheader("🤖 Núcleo de Autonomia e Criação de Habilidades")
+
+with st.form("form_nova_habilidade"):
+    nome_hab = st.text_input(
+        "Nome da Nova Habilidade:", placeholder="ex: gerador_dados"
+    )
+    codigo_hab = st.text_area(
+        "Código Python da Habilidade:",
+        value="def executar():\n    print('Habilidade executada com sucesso!')\n\nif _name_ == '_main_':\n    executar()",
+        height=200,
+    )
+
+    botao_criar = st.form_submit_button("⚡ Ensinar Habilidade ao Zeus (Deploy Real)")
+
+    if botao_criar:
+        if not nome_hab or not codigo_hab:
+            st.error("Preencha o nome e o código da habilidade.")
+        else:
+            with st.spinner(
+                "O Zeus está escrevendo, testando e enviando para o GitHub..."
+            ):
+                # Chama a função real de autonomia soberana que criamos
+                sucesso, log_retorno = zeus_criar_e_commitar_habilidade(
+                    nome_hab, codigo_hab
+                )
+
+                if sucesso:
+                    st.success(
+                        f"Habilidade '{nome_hab}' criada e sincronizada com sucesso!"
+                    )
+                    st.code(log_retorno, language="bash")
+                else:
+                    st.error("Falha no processo de auto-evolução.")
+                    st.code(log_retorno, language="bash")
+# =====================================================================
