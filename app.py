@@ -2479,206 +2479,113 @@ def render_avatar_voice(avatar_key, silence_s, stt_engine, tts_engine, voz, tts_
 
 
 # ============================================================
-# ZEUS 5.0 - APP PRINCIPAL CONSOLIDADO COM O ZEUS LENDÁRIO (4º AVATAR)
+# APP PRINCIPAL
 # ============================================================
-import streamlit as st
-import streamlit.components.v1 as components
-import os
-import tempfile
-import base64
-import hashlib
-import requests
-
-# Inicialização do Banco / Sessão
-# init_db()  # Certifique-se de manter sua função de banco se houver
-
+init_db()
 if "session_id" not in st.session_state:
     st.session_state.session_id = "zeus_master"
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ------------------------------------------------------------
-# DICIONÁRIO DE AVATARES (INCLUINDO O ZEUS LENDÁRIO COMO 4º)
-# ------------------------------------------------------------
-AVATAR_MAP = {
-    "Esfera 3D (Cyberpunk)": "v1",
-    "Olho Cibernético": "v2",
-    "Robô Digital": "v3",
-    "Zeus Lendário (HD, 3D, Raio)": "v4"
-}
-
-THEMES = {
-    "Cyberpunk Dark": {"bg": "#030308", "accent": "#00ffd0"},
-    "Zeus Gold": {"bg": "#050510", "accent": "#ffcc00"}
-}
-
-# ------------------------------------------------------------
-# HTML COMPLETO DOS AVATARES (INCLUINDO O ZEUS LENDÁRIO)
-# ------------------------------------------------------------
-AVATAR_HTML = r"""
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<style>
-  body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030308; font-family: sans-serif; }
-  #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-  .ui-overlay { position: absolute; top: 16px; left: 16px; z-index: 10; pointer-events: none; }
-  h1 { font-size: 1.4rem; margin: 0; color: #00ffd0; text-shadow: 0 0 10px #00ffd0, 0 0 20px #00ffd0; letter-spacing: 2px; }
-  p { font-size: 0.9rem; color: #66ccff; text-shadow: 0 0 5px #66ccff; margin: 4px 0 0 0; }
-</style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-</head>
-<body>
-<div class="ui-overlay">
-  <h1 id="avatar-title">ZEUS // CYBER-CORE</h1>
-  <p id="avatar-status">STATUS: ONLINE</p>
-</div>
-<div id="canvas-container"></div>
-<script>
-  const urlParams = new URLSearchParams(window.location.search);
-  const mode = urlParams.get('mode') || 'v1';
-
-  const container = document.getElementById("canvas-container");
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
-  camera.position.set(0, 0.6, 9);
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  container.appendChild(renderer.domElement);
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-  const sol = new THREE.DirectionalLight(0xffffff, 1.3); 
-  sol.position.set(3, 4, 5); 
-  scene.add(sol);
-
-  let activeGroup = new THREE.Group();
-  scene.add(activeGroup);
-
-  // Textos de overlay
-  const titleEl = document.getElementById("avatar-title");
-  const statusEl = document.getElementById("avatar-status");
-
-  if (mode === 'v4') {
-    titleEl.innerText = "⚡ ZEUS LENDÁRIO";
-    statusEl.innerText = "STATUS: DEITY MODE // RAIO ATIVO";
-    
-    // ZEUS LENDÁRIO (Núcleo com Cabelo Branco, Halo e Raios)
-    const nucleo = new THREE.Mesh(new THREE.SphereGeometry(0.6, 40, 40), new THREE.MeshBasicMaterial({ color: 0xe8f6ff }));
-    const casca = new THREE.Mesh(new THREE.IcosahedronGeometry(1.0, 3), new THREE.MeshBasicMaterial({ color: 0x3366ff, wireframe: true, transparent: true, opacity: 0.6 }));
-    const halo = new THREE.Mesh(new THREE.SphereGeometry(1.3, 32, 32), new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.15, side: THREE.BackSide }));
-    const luzZ = new THREE.PointLight(0x00ffff, 4, 15);
-    const raios = new THREE.Group(); 
-    const matRaio = new THREE.LineBasicMaterial({ color: 0xffffff });
-
-    activeGroup.add(nucleo, casca, halo, luzZ, raios);
-
-    function criarRaio() {
-      const dir = new THREE.Vector3(Math.random() - .5, Math.random() - .5, Math.random() - .5).normalize();
-      const pts = [];
-      for (let i = 0; i <= 8; i++) {
-        const p = dir.clone().multiplyScalar(0.6 + i / 8 * 1.2);
-        if (i > 0 && i < 8) p.add(new THREE.Vector3((Math.random() - .5) * .3, (Math.random() - .5) * .3, (Math.random() - .5) * .3));
-        pts.push(p);
-      }
-      return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), matRaio);
-    }
-
-    let ult = 0;
-    const clock = new THREE.Clock();
-    renderer.setAnimationLoop(() => {
-      const t = clock.getElapsedTime();
-      casca.rotation.y = t * 0.5;
-      casca.rotation.x = t * 0.3;
-      nucleo.scale.setScalar(1 + Math.sin(t * 4) * 0.06);
-      luzZ.intensity = 3 + Math.sin(t * 10) * 1.2;
-      if (t - ult > 0.1) {
-        raios.children.forEach(l => l.geometry.dispose());
-        raios.clear();
-        for (let i = 0; i < 4 + Math.floor(Math.random() * 3); i++) raios.add(criarRaio());
-        ult = t;
-      }
-      renderer.render(scene, camera);
-    });
-
-  } else {
-    // PADRÃO (Esfera 3D / Robô)
-    titleEl.innerText = "ZEUS // CYBER-CORE";
-    statusEl.innerText = "STATUS: ONLINE";
-    const globo = new THREE.Group(); 
-    globo.position.set(0, 0, 0);
-    globo.add(new THREE.Mesh(new THREE.SphereGeometry(1.2, 32, 32), new THREE.MeshStandardMaterial({ color: 0x1b4fa0 })));
-    globo.add(new THREE.Mesh(new THREE.SphereGeometry(1.23, 24, 24), new THREE.MeshBasicMaterial({ color: 0x66aaff, wireframe: true, transparent: true, opacity: 0.4 })));
-    activeGroup.add(globo);
-
-    const clock = new THREE.Clock();
-    renderer.setAnimationLoop(() => {
-      const t = clock.getElapsedTime();
-      globo.rotation.y = t * 0.4;
-      renderer.render(scene, camera);
-    });
-  }
-
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-</script>
-</body>
-</html>
-"""
-
-@st.cache_resource
-def _avatar_component(_html_hash: str):
-    pasta = os.path.join(tempfile.gettempdir(), f"zeus_avatar_{_html_hash}")
-    os.makedirs(pasta, exist_ok=True)
-    with open(os.path.join(pasta, "index.html"), "w", encoding="utf-8") as f:
-        f.write(AVATAR_HTML)
-    return components.declare_component(f"zeus_avatar_{_html_hash}", path=pasta)
-
-def render_avatar_voice(avatar_id: str, silence_s, stt_key, tts_key, voz_edge, tts_rate):
-    # Renderiza o componente passando o modo via query parameter do iframe
-    comp = _avatar_component(avatar_id)
-    comp(mode=avatar_id, height=520)
-
-# ------------------------------------------------------------
-# SIDEBAR DE CONFIGURAÇÃO
-# ------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Configuração")
     theme_name = st.selectbox("🎨 Interface", list(THEMES.keys()), index=0, key="theme_sel")
-    avatar_type = st.selectbox("🤖 Avatar do Zeus", list(AVATAR_MAP.keys()), index=3, key="avatar_sel") # Deixado o Zeus Lendário como padrão index=3
-    model_choice = st.selectbox("🧠 Modelo LLM", ["Groq (Llama 3)", "OpenAI GPT-4"], index=0, key="model_sel")
-    
+    avatar_type = st.selectbox("🤖 Avatar do Zeus", list(AVATAR_MAP.keys()), index=0, key="avatar_sel")
+    model_choice = st.selectbox("🧠 Modelo LLM", PROVIDERS, index=0, key="model_sel")
     st.subheader("🎙️ Voz")
-    stt_label = st.selectbox("👂 Reconhecimento", ["Whisper (Groq) — melhor no celular", "Navegador — mais rápido"], key="stt_sel")
-    tts_label = st.selectbox("🔊 Motor de voz", ["Neural (Edge) — voz natural", "Navegador"], key="tts_sel")
-    
+    stt_label = st.selectbox("👂 Reconhecimento", ["Whisper (Groq) — melhor no celular", "Navegador — mais rápido, menos preciso"], key="stt_sel")
+    tts_label = st.selectbox("🔊 Motor de voz", ["Neural (Edge) — voz natural", "Navegador — voz do aparelho"], key="tts_sel")
+    _vozes = listar_vozes_edge()
+    voz_nome = st.selectbox("🗣️ Voz do Zeus", list(_vozes.keys()), key="voz_sel")
+    tts_rate = st.slider("⚡ Velocidade da fala", 0.8, 1.5, 1.0, 0.05, key="rate_sel")
     silence_s = st.slider("⏱️ Silêncio para enviar (s)", 1, 10, 2, key="silence_sel")
     stt_key = "whisper" if stt_label.startswith("Whisper") else "browser"
     tts_key = "edge" if tts_label.startswith("Neural") else "browser"
-    voz_edge = "pt-BR-AntonioNeural"
-
+    voz_edge = _vozes[voz_nome]
+    grupo_voz = st.selectbox("🌍 Mais vozes", ["Só português (padrão)", "Multilíngues (falam português)", "Todas as vozes (outros idiomas)"], key="grupo_voz")
+    if grupo_voz != "Só português (padrão)":
+        _todas = listar_todas_vozes_edge()
+        _filtro = ({k_: v_ for k_, v_ in _todas.items() if "Multilingual" in v_} if grupo_voz.startswith("Multi") else _todas)
+        if _filtro:
+            _nome_extra = st.selectbox("🗣️ Escolha a voz", list(_filtro.keys()), key="voz_extra_sel")
+            voz_edge = _filtro[_nome_extra]
+    _tom = st.slider("🎚️ Tom da voz (Hz)", -50, 50, 0, 5, key="tom_sel")
+    _vol = st.slider("🔉 Volume da voz (%)", -50, 50, 0, 5, key="vol_sel")
+    PITCH_ATUAL = f"{_tom:+d}Hz"
+    VOLUME_ATUAL = f"{_vol:+d}%"
+    if st.button("🔊 Testar voz"):
+        _mp3 = sintetizar("Olá, eu sou o Zeus. Como posso ajudar?", voz_edge, tts_rate)
+        if _mp3:
+            st.audio(_mp3, format="audio/mp3")
+        else:
+            st.warning("Não consegui gerar a voz neural: " + st.session_state.get("tts_erro", "erro desconhecido"))
     if st.button("🗑️ Limpar conversa"):
         st.session_state.messages = []
+        st.session_state.avatar_reply = None
         st.rerun()
 
-# ------------------------------------------------------------
-# APP PRINCIPAL (INTERFACE)
-# ------------------------------------------------------------
+    st.divider()
+    st.subheader("🌐 Internet")
+    st.selectbox("Busca na web", ["Automática", "Sempre", "Desligada"], key="web_mode")
+    st.divider()
+    render_camera_sidebar()
+
+    st.divider()
+    render_visao_gerar_sidebar()
+
+    st.divider()
+    if st.button("🧪 Testar chaves", key="btn_test_keys"):
+        st.session_state.teste_chaves = testar_chaves()
+    for _l in st.session_state.get("teste_chaves", []):
+        st.write(_l)
+    st.subheader("🔑 Status das Chaves")
+    for k in KEYS.values():
+        st.write(("✅ " if _secret(k) else "❌ ") + k)
+    if st.session_state.get("last_info"):
+        st.caption(st.session_state.last_info)
+
+inject_theme(theme_name)
 st.title("⚡ ZEUS // CYBER-CORE")
+render_avatar_voice(AVATAR_MAP[avatar_type], silence_s, stt_key, tts_key, voz_edge, tts_rate)
+render_pipeline_ui()
+render_estudio_ui()
+render_evolucao_ui()
 
-# AQUI É ONDE O AVATAR É CHAMADO E RENDERIZADO NO QUADRADINHO DA TELA COM O NOME DELE
-render_avatar_voice(AVATAR_MAP[avatar_type], silence_s, stt_key, tts_key, voz_edge, 1.0)
-
-# Histórico de Conversa
-with st.expander("📜 Histórico da conversa", expanded=False):
+with st.expander("📜 Histórico da conversa"):
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+# ============================================================
+# ZEUS FINAL - NUCLEO CONSOLIDADO UNICO
+# (substitui TODOS os blocos "BLOCO SUPLEMENTAR ZEUS" anteriores:
+#  3.5, 3.9, 4.1, 4.2, 4.3, 4.4 - apague-os do app.py e cole so este)
+# Database no GitHub agora aponta para a pasta exclusiva: zilsy/
+# ============================================================
+import base64 as _b64_zf
+import requests as _req_zf
+import re as _re_zf
+import ast as _ast_zf
+import inspect as _insp_zf
+
+try:
+    import spotipy
+    from spotipy.oauth2 import SpotifyOAuth
+except ImportError:
+    spotipy = None
+
+_firestore_zf = None
+_firebase_admin_zf = None
+_cred_zf = None
+_db_firestore_zf = None
+try:
+    from google.cloud import firestore as _firestore_zf
+    import firebase_admin as _firebase_admin_zf
+    from firebase_admin import credentials as _cred_zf, firestore as _db_firestore_zf
+except ImportError:
+    pass
+
+_ZF_PASTA_RAIZ = "zilsy"
+_ZF_PASTA_MODULOS = _ZF_PASTA_RAIZ + "/modulos"
 
 
 # ------------------------------------------------------------
