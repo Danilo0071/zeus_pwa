@@ -356,3 +356,27 @@ def executar() -> str:
     """Retorna a mensagem de confirmação da conexão com o GitHub."""
     mensagem = "ZEUS SOBERANO: CONEXÃO COM O GITHUB ESTABELECIDA COM SUCESSO!"
     return mensagem
+
+
+def calcular_lucro_operacao(dados_operacao: dict) -> dict:
+    """Calcula o lucro líquido, o ROI percentual e a viabilidade de uma operação financeira."""
+    capital = float(dados_operacao.get("capital", 0.0))
+    entrada = float(dados_operacao.get("preco_entrada", 0.0))
+    saida = float(dados_operacao.get("preco_saida", 0.0))
+    taxas = float(dados_operacao.get("taxas", 0.0))
+    
+    if entrada <= 0 or capital <= 0:
+        return {"erro": "Capital e preço de entrada devem ser maiores que zero"}
+    
+    quantidade = capital / entrada
+    bruto_saida = quantidade * saida
+    lucro_liquido = bruto_saida - capital - taxas
+    roi_percentual = (lucro_liquido / capital) * 100
+    
+    viavel = True if lucro_liquido > 0 else False
+    
+    return {
+        "lucro_liquido": round(lucro_liquido, 2),
+        "roi_percentual": round(roi_percentual, 2),
+        "operacao_viavel": viavel
+    }
