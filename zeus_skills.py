@@ -583,3 +583,64 @@ st.info("Painel atualizado com sucesso e integrado ao ecossistema autônomo.")
         "codigo_gerado": codigo_app,
         "mensagem": "Código do painel com o Avatar 3D gerado com sucesso pelo motor."
     }
+
+
+import base64
+import json
+import urllib.request
+from typing import Dict, Any
+
+def atualizar_painel_github(dados: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Entra autonomamente no repositório GitHub do Zeus, pega a versão atual do app.py,
+    atualiza com o novo código gerado e faz o commit automático na nuvem.
+    Espera: 'token_github' e o 'novo_codigo'.
+    """
+    token = dados.get("token_github", "")
+    novo_codigo = dados.get("novo_codigo", "")
+    
+    if not token or not novo_codigo:
+        return {"status": "erro", "detalhe": "Token do GitHub ou código ausente."}
+        
+    repo = "Danilo0071/zeus_pwa"
+    path = "app.py"
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Zeus-Autonomous-Agent"
+    }
+    
+    try:
+        req_get = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req_get, timeout=10) as response:
+            file_info = json.loads(response.read().decode('utf-8'))
+            sha = file_info.get("sha")
+            
+        content_encoded = base64.b64encode(novo_codigo.encode('utf-8')).decode('utf-8')
+        
+        payload = {
+            "message": "Zeus [Auto-Update]: Injeção autônoma do Avatar 3D no app.py",
+            "content": content_encoded,
+            "sha": sha,
+            "branch": "main"
+        }
+        
+        data_bytes = json.dumps(payload).encode('utf-8')
+        req_put = urllib.request.Request(url, data=data_bytes, headers=headers, method="PUT")
+        
+        with urllib.request.urlopen(req_put, timeout=10) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            
+        return {
+            "status": "sucesso_soberano",
+            "commit_id": res_data.get("commit", {}).get("sha", "desconhecido"),
+            "mensagem": "Zeus atualizou o app.py no GitHub com sucesso absoluto!"
+        }
+        
+    except Exception as e:
+        return {
+            "status": "erro_conexao_github",
+            "detalhe": str(e)
+        }
