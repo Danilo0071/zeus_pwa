@@ -2885,3 +2885,384 @@ try:
     zf_interceptar_musica()
 except Exception as _zf_err:
     st.caption("Zeus Final desativado por erro: " + str(_zf_err)[:200])
+
+# ============================================================
+# ZEUS 5.0 - APP PRINCIPAL CONSOLIDADO COM O ZEUS LENDÁRIO (4º AVATAR)
+# ============================================================
+import streamlit as st
+import streamlit.components.v1 as components
+import os
+import tempfile
+import base64
+import hashlib
+import requests
+
+# Inicialização do Banco / Sessão
+# init_db()  # Certifique-se de manter sua função de banco se houver
+
+if "session_id" not in st.session_state:
+    st.session_state.session_id = "zeus_master"
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# ------------------------------------------------------------
+# DICIONÁRIO DE AVATARES (INCLUINDO O ZEUS LENDÁRIO COMO 4º)
+# ------------------------------------------------------------
+AVATAR_MAP = {
+    "Esfera 3D (Cyberpunk)": "v1",
+    "Olho Cibernético": "v2",
+    "Robô Digital": "v3",
+    "Zeus Lendário (HD, 3D, Raio)": "v4"
+}
+
+THEMES = {
+    "Cyberpunk Dark": {"bg": "#030308", "accent": "#00ffd0"},
+    "Zeus Gold": {"bg": "#050510", "accent": "#ffcc00"}
+}
+
+# ------------------------------------------------------------
+# HTML COMPLETO DOS AVATARES (INCLUINDO O ZEUS LENDÁRIO)
+# ------------------------------------------------------------
+AVATAR_HTML = r"""
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<style>
+  body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030308; font-family: sans-serif; }
+  #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+  .ui-overlay { position: absolute; top: 16px; left: 16px; z-index: 10; pointer-events: none; }
+  h1 { font-size: 1.4rem; margin: 0; color: #00ffd0; text-shadow: 0 0 10px #00ffd0, 0 0 20px #00ffd0; letter-spacing: 2px; }
+  p { font-size: 0.9rem; color: #66ccff; text-shadow: 0 0 5px #66ccff; margin: 4px 0 0 0; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+<div class="ui-overlay">
+  <h1 id="avatar-title">ZEUS // CYBER-CORE</h1>
+  <p id="avatar-status">STATUS: ONLINE</p>
+</div>
+<div id="canvas-container"></div>
+<script>
+  const urlParams = new URLSearchParams(window.location.search);
+  const mode = urlParams.get('mode') || 'v1';
+
+  const container = document.getElementById("canvas-container");
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+  camera.position.set(0, 0.6, 9);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  container.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const sol = new THREE.DirectionalLight(0xffffff, 1.3); 
+  sol.position.set(3, 4, 5); 
+  scene.add(sol);
+
+  let activeGroup = new THREE.Group();
+  scene.add(activeGroup);
+
+  // Textos de overlay
+  const titleEl = document.getElementById("avatar-title");
+  const statusEl = document.getElementById("avatar-status");
+
+  if (mode === 'v4') {
+    titleEl.innerText = "⚡ ZEUS LENDÁRIO";
+    statusEl.innerText = "STATUS: DEITY MODE // RAIO ATIVO";
+    
+    // ZEUS LENDÁRIO (Núcleo com Cabelo Branco, Halo e Raios)
+    const nucleo = new THREE.Mesh(new THREE.SphereGeometry(0.6, 40, 40), new THREE.MeshBasicMaterial({ color: 0xe8f6ff }));
+    const casca = new THREE.Mesh(new THREE.IcosahedronGeometry(1.0, 3), new THREE.MeshBasicMaterial({ color: 0x3366ff, wireframe: true, transparent: true, opacity: 0.6 }));
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(1.3, 32, 32), new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.15, side: THREE.BackSide }));
+    const luzZ = new THREE.PointLight(0x00ffff, 4, 15);
+    const raios = new THREE.Group(); 
+    const matRaio = new THREE.LineBasicMaterial({ color: 0xffffff });
+
+    activeGroup.add(nucleo, casca, halo, luzZ, raios);
+
+    function criarRaio() {
+      const dir = new THREE.Vector3(Math.random() - .5, Math.random() - .5, Math.random() - .5).normalize();
+      const pts = [];
+      for (let i = 0; i <= 8; i++) {
+        const p = dir.clone().multiplyScalar(0.6 + i / 8 * 1.2);
+        if (i > 0 && i < 8) p.add(new THREE.Vector3((Math.random() - .5) * .3, (Math.random() - .5) * .3, (Math.random() - .5) * .3));
+        pts.push(p);
+      }
+      return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), matRaio);
+    }
+
+    let ult = 0;
+    const clock = new THREE.Clock();
+    renderer.setAnimationLoop(() => {
+      const t = clock.getElapsedTime();
+      casca.rotation.y = t * 0.5;
+      casca.rotation.x = t * 0.3;
+      nucleo.scale.setScalar(1 + Math.sin(t * 4) * 0.06);
+      luzZ.intensity = 3 + Math.sin(t * 10) * 1.2;
+      if (t - ult > 0.1) {
+        raios.children.forEach(l => l.geometry.dispose());
+        raios.clear();
+        for (let i = 0; i < 4 + Math.floor(Math.random() * 3); i++) raios.add(criarRaio());
+        ult = t;
+      }
+      renderer.render(scene, camera);
+    });
+
+  } else {
+    // PADRÃO (Esfera 3D / Robô)
+    titleEl.innerText = "ZEUS // CYBER-CORE";
+    statusEl.innerText = "STATUS: ONLINE";
+    const globo = new THREE.Group(); 
+    globo.position.set(0, 0, 0);
+    globo.add(new THREE.Mesh(new THREE.SphereGeometry(1.2, 32, 32), new THREE.MeshStandardMaterial({ color: 0x1b4fa0 })));
+    globo.add(new THREE.Mesh(new THREE.SphereGeometry(1.23, 24, 24), new THREE.MeshBasicMaterial({ color: 0x66aaff, wireframe: true, transparent: true, opacity: 0.4 })));
+    activeGroup.add(globo);
+
+    const clock = new THREE.Clock();
+    renderer.setAnimationLoop(() => {
+      const t = clock.getElapsedTime();
+      globo.rotation.y = t * 0.4;
+      renderer.render(scene, camera);
+    });
+  }
+
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script>
+</body>
+</html>
+"""
+
+@st.cache_resource
+def _avatar_component(_html_hash: str):
+    pasta = os.path.join(tempfile.gettempdir(), f"zeus_avatar_{_html_hash}")
+    os.makedirs(pasta, exist_ok=True)
+    with open(os.path.join(pasta, "index.html"), "w", encoding="utf-8") as f:
+        f.write(AVATAR_HTML)
+    return components.declare_component(f"zeus_avatar_{_html_hash}", path=pasta)
+
+def render_avatar_voice(avatar_id: str, silence_s, stt_key, tts_key, voz_edge, tts_rate):
+    # Renderiza o componente passando o modo via query parameter do iframe
+    comp = _avatar_component(avatar_id)
+    comp(mode=avatar_id, height=520)
+
+# ------------------------------------------------------------
+# SIDEBAR DE CONFIGURAÇÃO
+# ------------------------------------------------------------
+with st.sidebar:
+    st.header("⚙️ Configuração")
+    theme_name = st.selectbox("🎨 Interface", list(THEMES.keys()), index=0, key="theme_sel")
+    avatar_type = st.selectbox("🤖 Avatar do Zeus", list(AVATAR_MAP.keys()), index=3, key="avatar_sel") # Deixado o Zeus Lendário como padrão index=3
+    model_choice = st.selectbox("🧠 Modelo LLM", ["Groq (Llama 3)", "OpenAI GPT-4"], index=0, key="model_sel")
+    
+    st.subheader("🎙️ Voz")
+    stt_label = st.selectbox("👂 Reconhecimento", ["Whisper (Groq) — melhor no celular", "Navegador — mais rápido"], key="stt_sel")
+    tts_label = st.selectbox("🔊 Motor de voz", ["Neural (Edge) — voz natural", "Navegador"], key="tts_sel")
+    
+    silence_s = st.slider("⏱️ Silêncio para enviar (s)", 1, 10, 2, key="silence_sel")
+    stt_key = "whisper" if stt_label.startswith("Whisper") else "browser"
+    tts_key = "edge" if tts_label.startswith("Neural") else "browser"
+    voz_edge = "pt-BR-AntonioNeural"
+
+    if st.button("🗑️ Limpar conversa"):
+        st.session_state.messages = []
+        st.rerun()
+
+# ------------------------------------------------------------
+# APP PRINCIPAL (INTERFACE)
+# ------------------------------------------------------------
+st.title("⚡ ZEUS // CYBER-CORE")
+
+# AQUI É ONDE O AVATAR É CHAMADO E RENDERIZADO NO QUADRADINHO DA TELA COM O NOME DELE
+render_avatar_voice(AVATAR_MAP[avatar_type], silence_s, stt_key, tts_key, voz_edge, 1.0)
+
+# Histórico de Conversa
+with st.expander("📜 Histórico da conversa", expanded=False):
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+"""
+agente_autonomo.py
+IA autônoma: recebe comandos pelo chat, edita o próprio código no GitHub,
+busca informação na internet e salva aprendizados no repositório.
+
+Instalação:  pip install anthropic PyGithub
+Variáveis de ambiente (arquivo .env ou painel do servidor):
+    ANTHROPIC_API_KEY=...
+    GITHUB_TOKEN=...            (token restrito só a este repositório)
+    GITHUB_REPO=usuario/repo
+    AUTO_MERGE=true             (true = aplica direto; false = deixa PR aberto)
+    BRANCH_BASE=main
+"""
+import os
+import re
+import json
+import time
+from anthropic import Anthropic
+from github import Github, GithubException
+
+MODEL = os.getenv("MODEL", "claude-sonnet-4-6")
+BASE = os.getenv("BRANCH_BASE", "main")
+AUTO_MERGE = os.getenv("AUTO_MERGE", "true").lower() == "true"
+ARQ_MEMORIA = "aprendizados.json"
+BLOQUEADOS = (".env", ".git/", "id_rsa", "secrets")  # nunca escrever nesses caminhos
+
+client = Anthropic()  # lê ANTHROPIC_API_KEY do ambiente
+gh = Github(os.environ["GITHUB_TOKEN"])
+repo = gh.get_repo(os.environ["GITHUB_REPO"])
+
+
+# ---------------------------------------------------------------- ferramentas
+def listar_arquivos(pasta: str = "") -> str:
+    itens = repo.get_contents(pasta or "", ref=BASE)
+    return "\n".join(f"{i.type}: {i.path}" for i in itens)
+
+
+def ler_arquivo(caminho: str) -> str:
+    f = repo.get_contents(caminho, ref=BASE)
+    return f.decoded_content.decode("utf-8")
+
+
+def aplicar_mudanca(caminho: str, novo_conteudo: str, motivo: str) -> str:
+    """Cria branch, commita, abre PR e (se AUTO_MERGE) faz merge sozinho."""
+    if any(b in caminho for b in BLOQUEADOS):
+        return f"Bloqueado: não escrevo em '{caminho}'."
+
+    slug = re.sub(r"[^a-z0-9]+", "-", motivo.lower())[:30].strip("-")
+    branch = f"ia/{slug}-{int(time.time())}"
+    repo.create_git_ref(f"refs/heads/{branch}", repo.get_branch(BASE).commit.sha)
+
+    try:
+        atual = repo.get_contents(caminho, ref=branch)
+        repo.update_file(caminho, f"IA: {motivo}", novo_conteudo, atual.sha, branch=branch)
+    except GithubException as e:
+        if e.status != 404:
+            raise
+        repo.create_file(caminho, f"IA: {motivo}", novo_conteudo, branch=branch)
+
+    pr = repo.create_pull(title=f"IA: {motivo}", body="Mudança feita pela IA.",
+                          head=branch, base=BASE)
+    if AUTO_MERGE:
+        try:
+            pr.merge(merge_method="squash")
+            return f"Aplicado e mesclado em {BASE}: {pr.html_url}"
+        except GithubException as e:
+            return f"PR criado, mas o merge falhou ({e.data}). Veja: {pr.html_url}"
+    return f"PR aberto para revisão: {pr.html_url}"
+
+
+def _ler_memoria() -> list:
+    try:
+        return json.loads(ler_arquivo(ARQ_MEMORIA))
+    except GithubException:
+        return []
+
+
+def salvar_aprendizado(licao: str) -> str:
+    """Grava o aprendizado direto no repositório (persiste entre conversas)."""
+    memoria = _ler_memoria()
+    memoria.append({"quando": time.strftime("%Y-%m-%d %H:%M"), "licao": licao})
+    texto = json.dumps(memoria, ensure_ascii=False, indent=2)
+    try:
+        atual = repo.get_contents(ARQ_MEMORIA, ref=BASE)
+        repo.update_file(ARQ_MEMORIA, "IA: novo aprendizado", texto, atual.sha, branch=BASE)
+    except GithubException:
+        repo.create_file(ARQ_MEMORIA, "IA: primeiro aprendizado", texto, branch=BASE)
+    return "Aprendizado salvo."
+
+
+FUNCOES = {
+    "listar_arquivos": listar_arquivos,
+    "ler_arquivo": ler_arquivo,
+    "aplicar_mudanca": aplicar_mudanca,
+    "salvar_aprendizado": salvar_aprendizado,
+}
+
+TOOLS = [
+    {"type": "web_search_20250305", "name": "web_search"},  # busca na internet
+    {
+        "name": "listar_arquivos",
+        "description": "Lista arquivos e pastas do repositório.",
+        "input_schema": {"type": "object", "properties": {"pasta": {"type": "string"}}},
+    },
+    {
+        "name": "ler_arquivo",
+        "description": "Lê o conteúdo atual de um arquivo do repositório.",
+        "input_schema": {"type": "object",
+                         "properties": {"caminho": {"type": "string"}},
+                         "required": ["caminho"]},
+    },
+    {
+        "name": "aplicar_mudanca",
+        "description": "Escreve o arquivo COMPLETO com a mudança aplicada e envia ao GitHub. "
+                       "Sempre leia o arquivo antes e preserve o que não foi pedido para mudar.",
+        "input_schema": {"type": "object",
+                         "properties": {"caminho": {"type": "string"},
+                                        "novo_conteudo": {"type": "string"},
+                                        "motivo": {"type": "string"}},
+                         "required": ["caminho", "novo_conteudo", "motivo"]},
+    },
+    {
+        "name": "salvar_aprendizado",
+        "description": "Salva uma lição ou preferência do usuário para lembrar no futuro.",
+        "input_schema": {"type": "object",
+                         "properties": {"licao": {"type": "string"}},
+                         "required": ["licao"]},
+    },
+]
+
+
+# ----------------------------------------------------------------------- cérebro
+def _system() -> str:
+    licoes = "\n".join(f"- {m['licao']}" for m in _ler_memoria()) or "(nenhum ainda)"
+    return (
+        "Você é uma IA autônoma que mantém e evolui o próprio código neste repositório. "
+        "Quando o usuário pedir uma mudança, leia os arquivos relevantes, faça a alteração "
+        "completa e use aplicar_mudanca. Use web_search quando precisar de informação atual. "
+        "Sempre que o usuário ensinar algo ou expressar uma preferência, use salvar_aprendizado. "
+        "Depois de agir, responda curto dizendo o que mudou e o link.\n\n"
+        f"Aprendizados anteriores:\n{licoes}"
+    )
+
+
+def conversar(historico: list, mensagem: str, max_passos: int = 12) -> str:
+    """Chame esta função na rota do seu chat. `historico` é uma lista que você mantém."""
+    historico.append({"role": "user", "content": mensagem})
+    system = _system()
+
+    for _ in range(max_passos):
+        resp = client.messages.create(model=MODEL, max_tokens=8000,
+                                      system=system, tools=TOOLS, messages=historico)
+        historico.append({"role": "assistant", "content": resp.content})
+
+        if resp.stop_reason == "pause_turn":  # busca web ainda em andamento
+            continue
+        if resp.stop_reason != "tool_use":
+            return "".join(b.text for b in resp.content if b.type == "text")
+
+        resultados = []
+        for bloco in resp.content:
+            if bloco.type == "tool_use":
+                try:
+                    saida = FUNCOES[bloco.name](**bloco.input)
+                except Exception as e:  # o erro volta para a IA tentar de novo sozinha
+                    saida = f"ERRO: {e}"
+                resultados.append({"type": "tool_result",
+                                   "tool_use_id": bloco.id, "content": str(saida)})
+        historico.append({"role": "user", "content": resultados})
+
+    return "Parei após muitos passos; me diga como continuar."
+
+
+# ------------------------------------------------------------- teste no terminal
+if __name__ == "__main__":
+    hist = []
+    while True:
+        print("IA:", conversar(hist, input("Você: ")))
