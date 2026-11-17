@@ -4145,3 +4145,52 @@ except Exception as _hb_err:
     st.caption("⚠️ Cadastro de Habilidade desativado por erro: " + str(_hb_err)[:200])
 
 feat: sistema de habilidades com validação e carga dinâmica
+# --- Bloco de Extensão Autônoma: Avatar 3D do Zeus (v2) ---
+import streamlit.components.v1 as components
+
+def renderizar_avatar_zeus_3d_final():
+    """Renderiza o núcleo 3D interativo do Zeus de forma isolada."""
+    html_3d = """
+    <div class="zeus-container">
+        <div class="zeus-core-wrapper">
+            <div class="zeus-ring"></div>
+            <div class="zeus-core">
+                <div class="zeus-inner-glow"></div>
+            </div>
+            <div class="zeus-particles">
+                <span></span><span></span><span></span><span></span>
+            </div>
+        </div>
+        <h3 class="zeus-title">ZEUS [CORE 3D SOBERANO]</h3>
+        <p class="zeus-status">Sistemas Ativos: Online | Autonomia: 100%</p>
+    </div>
+
+    <style>
+    .zeus-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 28px 20px;
+        background: linear-gradient(145deg, #0a0e14 0%, #12181f 50%, #0e1117 100%);
+        border-radius: 18px;
+        border: 1px solid #1f2a35;
+        box-shadow: 0 12px 40px rgba(0, 242, 254, 0.12), inset 0 1px 0 rgba(255,255,255,0.05);
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        transition: all 0.4s ease;
+    }
+
+    .zeus-core-wrapper {
+        position: relative;
+        width: 140px;
+        height: 140px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        perspective: 600px;
+    }
+
+    .zeus-core {
+        width: 110px;
+        height: 110px;
+        border-
