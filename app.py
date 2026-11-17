@@ -3266,3 +3266,230 @@ if __name__ == "__main__":
     hist = []
     while True:
         print("IA:", conversar(hist, input("Você: ")))
+
+"""
+app_unico.py - tudo em um arquivo: chat com agente autônomo + cena 3D (globo, robô, Zeus).
+
+pip install flask anthropic PyGithub python-dotenv
+Crie um arquivo .env ao lado com:
+    ANTHROPIC_API_KEY=...
+    GITHUB_TOKEN=...
+    GITHUB_REPO=usuario/repo
+    AUTO_MERGE=true
+    BRANCH_BASE=main
+Rode:  python app_unico.py   e abra  http://localhost:5000
+"""
+import os, re, json, time, uuid
+try:
+    from dotenv import load_dotenv; load_dotenv()
+except ImportError:
+    pass
+from flask import Flask, request, jsonify, Response
+from anthropic import Anthropic
+from github import Github, GithubException
+
+MODEL = os.getenv("MODEL", "claude-sonnet-4-6")
+BASE = os.getenv("BRANCH_BASE", "main")
+AUTO_MERGE = os.getenv("AUTO_MERGE", "true").lower() == "true"
+ARQ_MEMORIA = "aprendizados.json"
+BLOQUEADOS = (".env", ".git/", "id_rsa", "secrets")
+
+client = Anthropic()
+repo = Github(os.environ["GITHUB_TOKEN"]).get_repo(os.environ["GITHUB_REPO"])
+app = Flask(__name__)
+SESSOES = {}
+
+# ------------------------------------------------------------ ferramentas GitHub
+def listar_arquivos(pasta=""):
+    return "\n".join(f"{i.type}: {i.path}" for i in repo.get_contents(pasta or "", ref=BASE))
+
+def ler_arquivo(caminho):
+    return repo.get_contents(caminho, ref=BASE).decoded_content.decode("utf-8")
+
+def aplicar_mudanca(caminho, novo_conteudo, motivo):
+    if any(b in caminho for b in BLOQUEADOS):
+        return f"Bloqueado: não escrevo em '{caminho}'."
+    slug = re.sub(r"[^a-z0-9]+", "-", motivo.lower())[:30].strip("-")
+    branch = f"ia/{slug}-{int(time.time())}"
+    repo.create_git_ref(f"refs/heads/{branch}", repo.get_branch(BASE).commit.sha)
+    try:
+        atual = repo.get_contents(caminho, ref=branch)
+        repo.update_file(caminho, f"IA: {motivo}", novo_conteudo, atual.sha, branch=branch)
+    except GithubException as e:
+        if e.status != 404:
+            raise
+        repo.create_file(caminho, f"IA: {motivo}", novo_conteudo, branch=branch)
+    pr = repo.create_pull(title=f"IA: {motivo}", body="Mudança feita pela IA.", head=branch, base=BASE)
+    if AUTO_MERGE:
+        try:
+            pr.merge(merge_method="squash")
+            return f"Aplicado em {BASE}: {pr.html_url}"
+        except GithubException as e:
+            return f"PR criado, merge falhou ({e.data}): {pr.html_url}"
+    return f"PR aberto: {pr.html_url}"
+
+def _memoria():
+    try:
+        return json.loads(ler_arquivo(ARQ_MEMORIA))
+    except Exception:
+        return []
+
+def salvar_aprendizado(licao):
+    mem = _memoria() + [{"quando": time.strftime("%Y-%m-%d %H:%M"), "licao": licao}]
+    txt = json.dumps(mem, ensure_ascii=False, indent=2)
+    try:
+        atual = repo.get_contents(ARQ_MEMORIA, ref=BASE)
+        repo.update_file(ARQ_MEMORIA, "IA: novo aprendizado", txt, atual.sha, branch=BASE)
+    except GithubException:
+        repo.create_file(ARQ_MEMORIA, "IA: primeiro aprendizado", txt, branch=BASE)
+    return "Aprendizado salvo."
+
+FUNCOES = {f.__name__: f for f in (listar_arquivos, ler_arquivo, aplicar_mudanca, salvar_aprendizado)}
+
+def _tool(nome, desc, props, req=()):
+    return {"name": nome, "description": desc,
+            "input_schema": {"type": "object", "properties": {k: {"type": "string"} for k in props},
+                             "required": list(req)}}
+
+TOOLS = [
+    {"type": "web_search_20250305", "name": "web_search"},
+    _tool("listar_arquivos", "Lista arquivos do repositório.", ["pasta"]),
+    _tool("ler_arquivo", "Lê um arquivo do repositório.", ["caminho"], ["caminho"]),
+    _tool("aplicar_mudanca", "Escreve o arquivo COMPLETO alterado no GitHub. Leia antes e preserve o resto.",
+          ["caminho", "novo_conteudo", "motivo"], ["caminho", "novo_conteudo", "motivo"]),
+    _tool("salvar_aprendizado", "Salva uma lição ou preferência do usuário.", ["licao"], ["licao"]),
+]
+
+def conversar(hist, msg, max_passos=12):
+    hist.append({"role": "user", "content": msg})
+    licoes = "\n".join(f"- {m['licao']}" for m in _memoria()) or "(nenhum)"
+    system = ("Você é uma IA autônoma que mantém e evolui o próprio código neste repositório. "
+              "Para mudanças: leia os arquivos, altere por completo e use aplicar_mudanca. "
+              "Use web_search para informação atual. Use salvar_aprendizado quando o usuário ensinar algo. "
+              "Responda curto, com o link.\n\nAprendizados:\n" + licoes)
+    for _ in range(max_passos):
+        r = client.messages.create(model=MODEL, max_tokens=8000, system=system, tools=TOOLS, messages=hist)
+        hist.append({"role": "assistant", "content": r.content})
+        if r.stop_reason == "pause_turn":
+            continue
+        if r.stop_reason != "tool_use":
+            return "".join(b.text for b in r.content if b.type == "text")
+        res = []
+        for b in r.content:
+            if b.type == "tool_use":
+                try:
+                    out = FUNCOES[b.name](**b.input)
+                except Exception as e:
+                    out = f"ERRO: {e}"
+                res.append({"type": "tool_result", "tool_use_id": b.id, "content": str(out)})
+        hist.append({"role": "user", "content": res})
+    return "Parei após muitos passos; diga como continuar."
+
+@app.post("/chat")
+def chat():
+    d = request.get_json(force=True)
+    sid = d.get("sessao") or str(uuid.uuid4())
+    try:
+        resp = conversar(SESSOES.setdefault(sid, []), d.get("mensagem", ""))
+    except Exception as e:
+        resp = f"Erro: {e}"
+    return jsonify(resposta=resp, sessao=sid)
+
+# ------------------------------------------------------------------- interface
+PAGINA = r"""<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IA Autônoma</title>
+<style>
+ html,body{margin:0;height:100%;background:#05070f;color:#e6edf7;font-family:system-ui,sans-serif;overflow:hidden}
+ canvas{position:fixed;inset:0;width:100%;height:100%}
+ #chat{position:fixed;left:12px;right:12px;bottom:12px;max-width:520px;margin:auto;background:#0d1424ee;
+  border:1px solid #2a3a63;border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px}
+ #log{max-height:32vh;overflow:auto;font-size:14px;line-height:1.4}
+ #log div{margin:4px 0;white-space:pre-wrap}.eu{color:#9fd8ff}
+ #linha{display:flex;gap:6px}
+ input{flex:1;background:#070b16;color:inherit;border:1px solid #2a3a63;border-radius:10px;padding:10px;font-size:16px}
+ button{background:#3366ff;color:#fff;border:0;border-radius:10px;padding:0 16px;font-size:15px}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+</script></head>
+<body>
+<div id="chat"><div id="log"></div>
+ <div id="linha"><input id="msg" placeholder="Dê um comando para a IA..."><button id="ok">Enviar</button></div></div>
+<script type="module">
+import * as THREE from "three";
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 100);
+camera.position.set(0, 0.6, 9);
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const sol = new THREE.DirectionalLight(0xffffff, 1.2); sol.position.set(3,4,5); scene.add(sol);
+
+// GLOBO (esquerda)
+const globo = new THREE.Group(); globo.position.set(-3.4, 1.4, 0);
+globo.add(new THREE.Mesh(new THREE.SphereGeometry(1,32,32), new THREE.MeshStandardMaterial({color:0x1b4fa0})));
+globo.add(new THREE.Mesh(new THREE.SphereGeometry(1.01,24,24), new THREE.MeshBasicMaterial({color:0x66aaff,wireframe:true,transparent:true,opacity:0.35})));
+scene.add(globo);
+
+// ROBÔ (direita)
+const robo = new THREE.Group(); robo.position.set(3.4, 1.2, 0);
+const aco = new THREE.MeshStandardMaterial({color:0x8fa3c7, metalness:0.6, roughness:0.35});
+const cabeca = new THREE.Mesh(new THREE.BoxGeometry(1,0.8,0.8), aco); cabeca.position.y = 0.8;
+const corpo = new THREE.Mesh(new THREE.BoxGeometry(1.3,1.1,0.8), aco); corpo.position.y = -0.2;
+const olhoMat = new THREE.MeshBasicMaterial({color:0x00ffd0});
+for (const x of [-0.22, 0.22]) { const o = new THREE.Mesh(new THREE.SphereGeometry(0.1,16,16), olhoMat); o.position.set(x,0.85,0.41); robo.add(o); }
+robo.add(cabeca, corpo); scene.add(robo);
+
+// ZEUS (centro) - material "basic" aparece mesmo sem luz
+const zeus = new THREE.Group(); zeus.position.set(0, 1.4, 0);
+const nucleo = new THREE.Mesh(new THREE.SphereGeometry(0.55,40,40), new THREE.MeshBasicMaterial({color:0x9fd8ff}));
+const casca = new THREE.Mesh(new THREE.IcosahedronGeometry(0.95,3), new THREE.MeshBasicMaterial({color:0x3366ff,wireframe:true,transparent:true,opacity:0.55}));
+const halo = new THREE.Mesh(new THREE.SphereGeometry(1.2,32,32), new THREE.MeshBasicMaterial({color:0x66ccff,transparent:true,opacity:0.12,side:THREE.BackSide}));
+const luzZ = new THREE.PointLight(0x88ccff, 3, 12);
+const raios = new THREE.Group(); const matRaio = new THREE.LineBasicMaterial({color:0xe8f6ff});
+zeus.add(nucleo, casca, halo, luzZ, raios); scene.add(zeus);
+function raio(){
+  const dir = new THREE.Vector3(Math.random()-.5, Math.random()-.5, Math.random()-.5).normalize(), pts = [];
+  for (let i=0;i<=8;i++){ const p = dir.clone().multiplyScalar(0.55 + i/8*1.1);
+    if (i>0 && i<8) p.add(new THREE.Vector3((Math.random()-.5)*.25,(Math.random()-.5)*.25,(Math.random()-.5)*.25));
+    pts.push(p); }
+  return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), matRaio);
+}
+let ult = 0;
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const t = clock.getElapsedTime();
+  globo.rotation.y = t*0.3; robo.rotation.y = Math.sin(t*0.6)*0.4; robo.position.y = 1.2 + Math.sin(t*1.5)*0.08;
+  casca.rotation.y = t*0.4; casca.rotation.x = t*0.2; nucleo.scale.setScalar(1 + Math.sin(t*3)*0.05);
+  luzZ.intensity = 2.5 + Math.sin(t*8)*0.8;
+  if (t - ult > 0.12) { raios.children.forEach(l => l.geometry.dispose()); raios.clear();
+    for (let i=0;i<3+Math.floor(Math.random()*4);i++) raios.add(raio()); ult = t; }
+  renderer.render(scene, camera);
+});
+addEventListener("resize", () => { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+// CHAT
+let sessao = null; const log = document.getElementById("log"), msg = document.getElementById("msg");
+function linha(txt, cls){ const d = document.createElement("div"); d.textContent = txt; if (cls) d.className = cls; log.appendChild(d); log.scrollTop = log.scrollHeight; return d; }
+async function enviar(){
+  const m = msg.value.trim(); if (!m) return; msg.value = ""; linha("Você: " + m, "eu");
+  const espera = linha("IA: trabalhando...");
+  try {
+    const r = await fetch("/chat", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({mensagem:m, sessao})});
+    const d = await r.json(); sessao = d.sessao; espera.textContent = "IA: " + d.resposta;
+  } catch (e) { espera.textContent = "IA: erro de conexão."; }
+}
+document.getElementById("ok").onclick = enviar;
+msg.addEventListener("keydown", e => { if (e.key === "Enter") enviar(); });
+</script></body></html>"""
+
+@app.get("/")
+def index():
+    return Response(PAGINA, mimetype="text/html")
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
