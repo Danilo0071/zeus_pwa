@@ -3540,11 +3540,58 @@ except Exception as _hb_err:
     if hasattr(st, "sidebar"):
         st.sidebar.caption("⚠️ Módulo de Habilidades em espera: " + str(_hb_err)[:100])
 
-# ============================================================
-# CHAMANDO O LABORATÓRIO DE HABILIDADES NA BARRA LATERAL
-# ============================================================
-try:
-    import bloco_cadastro_habilidade
-    bloco_cadastro_habilidade.render_cadastro_habilidade()
-except Exception as e:
-    st.sidebar.error(f"Erro ao carregar o laboratório: {e}")
+# ------------------------------------------------------------
+# 5. PAINEL DE INTERFACE (NA TELA PRINCIPAL)
+# ------------------------------------------------------------
+def render_cadastro_habilidade():
+    # Removemos o 'with st.sidebar:' para aparecer no meio da tela
+    st.divider()
+    st.subheader("🧩 Laboratório de Habilidades (Criar e Testar)")
+    
+    with st.form("form_cadastro_habilidade"):
+        st.markdown("*Criar nova habilidade*")
+        nome = st.text_input("Nome da Habilidade", placeholder="Ex: calcular_raiz_quadrada")
+        codigo = st.text_area("Código Python", height=200, 
+                              placeholder="def minha_funcao():\n    return 2 + 2\n\nprint(minha_funcao())")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            testar = st.form_submit_button("🧪 Testar Código")
+        with col2:
+            publicar = st.form_submit_button("🚀 Publicar no GitHub")
+        
+        if testar or publicar:
+            if not nome.strip() or not codigo.strip():
+                st.warning("Preencha o nome e o código.")
+            else:
+                if testar:
+                    with st.spinner("Testando execução..."):
+                        res_val = hb_validar_sintaxe(codigo)
+                        if not res_val["ok"]:
+                            st.error(f"❌ Erro de Sintaxe: {res_val['mensagem']}")
+                            st.code(res_val["erro"])
+                        else:
+                            res_exec = hb_testar_execucao(codigo)
+                            if res_exec["ok"]:
+                                st.success("✅ O código rodou perfeitamente!")
+                                if res_exec.get("stdout"):
+                                    st.markdown("*Saída do código (print):*")
+                                    st.code(res_exec["stdout"])
+                            else:
+                                st.error("❌ Erro na execução do código:")
+                                st.code(res_exec["stderr"])
+                
+                if publicar:
+                    with st.spinner("Validando, testando e publicando no GitHub..."):
+                        resultado = hb_processar_habilidade(nome.strip(), codigo)
+                        
+                        if resultado["ok"]:
+                            st.success(f"✅ {resultado['mensagem']}")
+                            if resultado.get("url"):
+                                st.markdown(f"[🔗 Ver no GitHub]({resultado['url']})")
+                        else:
+                            st.error(f"❌ Falha: {resultado['mensagem']}")
+                            if resultado.get("erro"):
+                                st.code(resultado["erro"])
+                            if resultado.get("stderr"):
+                                st.code(resultado["stderr"])
