@@ -4143,3 +4143,5 @@ try:
     render_cadastro_habilidade()
 except Exception as _hb_err:
     st.caption("⚠️ Cadastro de Habilidade desativado por erro: " + str(_hb_err)[:200])
+
+feat: sistema de habilidades com validação e carga dinâmica
