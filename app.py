@@ -2557,1591 +2557,331 @@ def zf_salvar_firestore(colecao: str, doc_id: str, dados: dict):
     except Exception as e:
         return False, f"Firestore: {str(e)[:120]}"
 
-# ============================================================
-# PAINEL DE RELATÓRIOS - GitHub REST API (cole no final do app.py)
-# ============================================================
-import base64 as _rp_base64
-import traceback as _rp_traceback
-from datetime import datetime as _rp_datetime, timezone as _rp_timezone
-
-import requests as _rp_requests
-
 
 # ------------------------------------------------------------
-# 1. CREDENCIAIS
+# 2. ENSEMBLE DE APRENDIZADO (multiplas IAs se revisam)
 # ------------------------------------------------------------
-def rp_get_secret(key: str, default: str = "") -> str:
+_ZF_EXTENSOES = {"python": "py", "javascript": "js", "cpp": "cpp", "c++": "cpp", "java": "java"}
+
+
+def _zf_extrair_codigo(texto: str) -> str:
+    m = _re_zf.search(r"```(?:[a-zA-Z+]*)?\s*\n(.*?)```", texto, _re_zf.S)
+    return (m.group(1) if m else texto).strip()
+
+
+def _zf_executar_python(codigo: str):
     try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            val = st.secrets[key]
-            if val:
-                return str(val).strip()
-    except Exception:
-        pass
-    return os.environ.get(key, default).strip()
-
-
-def rp_carregar_config_github():
-    token = rp_get_secret("GITHUB_TOKEN") or rp_get_secret("GITHUB_API_KEY")
-    user = rp_get_secret("GITHUB_USER")
-    repo = rp_get_secret("GITHUB_REPO")
-    branch = rp_get_secret("GITHUB_BRANCH", "main")
-    if not (token and user and repo):
-        return None, None, None, None
-    return token, user, repo, branch
-
-
-# ------------------------------------------------------------
-# 2. CLIENTE REST DO GITHUB
-# ------------------------------------------------------------
-def _rp_gh_headers(token: str) -> dict:
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-
-def rp_gh_get_sha(caminho: str, token: str, user: str, repo: str, branch: str):
-    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
-    try:
-        resp = _rp_requests.get(url, headers=_rp_gh_headers(token), params={"ref": branch}, timeout=20)
-        if resp.status_code == 200:
-            return resp.json().get("sha")
-        return None
-    except _rp_requests.RequestException:
-        return None
-
-
-def rp_gh_put_file(caminho: str, conteudo: str, mensagem: str, token: str, user: str, repo: str, branch: str) -> dict:
-    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
-    sha = rp_gh_get_sha(caminho, token, user, repo, branch)
-
-    payload = {
-        "message": mensagem,
-        "content": _rp_base64.b64encode(conteudo.encode("utf-8")).decode("utf-8"),
-        "branch": branch,
-    }
-    if sha:
-        payload["sha"] = sha
-
-    try:
-        resp = _rp_requests.put(url, headers=_rp_gh_headers(token), json=payload, timeout=30)
-    except _rp_requests.RequestException as e:
-        return {"ok": False, "mensagem": f"Falha de conexão: {e}", "url": None, "status_code": None}
-
-    if resp.status_code in (200, 201):
-        html_url = resp.json().get("content", {}).get("html_url")
-        return {"ok": True, "mensagem": "Commit realizado com sucesso.", "url": html_url, "status_code": resp.status_code}
-
-    try:
-        detalhe = resp.json().get("message", "Erro desconhecido da API do GitHub.")
-    except Exception:
-        detalhe = resp.text[:200]
-    return {"ok": False, "mensagem": f"({resp.status_code}) {detalhe}", "url": None, "status_code": resp.status_code}
-
-
-def rp_gh_list_root(token: str, user: str, repo: str, branch: str) -> list:
-    url = f"https://api.github.com/repos/{user}/{repo}/contents/"
-    try:
-        resp = _rp_requests.get(url, headers=_rp_gh_headers(token), params={"ref": branch}, timeout=20)
-        if resp.status_code == 200:
-            itens = resp.json()
-            if isinstance(itens, list):
-                return [i["name"] for i in itens if i.get("type") == "file"]
-    except _rp_requests.RequestException:
-        pass
-    return []
-
-
-# ------------------------------------------------------------
-# 3. COLETA DE LOGS E RELATÓRIO MARKDOWN
-# ------------------------------------------------------------
-def rp_registrar_evento(mensagem: str, nivel: str = "INFO"):
-    log = st.session_state.setdefault("rp_eventos_log", [])
-    log.append({
-        "timestamp": _rp_datetime.now(_rp_timezone.utc).isoformat(timespec="seconds"),
-        "nivel": nivel,
-        "mensagem": mensagem,
-    })
-    st.session_state["rp_eventos_log"] = log[-200:]
-
-
-def rp_coletar_logs_recentes(limite: int = 50) -> list:
-    log = st.session_state.get("rp_eventos_log", [])
-    return list(reversed(log))[:limite]
-
-
-def rp_gerar_relatorio_markdown(logs: list, titulo: str = "Relatório de Status do Projeto") -> str:
-    agora = _rp_datetime.now(_rp_timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    linhas = [
-        f"# {titulo}", "", f"**Gerado em:** {agora}", f"**Total de eventos no período:** {len(logs)}", "",
-        "## Resumo por nível", "",
-    ]
-    contagem = {}
-    for ev in logs:
-        contagem[ev["nivel"]] = contagem.get(ev["nivel"], 0) + 1
-    if contagem:
-        linhas.append("| Nível | Ocorrências |")
-        linhas.append("|---|---|")
-        for nivel, qtd in sorted(contagem.items()):
-            linhas.append(f"| {nivel} | {qtd} |")
-    else:
-        linhas.append("_Nenhum evento registrado neste período._")
-    linhas.append("")
-    linhas.append("## Eventos detalhados")
-    linhas.append("")
-    if logs:
-        linhas.append("| Timestamp (UTC) | Nível | Mensagem |")
-        linhas.append("|---|---|---|")
-        for ev in logs:
-            msg_escapada = ev["mensagem"].replace("|", "\\|").replace("\n", " ")
-            linhas.append(f"| {ev['timestamp']} | {ev['nivel']} | {msg_escapada} |")
-    else:
-        linhas.append("_Sem eventos para exibir._")
-    linhas.append("")
-    linhas.append("---")
-    linhas.append("_Relatório gerado automaticamente pelo painel administrativo._")
-    return "\n".join(linhas)
-
-
-# ------------------------------------------------------------
-# 4. CICLO COMPLETO
-# ------------------------------------------------------------
-def rp_executar_ciclo_relatorio(nome_arquivo: str = None) -> dict:
-    token, user, repo, branch = rp_carregar_config_github()
-    if not token:
-        return {"ok": False, "mensagem": "❌ Faltam credenciais do GitHub. Configure GITHUB_TOKEN (ou GITHUB_API_KEY), GITHUB_USER e GITHUB_REPO.",
-                "url": None, "arquivo": None, "relatorio_md": ""}
-
-    logs = rp_coletar_logs_recentes()
-    relatorio_md = rp_gerar_relatorio_markdown(logs)
-
-    if not nome_arquivo:
-        carimbo = _rp_datetime.now(_rp_timezone.utc).strftime("%Y%m%d_%H%M%S")
-        nome_arquivo = f"relatorio_{carimbo}.md"
-
-    resultado = rp_gh_put_file(
-        caminho=nome_arquivo, conteudo=relatorio_md, mensagem=f"Relatório automático: {nome_arquivo}",
-        token=token, user=user, repo=repo, branch=branch,
-    )
-
-    rp_registrar_evento(
-        f"Ciclo de relatório executado ({'sucesso' if resultado['ok'] else 'falha'}): {nome_arquivo}",
-        nivel="INFO" if resultado["ok"] else "ERRO",
-    )
-
-    return {"ok": resultado["ok"], "mensagem": resultado["mensagem"], "url": resultado.get("url"),
-            "arquivo": nome_arquivo, "relatorio_md": relatorio_md}
-
-
-# ------------------------------------------------------------
-# 5. INTERFACE
-# ------------------------------------------------------------
-def rp_render_painel_relatorios():
-    st.subheader("📊 Painel de Relatórios e Logs")
-
-    token, user, repo, branch = rp_carregar_config_github()
-    if token:
-        st.caption(f"Conectado a `{user}/{repo}` (branch `{branch}`).")
-    else:
-        st.warning("Credenciais do GitHub não configuradas. Defina `GITHUB_TOKEN`, `GITHUB_USER` e `GITHUB_REPO` "
-                    "em `.streamlit/secrets.toml` ou como variáveis de ambiente.")
-
-    with st.expander("➕ Registrar evento manual (para teste)", expanded=False):
-        msg_manual = st.text_input("Mensagem do evento", key="rp_msg_manual")
-        nivel_manual = st.selectbox("Nível", ["INFO", "AVISO", "ERRO"], key="rp_nivel_manual")
-        if st.button("Adicionar ao log", key="rp_btn_log_manual"):
-            if msg_manual.strip():
-                rp_registrar_evento(msg_manual.strip(), nivel_manual)
-                st.success("Evento registrado.")
-            else:
-                st.warning("Digite uma mensagem antes de registrar.")
-
-    total_eventos = len(st.session_state.get("rp_eventos_log", []))
-    st.caption(f"Eventos acumulados na sessão atual: {total_eventos}")
-
-    nome_arquivo = st.text_input(
-        "Nome do arquivo de relatório (opcional)",
-        placeholder="deixe em branco para gerar automaticamente com data/hora",
-        key="rp_nome_arquivo",
-    )
-
-    if st.button("🚀 Executar Ciclo de Relatório e Salvar no GitHub", key="rp_btn_executar", disabled=not token):
-        with st.spinner("Coletando logs, gerando relatório e enviando ao GitHub..."):
-            try:
-                resultado = rp_executar_ciclo_relatorio(nome_arquivo.strip() or None)
-            except Exception as e:
-                resultado = {"ok": False, "mensagem": f"Erro inesperado: {e}", "url": None, "relatorio_md": "", "arquivo": None}
-                st.session_state["rp_ultimo_traceback"] = _rp_traceback.format_exc()
-
-        if resultado["ok"]:
-            st.success(f"✅ Relatório `{resultado['arquivo']}` salvo com sucesso no repositório.")
-            if resultado.get("url"):
-                st.markdown(f"[🔗 Ver arquivo no GitHub]({resultado['url']})")
-        else:
-            st.error(f"❌ Falha ao executar o ciclo: {resultado['mensagem']}")
-            if st.session_state.get("rp_ultimo_traceback"):
-                with st.expander("Detalhes técnicos do erro"):
-                    st.code(st.session_state["rp_ultimo_traceback"])
-
-        with st.expander("📄 Pré-visualizar relatório gerado", expanded=False):
-            st.markdown(resultado.get("relatorio_md", "_Nenhum conteúdo gerado._"))
-
-
-try:
-    rp_render_painel_relatorios()
-except Exception as _rp_err:
-    st.caption("⚠️ Painel de Relatórios desativado por erro: " + str(_rp_err)[:200])
-
-# ============================================================
-# PAINEL DE RELATÓRIOS - GitHub REST API (cole no final do app.py)
-# ============================================================
-import base64 as _rp_base64
-import traceback as _rp_traceback
-from datetime import datetime as _rp_datetime, timezone as _rp_timezone
-
-import requests as _rp_requests
-
-
-# ------------------------------------------------------------
-# 1. CREDENCIAIS
-# ------------------------------------------------------------
-def rp_get_secret(key: str, default: str = "") -> str:
-    try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            val = st.secrets[key]
-            if val:
-                return str(val).strip()
-    except Exception:
-        pass
-    return os.environ.get(key, default).strip()
-
-
-def rp_carregar_config_github():
-    token = rp_get_secret("GITHUB_TOKEN") or rp_get_secret("GITHUB_API_KEY")
-    user = rp_get_secret("GITHUB_USER")
-    repo = rp_get_secret("GITHUB_REPO")
-    branch = rp_get_secret("GITHUB_BRANCH", "main")
-    if not (token and user and repo):
-        return None, None, None, None
-    return token, user, repo, branch
-
-
-# ------------------------------------------------------------
-# 2. CLIENTE REST DO GITHUB
-# ------------------------------------------------------------
-def _rp_gh_headers(token: str) -> dict:
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-
-def rp_gh_get_sha(caminho: str, token: str, user: str, repo: str, branch: str):
-    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
-    try:
-        resp = _rp_requests.get(url, headers=_rp_gh_headers(token), params={"ref": branch}, timeout=20)
-        if resp.status_code == 200:
-            return resp.json().get("sha")
-        return None
-    except _rp_requests.RequestException:
-        return None
-
-
-def rp_gh_put_file(caminho: str, conteudo: str, mensagem: str, token: str, user: str, repo: str, branch: str) -> dict:
-    url = f"https://api.github.com/repos/{user}/{repo}/contents/{caminho}"
-    sha = rp_gh_get_sha(caminho, token, user, repo, branch)
-
-    payload = {
-        "message": mensagem,
-        "content": _rp_base64.b64encode(conteudo.encode("utf-8")).decode("utf-8"),
-        "branch": branch,
-    }
-    if sha:
-        payload["sha"] = sha
-
-    try:
-        resp = _rp_requests.put(url, headers=_rp_gh_headers(token), json=payload, timeout=30)
-    except _rp_requests.RequestException as e:
-        return {"ok": False, "mensagem": f"Falha de conexão: {e}", "url": None, "status_code": None}
-
-    if resp.status_code in (200, 201):
-        html_url = resp.json().get("content", {}).get("html_url")
-        return {"ok": True, "mensagem": "Commit realizado com sucesso.", "url": html_url, "status_code": resp.status_code}
-
-    try:
-        detalhe = resp.json().get("message", "Erro desconhecido da API do GitHub.")
-    except Exception:
-        detalhe = resp.text[:200]
-    return {"ok": False, "mensagem": f"({resp.status_code}) {detalhe}", "url": None, "status_code": resp.status_code}
-
-
-def rp_gh_list_root(token: str, user: str, repo: str, branch: str) -> list:
-    url = f"https://api.github.com/repos/{user}/{repo}/contents/"
-    try:
-        resp = _rp_requests.get(url, headers=_rp_gh_headers(token), params={"ref": branch}, timeout=20)
-        if resp.status_code == 200:
-            itens = resp.json()
-            if isinstance(itens, list):
-                return [i["name"] for i in itens if i.get("type") == "file"]
-    except _rp_requests.RequestException:
-        pass
-    return []
-
-
-# ------------------------------------------------------------
-# 3. COLETA DE LOGS E RELATÓRIO MARKDOWN
-# ------------------------------------------------------------
-def rp_registrar_evento(mensagem: str, nivel: str = "INFO"):
-    log = st.session_state.setdefault("rp_eventos_log", [])
-    log.append({
-        "timestamp": _rp_datetime.now(_rp_timezone.utc).isoformat(timespec="seconds"),
-        "nivel": nivel,
-        "mensagem": mensagem,
-    })
-    st.session_state["rp_eventos_log"] = log[-200:]
-
-
-def rp_coletar_logs_recentes(limite: int = 50) -> list:
-    log = st.session_state.get("rp_eventos_log", [])
-    return list(reversed(log))[:limite]
-
-
-def rp_gerar_relatorio_markdown(logs: list, titulo: str = "Relatório de Status do Projeto") -> str:
-    agora = _rp_datetime.now(_rp_timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    linhas = [
-        f"# {titulo}", "", f"**Gerado em:** {agora}", f"**Total de eventos no período:** {len(logs)}", "",
-        "## Resumo por nível", "",
-    ]
-    contagem = {}
-    for ev in logs:
-        contagem[ev["nivel"]] = contagem.get(ev["nivel"], 0) + 1
-    if contagem:
-        linhas.append("| Nível | Ocorrências |")
-        linhas.append("|---|---|")
-        for nivel, qtd in sorted(contagem.items()):
-            linhas.append(f"| {nivel} | {qtd} |")
-    else:
-        linhas.append("_Nenhum evento registrado neste período._")
-    linhas.append("")
-    linhas.append("## Eventos detalhados")
-    linhas.append("")
-    if logs:
-        linhas.append("| Timestamp (UTC) | Nível | Mensagem |")
-        linhas.append("|---|---|---|")
-        for ev in logs:
-            msg_escapada = ev["mensagem"].replace("|", "\\|").replace("\n", " ")
-            linhas.append(f"| {ev['timestamp']} | {ev['nivel']} | {msg_escapada} |")
-    else:
-        linhas.append("_Sem eventos para exibir._")
-    linhas.append("")
-    linhas.append("---")
-    linhas.append("_Relatório gerado automaticamente pelo painel administrativo._")
-    return "\n".join(linhas)
-
-
-# ------------------------------------------------------------
-# 4. CICLO COMPLETO
-# ------------------------------------------------------------
-def rp_executar_ciclo_relatorio(nome_arquivo: str = None) -> dict:
-    token, user, repo, branch = rp_carregar_config_github()
-    if not token:
-        return {"ok": False, "mensagem": "❌ Faltam credenciais do GitHub. Configure GITHUB_TOKEN (ou GITHUB_API_KEY), GITHUB_USER e GITHUB_REPO.",
-                "url": None, "arquivo": None, "relatorio_md": ""}
-
-    logs = rp_coletar_logs_recentes()
-    relatorio_md = rp_gerar_relatorio_markdown(logs)
-
-    if not nome_arquivo:
-        carimbo = _rp_datetime.now(_rp_timezone.utc).strftime("%Y%m%d_%H%M%S")
-        nome_arquivo = f"relatorio_{carimbo}.md"
-
-    resultado = rp_gh_put_file(
-        caminho=nome_arquivo, conteudo=relatorio_md, mensagem=f"Relatório automático: {nome_arquivo}",
-        token=token, user=user, repo=repo, branch=branch,
-    )
-
-    rp_registrar_evento(
-        f"Ciclo de relatório executado ({'sucesso' if resultado['ok'] else 'falha'}): {nome_arquivo}",
-        nivel="INFO" if resultado["ok"] else "ERRO",
-    )
-
-    return {"ok": resultado["ok"], "mensagem": resultado["mensagem"], "url": resultado.get("url"),
-            "arquivo": nome_arquivo, "relatorio_md": relatorio_md}
-
-
-# ------------------------------------------------------------
-# 5. INTERFACE
-# ------------------------------------------------------------
-def rp_render_painel_relatorios():
-    st.subheader("📊 Painel de Relatórios e Logs")
-
-    token, user, repo, branch = rp_carregar_config_github()
-    if token:
-        st.caption(f"Conectado a `{user}/{repo}` (branch `{branch}`).")
-    else:
-        st.warning("Credenciais do GitHub não configuradas. Defina `GITHUB_TOKEN`, `GITHUB_USER` e `GITHUB_REPO` "
-                    "em `.streamlit/secrets.toml` ou como variáveis de ambiente.")
-
-    with st.expander("➕ Registrar evento manual (para teste)", expanded=False):
-        msg_manual = st.text_input("Mensagem do evento", key="rp_msg_manual")
-        nivel_manual = st.selectbox("Nível", ["INFO", "AVISO", "ERRO"], key="rp_nivel_manual")
-        if st.button("Adicionar ao log", key="rp_btn_log_manual"):
-            if msg_manual.strip():
-                rp_registrar_evento(msg_manual.strip(), nivel_manual)
-                st.success("Evento registrado.")
-            else:
-                st.warning("Digite uma mensagem antes de registrar.")
-
-    total_eventos = len(st.session_state.get("rp_eventos_log", []))
-    st.caption(f"Eventos acumulados na sessão atual: {total_eventos}")
-
-    nome_arquivo = st.text_input(
-        "Nome do arquivo de relatório (opcional)",
-        placeholder="deixe em branco para gerar automaticamente com data/hora",
-        key="rp_nome_arquivo",
-    )
-
-    if st.button("🚀 Executar Ciclo de Relatório e Salvar no GitHub", key="rp_btn_executar", disabled=not token):
-        with st.spinner("Coletando logs, gerando relatório e enviando ao GitHub..."):
-            try:
-                resultado = rp_executar_ciclo_relatorio(nome_arquivo.strip() or None)
-            except Exception as e:
-                resultado = {"ok": False, "mensagem": f"Erro inesperado: {e}", "url": None, "relatorio_md": "", "arquivo": None}
-                st.session_state["rp_ultimo_traceback"] = _rp_traceback.format_exc()
-
-        if resultado["ok"]:
-            st.success(f"✅ Relatório `{resultado['arquivo']}` salvo com sucesso no repositório.")
-            if resultado.get("url"):
-                st.markdown(f"[🔗 Ver arquivo no GitHub]({resultado['url']})")
-        else:
-            st.error(f"❌ Falha ao executar o ciclo: {resultado['mensagem']}")
-            if st.session_state.get("rp_ultimo_traceback"):
-                with st.expander("Detalhes técnicos do erro"):
-                    st.code(st.session_state["rp_ultimo_traceback"])
-
-        with st.expander("📄 Pré-visualizar relatório gerado", expanded=False):
-            st.markdown(resultado.get("relatorio_md", "_Nenhum conteúdo gerado._"))
-
-
-try:
-    rp_render_painel_relatorios()
-except Exception as _rp_err:
-    st.caption("⚠️ Painel de Relatórios desativado por erro: " + str(_rp_err)[:200])
-
-# ============================================================
-# ENSEMBLE: CONSULTA A IA SECUNDÁRIA PARA REVISÃO DE CÓDIGO
-# A sugestão só é aplicada se você revisar e clicar em aprovar.
-# ============================================================
-import os as _ens_os
-
-import requests as _ens_requests
-
-
-def _ens_get_secret(key: str, default: str = "") -> str:
-    try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            val = st.secrets[key]
-            if val:
-                return str(val).strip()
-    except Exception:
-        pass
-    return _ens_os.environ.get(key, default).strip()
-
-
-_ENS_SISTEMA_PADRAO = (
-    "Você é um revisor de código sênior. Analise o trecho enviado e responda com: "
-    "1) um resumo curto dos problemas encontrados, se houver; "
-    "2) o código corrigido/otimizado completo, dentro de um bloco de código. "
-    "Se o código já estiver bom, diga isso e devolva-o sem alterações."
-)
-
-
-def ens_consultar_groq(codigo_ou_prompt: str, sistema: str = _ENS_SISTEMA_PADRAO) -> dict:
-    """Consulta a API da Groq. Retorna {"ok": bool, "resposta": str}."""
-    key = _ens_get_secret("GROQ_API_KEY")
-    if not key:
-        return {"ok": False, "resposta": "GROQ_API_KEY não configurada nos Secrets."}
-    modelo = _ens_get_secret("GROQ_MODEL", "openai/gpt-oss-120b")
-    try:
-        r = _ens_requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={
-                "model": modelo,
-                "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": codigo_ou_prompt}],
-                "temperature": 0.3,
-                "max_tokens": 1500,
-            },
-            timeout=60,
-        )
-    except _ens_requests.RequestException as e:
-        return {"ok": False, "resposta": f"Falha de conexão: {e}"}
-
-    if r.status_code != 200:
-        return {"ok": False, "resposta": f"({r.status_code}) {r.text[:200]}"}
-    try:
-        return {"ok": True, "resposta": r.json()["choices"][0]["message"]["content"].strip()}
-    except Exception as e:
-        return {"ok": False, "resposta": f"Resposta inesperada da API: {e}"}
-
-
-def ens_consultar_deepseek(codigo_ou_prompt: str, sistema: str = _ENS_SISTEMA_PADRAO) -> dict:
-    """Consulta a API da DeepSeek (compatível com formato OpenAI). Retorna {"ok": bool, "resposta": str}."""
-    key = _ens_get_secret("DEEPSEEK_API_KEY")
-    if not key:
-        return {"ok": False, "resposta": "DEEPSEEK_API_KEY não configurada nos Secrets."}
-    modelo = _ens_get_secret("DEEPSEEK_MODEL", "deepseek-chat")
-    try:
-        r = _ens_requests.post(
-            "https://api.deepseek.com/chat/completions",
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={
-                "model": modelo,
-                "messages": [{"role": "system", "content": sistema}, {"role": "user", "content": codigo_ou_prompt}],
-                "temperature": 0.3,
-                "max_tokens": 1500,
-            },
-            timeout=60,
-        )
-    except _ens_requests.RequestException as e:
-        return {"ok": False, "resposta": f"Falha de conexão: {e}"}
-
-    if r.status_code != 200:
-        return {"ok": False, "resposta": f"({r.status_code}) {r.text[:200]}"}
-    try:
-        return {"ok": True, "resposta": r.json()["choices"][0]["message"]["content"].strip()}
-    except Exception as e:
-        return {"ok": False, "resposta": f"Resposta inesperada da API: {e}"}
-
-
-_ENS_PROVEDORES = {
-    "Groq": ens_consultar_groq,
-    "DeepSeek": ens_consultar_deepseek,
-}
-
-
-def _ens_extrair_bloco_codigo(texto: str) -> str:
-    """Extrai o primeiro bloco ```...``` da resposta, se houver; senão devolve o texto inteiro."""
-    import re
-    m = re.search(r"```(?:[a-zA-Z]*)?\s*\n(.*?)```", texto, re.S)
-    return m.group(1).strip() if m else texto.strip()
-
-
-def render_ensemble_revisao():
-    with st.expander("🔍 Revisão Ensemble (consulta a IA secundária)", expanded=False):
-        provedor_nome = st.selectbox("Provedor de revisão", list(_ENS_PROVEDORES.keys()), key="ens_provedor")
-        entrada = st.text_area(
-            "Código ou prompt para revisão",
-            height=200,
-            key="ens_entrada",
-            placeholder="Cole aqui o trecho de código que deseja revisar/otimizar",
-        )
-
-        if st.button("🤖 Consultar Revisão", key="ens_btn_consultar"):
-            if not entrada.strip():
-                st.warning("Cole algo para revisar antes de consultar.")
-            else:
-                with st.spinner(f"Consultando {provedor_nome}..."):
-                    resultado = _ENS_PROVEDORES[provedor_nome](entrada.strip())
-                st.session_state["ens_ultimo_resultado"] = resultado
-                st.session_state["ens_ultima_entrada"] = entrada.strip()
-
-        resultado = st.session_state.get("ens_ultimo_resultado")
-        if resultado:
-            if resultado["ok"]:
-                st.success("Sugestão recebida:")
-                st.markdown(resultado["resposta"])
-
-                codigo_sugerido = _ens_extrair_bloco_codigo(resultado["resposta"])
-                st.markdown("**Código sugerido (extraído da resposta):**")
-                st.code(codigo_sugerido, language="python")
-
-                st.divider()
-                st.markdown("**Aplicar esta sugestão a um arquivo local**")
-                caminho_destino = st.text_input(
-                    "Caminho do arquivo onde salvar (relativo ao projeto)",
-                    placeholder="ex: zeus_skills.py ou sugestoes/revisao_01.py",
-                    key="ens_caminho_destino",
-                )
-                modo = st.radio("Modo", ["Criar novo arquivo", "Sobrescrever se existir"], key="ens_modo_aplicar", horizontal=True)
-                aprovar = st.checkbox("Revisei o código acima e aprovo aplicá-lo", key="ens_aprovar")
-
-                if st.button("✅ Aplicar Localmente", key="ens_btn_aplicar", disabled=not aprovar):
-                    if not caminho_destino.strip():
-                        st.warning("Informe o caminho do arquivo de destino.")
-                    else:
-                        try:
-                            existe = _ens_os.path.exists(caminho_destino.strip())
-                            if existe and modo == "Criar novo arquivo":
-                                st.error(f"O arquivo '{caminho_destino}' já existe. Escolha 'Sobrescrever' ou outro caminho.")
-                            else:
-                                with open(caminho_destino.strip(), "w", encoding="utf-8") as f:
-                                    f.write(codigo_sugerido + "\n")
-                                st.success(f"✅ Código aplicado em '{caminho_destino}'.")
-                        except Exception as e:
-                            st.error(f"❌ Erro ao escrever o arquivo: {e}")
-            else:
-                st.error(f"❌ {resultado['resposta']}")
-
-
-try:
-    render_ensemble_revisao()
-except Exception as _ens_err:
-    st.caption("⚠️ Revisão Ensemble desativada por erro: " + str(_ens_err)[:200])
-
-python
-import os
-import sys
-import shlex
-import subprocess
-from pathlib import Path
-
-
-def zeus_run_script(script_path, timeout=120, extra_args=None, cwd=None):
-    """
-    Executa arquivos .py ou .sh locais de forma isolada.
-    Uso: zeus_run_script("scripts/meu_script.py")
-    """
-    result = {
-        "success": False,
-        "returncode": None,
-        "stdout": "",
-        "stderr": "",
-        "timed_out": False,
-        "command": "",
-    }
-
-    try:
-        p = Path(script_path)
-
-        if not p.is_file():
-            result["stderr"] = f"[zeus] Arquivo não encontrado: {script_path}"
-            return result
-
-        if p.suffix not in (".py", ".sh"):
-            result[
-                "stderr"
-            ] = f"[zeus] Extensão não suportada: {p.suffix}. Use .py ou .sh"
-            return result
-
-        if p.suffix == ".py":
-            base_cmd = f"{shlex.quote(sys.executable)} {shlex.quote(str(p))}"
-        else:
-            # .sh via bash, sem depender de chmod +x
-            base_cmd = f"bash {shlex.quote(str(p))}"
-
-        if extra_args:
-            if isinstance(extra_args, str):
-                base_cmd += f" {extra_args}"
-            else:
-                base_cmd += " " + " ".join(shlex.quote(str(a)) for a in extra_args)
-
-        result["command"] = base_cmd
-        args_list = shlex.split(base_cmd)
-
-        completed = subprocess.run(
-            args_list,
-            cwd=cwd or str(p.parent),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-        )
-
-        result["returncode"] = completed.returncode
-        result["stdout"] = completed.stdout or ""
-        result["stderr"] = completed.stderr or ""
-        result["success"] = completed.returncode == 0
-        return result
-
-    except subprocess.TimeoutExpired as e:
-        result["timed_out"] = True
-        result["stdout"] = (
-            (e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or ""))
-            if e.stdout
-            else ""
-        )
-        result["stderr"] = (
-            (e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or ""))
-            if e.stderr
-            else ""
-        )
-        result["stderr"] += f"\n[zeus] Timeout após {timeout}s sem travar o painel."
-        return result
-
-    except Exception as e:
-        result["stderr"] = f"[zeus] Erro ao executar script: {e}"
-        return result
-
-# ============================================================
-# CADASTRO E TESTE DE NOVAS HABILIDADES DO ZEUS (VERSÃO COM PAINEL)
-# ============================================================
-import base64 as _hb_base64
-import os as _hb_os
-import re as _hb_re
-import ast as _hb_ast
-import requests as _hb_requests
-import streamlit as st
-import importlib.util as _hb_importlib
-
-
-def _hb_get_secret(key: str, default: str = "") -> str:
-    try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            val = st.secrets[key]
-            if val:
-                return str(val).strip()
-    except Exception:
-        pass
-    return _hb_os.environ.get(key, default).strip()
-
-
-def hb_slug(nome: str) -> str:
-    base = hb_re.sub(r"[^a-zA-Z0-9]+", "", nome.strip()).strip("").lower()
-    return base or "habilidade_sem_nome"
-
-
-# ------------------------------------------------------------
-# 1. VALIDAÇÃO DE SINTAXE
-# ------------------------------------------------------------
-def hb_validar_sintaxe(codigo: str) -> dict:
-    try:
-        _hb_ast.parse(codigo)
-        return {"ok": True, "mensagem": "Sintaxe válida.", "erro": ""}
+        _ast_zf.parse(codigo)
     except SyntaxError as e:
-        return {
-            "ok": False,
-            "mensagem": f"Erro de sintaxe na linha {e.lineno}",
-            "erro": str(e),
-        }
+        return False, f"Erro de sintaxe na linha {e.lineno}: {e.msg}"
 
-
-# ------------------------------------------------------------
-# 2. EXECUÇÃO LOCAL (TESTE)
-# ------------------------------------------------------------
-def hb_testar_execucao(codigo: str) -> dict:
-    """Tenta executar o código em um ambiente isolado e retorna o resultado."""
-    namespace = {"_builtins": __builtins_}
+    namespace = {"__builtins__": __builtins__}
     try:
-        # Cria o arquivo temporário e executa
-        temp_nome = f"temp_test_{_hb_os.getpid()}.py"
-        with open(temp_nome, "w", encoding="utf-8") as f:
-            f.write(codigo)
-
-        # Executa o código em um subprocesso (seguro)
-        import subprocess
-
-        resultado = subprocess.run(
-            ["python", temp_nome], capture_output=True, text=True, timeout=10
-        )
-
-        _hb_os.remove(temp_nome)  # Limpa o arquivo
-
-        if resultado.returncode == 0:
-            return {
-                "ok": True,
-                "mensagem": "Código executado com sucesso!",
-                "stdout": resultado.stdout,
-                "stderr": resultado.stderr,
-            }
-        else:
-            return {
-                "ok": False,
-                "mensagem": "Erro ao executar o código.",
-                "stdout": resultado.stdout,
-                "stderr": resultado.stderr,
-            }
-
+        exec(codigo, namespace)
     except Exception as e:
-        return {
-            "ok": False,
-            "mensagem": f"Erro na execução: {e}",
-            "stdout": "",
-            "stderr": str(e),
-        }
+        return False, f"Erro no carregamento: {str(e)[:150]}"
+
+    funcoes = [v for k, v in namespace.items() if callable(v) and not k.startswith("_") and _insp_zf.isfunction(v)]
+    if not funcoes:
+        return True, "Codigo compilado e estruturado com sucesso."
+
+    alvo = funcoes[0]
+    try:
+        params = _insp_zf.signature(alvo).parameters
+        if params:
+            return True, f"Funcao {alvo.__name__} validada (requer parametros: {chr(44).join(params)})."
+        resultado = alvo()
+        return True, f"Execucao bem-sucedida! Retorno: {resultado}"
+    except Exception as e:
+        return False, f"Erro ao executar a funcao: {str(e)[:150]}"
+
+
+def _zf_chamar_ia(prompt: str, sistema: str, preferir: str = None):
+    fn_prioridade = globals().get("gerar_com_prioridade_claude")
+    if fn_prioridade and not preferir:
+        return fn_prioridade(sistema, prompt, max_tokens=2000)
+    fn_llm = globals().get("get_llm_response")
+    if fn_llm and "session_id" in st.session_state:
+        provedor = preferir or st.session_state.get("model_sel", "groq")
+        ok, texto, prov, _erros = fn_llm(st.session_state.session_id, prompt, provedor, system=sistema, use_history=False)
+        return (texto, prov) if ok else (None, None)
+    return None, None
+
+
+def zf_aprender_ensemble(instrucao: str, linguagem: str = "python") -> str:
+    linguagem = linguagem.lower().strip()
+    ext = _ZF_EXTENSOES.get(linguagem, "txt")
+
+    sys_gerar = (
+        f"Voce e um engenheiro senior em {linguagem}. Escreva codigo funcional, limpo e comentado "
+        f"em {linguagem} puro que implemente exatamente o pedido. Responda APENAS com o codigo, sem explicacoes."
+    )
+    texto1, prov1 = _zf_chamar_ia("Pedido: " + instrucao, sys_gerar)
+    if not texto1:
+        return "Nenhuma IA disponivel gerou o codigo inicial."
+    codigo_v1 = _zf_extrair_codigo(texto1)
+
+    provedores_disp = globals().get("PROVIDERS", [])
+    segundo_provedor = next((p for p in provedores_disp if p != prov1), None)
+
+    sys_revisar = (
+        f"Voce e um revisor de codigo senior em {linguagem}. Receba um codigo e melhore-o: "
+        "corrija bugs, otimize e deixe mais claro, mantendo a mesma funcionalidade. "
+        "Responda APENAS com o codigo final melhorado, sem explicacoes."
+    )
+    texto2, prov2 = _zf_chamar_ia("Codigo para revisar e melhorar:\n\n" + codigo_v1, sys_revisar, preferir=segundo_provedor)
+    codigo_final = _zf_extrair_codigo(texto2) if texto2 else codigo_v1
+    prov_revisor = prov2 if texto2 else None
+
+    slug = "".join(c if c.isalnum() else "_" for c in instrucao[:25]).lower().strip("_") or "modulo"
+    caminho = f"{_ZF_PASTA_MODULOS}/modulo_{slug}.{ext}"
+    res_save = zf_salvar_codigo_github(caminho, codigo_final, f"Zeus ensemble ({linguagem}): {instrucao[:40]}")
+
+    linhas_resp = []
+    if linguagem == "python":
+        ok_exec, msg_exec = _zf_executar_python(codigo_final)
+        linhas_resp.append(("Execucao: " + msg_exec) if ok_exec else ("Aviso na execucao: " + msg_exec))
+    else:
+        linhas_resp.append(f"Codigo em {linguagem} gerado e salvo. Execucao automatica disponivel so para Python.")
+
+    if res_save["status"] == "sucesso":
+        extra_url = (" Ver: " + res_save["url"]) if res_save.get("url") else ""
+        linhas_resp.append(f"GitHub: {caminho} (gerado por {prov1}" +
+                            (f", revisado por {prov_revisor})" if prov_revisor else ")") + extra_url)
+    else:
+        linhas_resp.append("Erro ao salvar: " + res_save["mensagem"])
+
+    zf_salvar_firestore("zeus_memoria", f"modulo_{slug}", {
+        "instrucao": instrucao, "linguagem": linguagem, "caminho": caminho,
+        "gerado_por": prov1, "revisado_por": prov_revisor,
+    })
+
+    audio = zf_falar("Modulo revisado por mais de uma inteligencia artificial e salvo com sucesso.")
+    if audio:
+        st.audio(audio, format="audio/mp3")
+
+    return "\n\n".join(linhas_resp)
 
 
 # ------------------------------------------------------------
-# 3. COMMIT NO GITHUB
+# 3. MIDIA APRIMORADA
 # ------------------------------------------------------------
-def hb_commitar_github(caminho_remoto: str, conteudo: str, mensagem: str) -> dict:
-    token = _hb_get_secret("GITHUB_TOKEN") or _hb_get_secret("GITHUB_API_KEY")
-    owner = _hb_get_secret("GITHUB_USER")
-    repo = _hb_get_secret("GITHUB_REPO")
-    branch = _hb_get_secret("GITHUB_BRANCH", "main")
-
-    if not (token and owner and repo):
-        return {
-            "ok": False,
-            "mensagem": "Faltam chaves do GitHub nos Secrets.",
-            "url": None,
-        }
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{caminho_remoto}"
-
-    try:
-        r_get = _hb_requests.get(
-            url, headers=headers, params={"ref": branch}, timeout=20
+def zf_gerar_imagem_aprimorada(prompt_base: str, log: list):
+    fn_make_image = globals().get("make_image")
+    fn_editar = globals().get("editar_imagem")
+    if not fn_make_image:
+        return None
+    img = fn_make_image(prompt_base, log)
+    if img and fn_editar:
+        img_aprimorada, modo = fn_editar(
+            img,
+            "enhance resolution, sharpen fine details, improve lighting and color depth, "
+            "professional post-processing, keep composition identical",
+            prompt_base, log,
         )
-        sha = r_get.json().get("sha") if r_get.status_code == 200 else None
-    except Exception as e:
-        return {"ok": False, "mensagem": f"Falha ao consultar SHA: {e}", "url": None}
+        if img_aprimorada:
+            return img_aprimorada
+    return img
 
-    payload = {
-        "message": mensagem,
-        "content": _hb_base64.b64encode(conteudo.encode("utf-8")).decode("utf-8"),
-        "branch": branch,
-    }
-    if sha:
-        payload["sha"] = sha
 
-    try:
-        r_put = _hb_requests.put(url, headers=headers, json=payload, timeout=30)
-    except Exception as e:
-        return {"ok": False, "mensagem": f"Falha no commit: {e}", "url": None}
-
-    if r_put.status_code in (200, 201):
-        return {
-            "ok": True,
-            "mensagem": "Publicado no GitHub.",
-            "url": r_put.json().get("content", {}).get("html_url"),
-        }
-
-    return {
-        "ok": False,
-        "mensagem": f"({r_put.status_code}) {r_put.text[:100]}",
-        "url": None,
-    }
+def zf_gerar_video_aprimorado(prompt_base: str, log: list):
+    fn_make_video = globals().get("make_video")
+    img_base = zf_gerar_imagem_aprimorada(prompt_base, log)
+    if fn_make_video:
+        return fn_make_video(prompt_base, log, img_base), img_base
+    return None, img_base
 
 
 # ------------------------------------------------------------
-# 4. FLUXO COMPLETO: Validar -> Testar -> Comitar
+# 4. AVATARES E VOZ
 # ------------------------------------------------------------
-def hb_processar_habilidade(
-    nome: str, codigo: str, pasta_remota: str = "habilidades"
-) -> dict:
-    arquivo = hb_slug(nome) + ".py"
-    caminho_remoto = f"{pasta_remota}/{arquivo}"
+ZF_AVATAR_CLASSICO = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMDAgMzAwIj4KPGRlZnM+CjxyYWRpYWxHcmFkaWVudCBpZD0iYmcxIiBjeD0iNTAlIiBjeT0iMzAlIiByPSI4MCUiPgo8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjM2EzZjcwIi8+CjxzdG9wIG9mZnNldD0iNTAlIiBzdG9wLWNvbG9yPSIjMTUxODJlIi8+CjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzA0MDUwYSIvPgo8L3JhZGlhbEdyYWRpZW50Pgo8bGluZWFyR3JhZGllbnQgaWQ9InJhaW8xIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+CjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNmZmZmZmYiLz4KPHN0b3Agb2Zmc2V0PSI0MCUiIHN0b3AtY29sb3I9IiNmZmY0YjAiLz4KPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjZmZhNzAwIi8+CjwvbGluZWFyR3JhZGllbnQ+CjxyYWRpYWxHcmFkaWVudCBpZD0iZ2xvdzEiIGN4PSI1MCUiIGN5PSI1MCUiIHI9IjUwJSI+CjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNmZmY1YjAiIHN0b3Atb3BhY2l0eT0iMC45Ii8+CjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2ZmZjViMCIgc3RvcC1vcGFjaXR5PSIwIi8+CjwvcmFkaWFsR3JhZGllbnQ+CjwvZGVmcz4KPHJlY3Qgd2lkdGg9IjMwMCIgaGVpZ2h0PSIzMDAiIGZpbGw9InVybCgjYmcxKSIvPgo8Y2lyY2xlIGN4PSIxNjAiIGN5PSIxMzAiIHI9IjExMCIgZmlsbD0idXJsKCNnbG93MSkiLz4KPHBhdGggZD0iTTQwIDIzMCBDNjAgMTgwIDgwIDE0MCAxMTAgMTEwIEMxMzAgOTAgMTQwIDcwIDE0MCA3MCBMMTYwIDkwIEMxNjAgOTAgMTQ1IDExMCAxMjUgMTMwIEM5NSAxNjAgNzAgMjAwIDQ1IDI0MCBaIiBmaWxsPSIjYzlhMjZkIiBzdHJva2U9IiM4ZTZmNDMiIHN0cm9rZS13aWR0aD0iMiIvPgo8ZWxsaXBzZSBjeD0iMTIwIiBjeT0iMjIwIiByeD0iNzAiIHJ5PSI0NSIgZmlsbD0iI2U1ZTVlNSIvPgo8cGF0aCBkPSJNODAgMTkwIFExMjAgMTYwIDE2MCAxOTAgUTE0MCAyMzAgMTIwIDI0MCBROTAgMjMwIDgwIDE5MCBaIiBmaWxsPSIjZjVmNWY1Ii8+CjxjaXJjbGUgY3g9IjE1MCIgY3k9IjEwMCIgcj0iNDAiIGZpbGw9IiNkNGEzNzQiLz4KPHBhdGggZD0iTTExNSA3MCBRMTUwIDQ1IDE4NSA3MCBRMTkwIDU1IDE3NSA0NSBRMTUwIDMwIDEyNSA0NSBRMTEwIDU1IDExNSA3MCBaIiBmaWxsPSIjZThlOGU4Ii8+CjxwYXRoIGQ9Ik0xMTAgOTUgUTEwMCAxMzAgMTE1IDE1NSBRMTA1IDE0MCAxMDAgMTEwIFoiIGZpbGw9IiNlOGU4ZTgiLz4KPHBhdGggZD0iTTE5MCA5NSBRMjAwIDEzMCAxODUgMTU1IFExOTUgMTQwIDIwMCAxMTAgWiIgZmlsbD0iI2U4ZThlOCIvPgo8Y2lyY2xlIGN4PSIxMzUiIGN5PSIxMDAiIHI9IjUiIGZpbGw9IiMwMGU1ZmYiLz4KPGNpcmNsZSBjeD0iMTY1IiBjeT0iMTAwIiByPSI1IiBmaWxsPSIjMDBlNWZmIi8+CjxwYXRoIGQ9Ik0xMzAgMTIwIFExNTAgMTMwIDE3MCAxMjAiIHN0cm9rZT0iIzZiNGIyZSIgc3Ryb2tlLXdpZHRoPSIzIiBmaWxsPSJub25lIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPHBhdGggZD0iTTIwMCA4MCBDMjIwIDcwIDI0MCA5MCAyMzUgMTIwIEMyNTAgMTAwIDI2MCAxMzAgMjMwIDE1MCBDMjUwIDE2MCAyMjAgMTgwIDE5MCAxNjAgWiIgZmlsbD0iI2M5YTI2ZCIgc3Ryb2tlPSIjOGU2ZjQzIiBzdHJva2Utd2lkdGg9IjIiLz4KPHBhdGggZD0iTTIwNSA3MCBMMTY1IDE0MCBMMTk1IDE0MCBMMTc1IDIxMCBMMjQ1IDEyNSBMMjEwIDEyNSBaIiBmaWxsPSJ1cmwoI3JhaW8xKSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjIiLz4KPHBhdGggZD0iTTIwNSA3MCBMMTY1IDE0MCBMMTk1IDE0MCBMMTc1IDIxMCBMMjQ1IDEyNSBMMjEwIDEyNSBaIiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmZjZTAiIHN0cm9rZS13aWR0aD0iMSIgb3BhY2l0eT0iMC44Ii8+CjxjaXJjbGUgY3g9IjIwNSIgY3k9IjEzMCIgcj0iNDUiIGZpbGw9IiNmZmY1YjAiIG9wYWNpdHk9IjAuMyIvPgo8L3N2Zz4K"
+ZF_AVATAR_ACAO = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMDAgMzAwIj4KPGRlZnM+CjxyYWRpYWxHcmFkaWVudCBpZD0iYmcyIiBjeD0iNTAlIiBjeT0iMjUlIiByPSI5MCUiPgo8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMmIyZjVlIi8+CjxzdG9wIG9mZnNldD0iNDUlIiBzdG9wLWNvbG9yPSIjMTIxNDI4Ii8+CjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzAyMDIwOCIvPgo8L3JhZGlhbEdyYWRpZW50Pgo8bGluZWFyR3JhZGllbnQgaWQ9InJhaW9BIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+CjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNmZmZmZmYiLz4KPHN0b3Agb2Zmc2V0PSIzNSUiIHN0b3AtY29sb3I9IiNmZmYwYTAiLz4KPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjZmY5NTAwIi8+CjwvbGluZWFyR3JhZGllbnQ+CjxsaW5lYXJHcmFkaWVudCBpZD0icmFpb0IiIHgxPSIxIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj4KPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmZmZmZiIvPgo8c3RvcCBvZmZzZXQ9IjUwJSIgc3RvcC1jb2xvcj0iI2ZmZTQ5YSIvPgo8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNmZjdhMDAiLz4KPC9saW5lYXJHcmFkaWVudD4KPHJhZGlhbEdyYWRpZW50IGlkPSJnbG93QSIgY3g9IjUwJSIgY3k9IjUwJSIgcj0iNTAlIj4KPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmZWZiMCIgc3RvcC1vcGFjaXR5PSIwLjk1Ii8+CjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2ZmZWZiMCIgc3RvcC1vcGFjaXR5PSIwIi8+CjwvcmFkaWFsR3JhZGllbnQ+CjxyYWRpYWxHcmFkaWVudCBpZD0ic2tpblNoYWRlIiBjeD0iNDAlIiBjeT0iMzUlIiByPSI2NSUiPgo8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjZTNiNTg4Ii8+CjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2I5ODc1YSIvPgo8L3JhZGlhbEdyYWRpZW50Pgo8L2RlZnM+CjxyZWN0IHdpZHRoPSIzMDAiIGhlaWdodD0iMzAwIiBmaWxsPSJ1cmwoI2JnMikiLz4KPGNpcmNsZSBjeD0iMTUwIiBjeT0iMTQwIiByPSIxMzAiIGZpbGw9InVybCgjZ2xvd0EpIiBvcGFjaXR5PSIwLjYiLz4KPHBhdGggZD0iTTYwIDI2MCBDNzAgMjEwIDkwIDE3MCAxMTUgMTQwIEMxMDAgMTUwIDg1IDE1NSA3MCAxNTAgQzk1IDEzMCAxMTUgMTEwIDEzMCA4NSBMMTUwIDEwMCBDMTQwIDEyMCAxMjUgMTQwIDExMCAxNjAgQzEzMCAxNTAgMTUwIDE1NSAxNjUgMTc1IEMxNDAgMjAwIDEwMCAyMzAgNjAgMjYwIFoiIGZpbGw9IiNiOTg3NWEiIHN0cm9rZT0iIzdhNWEzNyIgc3Ryb2tlLXdpZHRoPSIyIi8+CjxlbGxpcHNlIGN4PSIxMjUiIGN5PSIyNDUiIHJ4PSI4NSIgcnk9IjUwIiBmaWxsPSIjZGNkY2RjIi8+CjxwYXRoIGQ9Ik03NSAyMTAgUTEyNSAxNzUgMTc1IDIxMCBRMTU1IDI1NSAxMjUgMjY1IFE5NSAyNTUgNzUgMjEwIFoiIGZpbGw9IiNmMmYyZjIiLz4KPGNpcmNsZSBjeD0iMTUwIiBjeT0iMTEwIiByPSI0NiIgZmlsbD0idXJsKCNza2luU2hhZGUpIi8+CjxwYXRoIGQ9Ik0xMDggNzUgUTE1MCA0MiAxOTIgNzUgUTE5OCA1NSAxNzggNDIgUTE1MCAyNCAxMjIgNDIgUTEwMiA1NSAxMDggNzUgWiIgZmlsbD0iI2VjZWNlYiIvPgo8cGF0aCBkPSJNMTAyIDEwMCBRODggMTQ1IDEwOCAxNzUgUTk0IDE1MCA5MCAxMTUgWiIgZmlsbD0iI2VjZWNlYiIvPgo8cGF0aCBkPSJNMTk4IDEwMCBRMjEyIDE0NSAxOTIgMTc1IFEyMDYgMTUwIDIxMCAxMTUgWiIgZmlsbD0iI2VjZWNlYiIvPgo8Y2lyY2xlIGN4PSIxMzQiIGN5PSIxMTAiIHI9IjYiIGZpbGw9IiMxOWYyZmYiLz4KPGNpcmNsZSBjeD0iMTY2IiBjeT0iMTEwIiByPSI2IiBmaWxsPSIjMTlmMmZmIi8+CjxjaXJjbGUgY3g9IjEzNCIgY3k9IjExMCIgcj0iMTAiIGZpbGw9IiMxOWYyZmYiIG9wYWNpdHk9IjAuMyIvPgo8Y2lyY2xlIGN4PSIxNjYiIGN5PSIxMTAiIHI9IjEwIiBmaWxsPSIjMTlmMmZmIiBvcGFjaXR5PSIwLjMiLz4KPHBhdGggZD0iTTEyNiAxMzUgUTE1MCAxNDggMTc0IDEzNSIgc3Ryb2tlPSIjNWMzZjIyIiBzdHJva2Utd2lkdGg9IjQiIGZpbGw9Im5vbmUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8cGF0aCBkPSJNMjE1IDcwIEMyNDUgNTAgMjcwIDc1IDI1OCAxMTAgQzI3OCA5NSAyODUgMTMwIDI1NSAxNTAgQzI3NSAxNjUgMjUwIDE5MCAyMTUgMTc1IEMyMzAgMTU1IDIyMCAxMzAgMjMwIDExMCBDMjE1IDEwMCAyMTAgODUgMjE1IDcwIFoiIGZpbGw9IiNiOTg3NWEiIHN0cm9rZT0iIzdhNWEzNyIgc3Ryb2tlLXdpZHRoPSIyIi8+CjxnPgo8cGF0aCBkPSJNMjMyIDU1IEwxNzUgMTUwIEwyMTIgMTUwIEwxODUgMjQ1IEwyNzIgMTMwIEwyMjggMTMwIFoiIGZpbGw9InVybCgjcmFpb0EpIiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMi41Ii8+CjxwYXRoIGQ9Ik0yMzIgNTUgTDE3NSAxNTAgTDIxMiAxNTAgTDE4NSAyNDUgTDI3MiAxMzAgTDIyOCAxMzAgWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmYmUwIiBzdHJva2Utd2lkdGg9IjEuMiIgb3BhY2l0eT0iMC44NSIvPgo8L2c+CjxwYXRoIGQ9Ik0yNDggOTAgTDIyNSAxMzAgTDI0MiAxMzAgTDIyOCAxNjUgTDI3MCAxMjAgTDI1MCAxMjAgWiIgZmlsbD0idXJsKCNyYWlvQikiIG9wYWNpdHk9IjAuOCIvPgo8Y2lyY2xlIGN4PSIyMzUiIGN5PSIxNDAiIHI9IjU1IiBmaWxsPSIjZmZmMGEwIiBvcGFjaXR5PSIwLjI1Ii8+CjxjaXJjbGUgY3g9IjIzNSIgY3k9IjE0MCIgcj0iOTAiIGZpbGw9IiNmZmYwYTAiIG9wYWNpdHk9IjAuMSIvPgo8L3N2Zz4K"
+ZF_AVATAR_SUPREMO = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMDAgMzAwIj4KPGRlZnM+CjxyYWRpYWxHcmFkaWVudCBpZD0idGVtcGVzdGFkZSIgY3g9IjUwJSIgY3k9IjM1JSIgcj0iOTAlIj4KPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzNiM2Y1NSIvPgo8c3RvcCBvZmZzZXQ9IjU1JSIgc3RvcC1jb2xvcj0iIzFiMWQyYiIvPgo8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMwNTA1MDgiLz4KPC9yYWRpYWxHcmFkaWVudD4KPGxpbmVhckdyYWRpZW50IGlkPSJyYWlvU3VwIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+CjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNmZmZmZmYiLz4KPHN0b3Agb2Zmc2V0PSI0MCUiIHN0b3AtY29sb3I9IiNlYWY2ZmYiLz4KPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjN2ZkMWZmIi8+CjwvbGluZWFyR3JhZGllbnQ+CjxyYWRpYWxHcmFkaWVudCBpZD0ib2xob1Zlcm1lbGhvIiBjeD0iNTAlIiBjeT0iNTAlIiByPSI1MCUiPgo8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjZmZkZWRlIi8+CjxzdG9wIG9mZnNldD0iNDAlIiBzdG9wLWNvbG9yPSIjZmYyZTJlIi8+CjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzdhMDAwMCIvPgo8L3JhZGlhbEdyYWRpZW50Pgo8cmFkaWFsR3JhZGllbnQgaWQ9InBlbGUiIGN4PSI0MCUiIGN5PSIzMCUiIHI9IjcwJSI+CjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNjNzk0NzIiLz4KPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjOGE1ZjNmIi8+CjwvcmFkaWFsR3JhZGllbnQ+CjwvZGVmcz4KPHJlY3Qgd2lkdGg9IjMwMCIgaGVpZ2h0PSIzMDAiIGZpbGw9InVybCgjdGVtcGVzdGFkZSkiLz4KPHBhdGggZD0iTTAgNjAgUTYwIDIwIDEyMCA1NSBRMTcwIDE1IDIzMCA1MCBRMjcwIDMwIDMwMCA2MCBMMzAwIDAgTDAgMCBaIiBmaWxsPSIjMmEyZDNkIiBvcGFjaXR5PSIwLjYiLz4KPHBhdGggZD0iTTE5MCA2MCBMMTYwIDEzMCBMMTg1IDEzMCBMMTUwIDIyMCBMMjQwIDExMCBMMjA1IDExMCBaIiBmaWxsPSJ1cmwoI3JhaW9TdXApIiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjkiPgo8YW5pbWF0ZSBhdHRyaWJ1dGVOYW1lPSJvcGFjaXR5IiB2YWx1ZXM9IjAuOTswLjQ7MC45IiBkdXI9IjEuNnMiIHJlcGVhdENvdW50PSJpbmRlZmluaXRlIi8+CjwvcGF0aD4KPHBhdGggZD0iTTYwIDE1MCBMMzUgMTk1IEw1MCAxOTUgTDI1IDI0NSBMOTAgMTg1IEw2OCAxODUgWiIgZmlsbD0idXJsKCNyYWlvU3VwKSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjEuMiIgb3BhY2l0eT0iMC43Ij4KPGFuaW1hdGUgYXR0cmlidXRlTmFtZT0ib3BhY2l0eSIgdmFsdWVzPSIwLjc7MC4zOzAuNyIgZHVyPSIxLjFzIiByZXBlYXRDb3VudD0iaW5kZWZpbml0ZSIvPgo8L3BhdGg+CjxwYXRoIGQ9Ik0zMCAyNzAgQzU1IDIzMCA4MCAxOTAgMTIwIDE2MCBDMTQwIDE0MCAxNTUgMTIwIDE2NSAxMDAgTDE4NSAxMTUgQzE3NSAxMzUgMTYwIDE1NSAxNDAgMTc1IEMxMTAgMjA1IDgwIDIzNSA1NSAyNzAgWiIgZmlsbD0idXJsKCNwZWxlKSIgc3Ryb2tlPSIjNWM0MDI4IiBzdHJva2Utd2lkdGg9IjIiLz4KPHBhdGggZD0iTTkwIDExMCBRMTUwIDY1IDIxMCAxMTAgUTIxNSA3MCAxODAgNTAgUTE1MCAzMCAxMjAgNTAgUTkwIDcwIDkwIDExMCBaIiBmaWxsPSIjOWE5YWEwIi8+CjxwYXRoIGQ9Ik04MCA5NSBRNTUgMTMwIDY1IDE3NSBRNzUgMjEwIDk1IDIyNSBRNzUgMTkwIDc1IDE1MCBRNzUgMTE1IDgwIDk1IFoiIGZpbGw9IiM5YTlhYTAiLz4KPHBhdGggZD0iTTIyMCA5NSBRMjQ1IDEzMCAyMzUgMTc1IFEyMjUgMjEwIDIwNSAyMjUgUTIyNSAxOTAgMjI1IDE1MCBRMjI1IDExNSAyMjAgOTUgWiIgZmlsbD0iIzlhOWFhMCIvPgo8Y2lyY2xlIGN4PSIxNTAiIGN5PSIxMzUiIHI9IjQ4IiBmaWxsPSJ1cmwoI3BlbGUpIi8+CjxwYXRoIGQ9Ik0xMzUgMTE1IFExNDAgMTE4IDE0MiAxMjUiIHN0cm9rZT0iIzNhMmExYSIgc3Ryb2tlLXdpZHRoPSIzIiBmaWxsPSJub25lIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPHBhdGggZD0iTTE2NSAxMTUgUTE2MCAxMTggMTU4IDEyNSIgc3Ryb2tlPSIjM2EyYTFhIiBzdHJva2Utd2lkdGg9IjMiIGZpbGw9Im5vbmUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8Y2lyY2xlIGN4PSIxMzgiIGN5PSIxMzAiIHI9IjgiIGZpbGw9InVybCgjb2xob1Zlcm1lbGhvKSI+CjxhbmltYXRlIGF0dHJpYnV0ZU5hbWU9InIiIHZhbHVlcz0iODs5LjU7OCIgZHVyPSIxLjRzIiByZXBlYXRDb3VudD0iaW5kZWZpbml0ZSIvPgo8L2NpcmNsZT4KPGNpcmNsZSBjeD0iMTYyIiBjeT0iMTMwIiByPSI4IiBmaWxsPSJ1cmwoI29saG9WZXJtZWxobykiPgo8YW5pbWF0ZSBhdHRyaWJ1dGVOYW1lPSJyIiB2YWx1ZXM9Ijg7OS41OzgiIGR1cj0iMS40cyIgcmVwZWF0Q291bnQ9ImluZGVmaW5pdGUiLz4KPC9jaXJjbGU+CjxwYXRoIGQ9Ik0xMTUgMTUwIFExNTAgMTcwIDE4NSAxNTAgUTE4MCAxOTUgMTUwIDIwNSBRMTIwIDE5NSAxMTUgMTUwIFoiIGZpbGw9IiM4YThhOTAiLz4KPHBhdGggZD0iTTExMCAxNzAgUTkwIDIyMCAxMTUgMjUwIFExMzUgMjY1IDE1MCAyNjUgUTE2NSAyNjUgMTg1IDI1MCBRMjEwIDIyMCAxOTAgMTcwIFExNzAgMTk1IDE1MCAyMDAgUTEzMCAxOTUgMTEwIDE3MCBaIiBmaWxsPSIjYjBiMGI2Ii8+CjxjaXJjbGUgY3g9IjE1MCIgY3k9IjE0MCIgcj0iNzAiIGZpbGw9IiNmZmVmYzAiIG9wYWNpdHk9IjAuMTIiPgo8YW5pbWF0ZSBhdHRyaWJ1dGVOYW1lPSJvcGFjaXR5IiB2YWx1ZXM9IjAuMDg7MC4yOzAuMDgiIGR1cj0iMnMiIHJlcGVhdENvdW50PSJpbmRlZmluaXRlIi8+CjwvY2lyY2xlPgo8L3N2Zz4K"
 
-    # Valida a sintaxe
-    res_validar = hb_validar_sintaxe(codigo)
-    if not res_validar["ok"]:
-        return {
-            "etapa": "validacao",
-            "ok": False,
-            "mensagem": res_validar["mensagem"],
-            "erro": res_validar["erro"],
-        }
-
-    # Testa a execução
-    res_teste = hb_testar_execucao(codigo)
-    if not res_teste["ok"]:
-        return {
-            "etapa": "teste",
-            "ok": False,
-            "mensagem": res_teste["mensagem"],
-            "stdout": res_teste["stdout"],
-            "stderr": res_teste["stderr"],
-        }
-
-    # Comita no GitHub
-    res_commit = hb_commitar_github(caminho_remoto, codigo, f"Nova habilidade: {nome}")
-    if not res_commit["ok"]:
-        return {"etapa": "commit", "ok": False, "mensagem": res_commit["mensagem"]}
-
-    return {
-        "etapa": "concluido",
-        "ok": True,
-        "mensagem": f"Habilidade '{nome}' validada, testada e publicada em '{caminho_remoto}'.",
-        "url": res_commit.get("url"),
-        "stdout": res_teste["stdout"],
-        "stderr": res_teste["stderr"],
-    }
-
-
-# ============================================================
-# ZEUS 3.0 - app.py
-# CHAVES: nunca coloque no código. Use .streamlit/secrets.toml (e adicione ao .gitignore)
-# ou Settings > Secrets no Streamlit Cloud:
-#   GROQ_API_KEY = "..."          GEMINI_API_KEY = "..."
-#   ANTHROPIC_API_KEY = "..."     HUGGINGFACE_API_KEY = "..."
-#   GITHUB_API_KEY = "..."        (token com acesso ao GitHub Models)
-#   DEEPINFRA_API_KEY = "..."     (deepinfra.com/dash/api_keys: Dolphin, imagem e edição de foto)
-#   OPENROUTER_API_KEY = "..."    (openrouter.ai/keys)
-#   GITHUB_USER = "..."  GITHUB_REPO = "..."   (auto-evolução: token com Contents: Read and write)
-# Opcionais (busca Google oficial): GOOGLE_API_KEY e GOOGLE_CSE_ID
-# Dependências: streamlit requests edge-tts duckduckgo-search huggingface_hub openai
-# ============================================================
-import ast
-import asyncio
-import base64
-import hashlib
-import importlib
-import inspect
-import io
-import json
-import os
-import re
-import sqlite3
-import sys
-import tempfile
-import time
-import zipfile
-
-import requests
-
-try:
-    from openai import OpenAI  # cliente OpenAI (usado para DeepInfra)
-except ImportError:
-    OpenAI = None
-import streamlit as st
-import streamlit.components.v1 as components
-
-# Importação dinâmica das habilidades geradas pelo Zeus e do gerenciador do GitHub
-try:
-    import zeus_skills
-except Exception:
-    pass
-try:
-    from github_manager import salvar_no_github
-except Exception:
-    salvar_no_github = None
-
-# ============================================================
-# CADASTRO MANUAL DE HABILIDADE (corrigido)
-# Grava local → valida (ast + subprocess) → usuário revisa → publica no GitHub
-# ============================================================
-import base64 as _hb_base64
-import os as _hb_os
-import re as _hb_re
-import subprocess as _hb_subprocess
-import sys as _hb_sys
-import requests as _hb_requests
-
-
-def _hb_get_secret(key: str, default: str = "") -> str:
-    try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            val = st.secrets[key]
-            if val:
-                return str(val).strip()
-    except Exception:
-        pass
-    return (_hb_os.environ.get(key) or default).strip()
-
-
-def hb_slug(nome: str) -> str:
-    base = _hb_re.sub(r"[^a-zA-Z0-9_]+", "_", nome.strip()).strip("_").lower()
-    return base or "habilidade_sem_nome"
-
-
-def hb_gravar_arquivo_local(caminho: str, codigo: str) -> dict:
-    try:
-        pasta = _hb_os.path.dirname(caminho)
-        if pasta:
-            _hb_os.makedirs(pasta, exist_ok=True)
-        with open(caminho, "w", encoding="utf-8") as f:
-            f.write(codigo)
-        return {"ok": True, "mensagem": f"Arquivo gravado em '{caminho}'."}
-    except Exception as e:
-        return {"ok": False, "mensagem": f"Erro ao gravar: {e}"}
-
-
-def hb_validar_execucao(caminho: str, timeout_s: int = 12) -> dict:
-    """Executa o arquivo em processo separado. Só considera ok se returncode == 0."""
-    try:
-        resultado = _hb_subprocess.run(
-            [_hb_sys.executable, caminho],
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-    except _hb_subprocess.TimeoutExpired:
-        return {
-            "ok": False,
-            "stdout": "",
-            "stderr": f"Execução excedeu {timeout_s}s e foi interrompida.",
-            "codigo_saida": None,
-        }
-    except Exception as e:
-        return {
-            "ok": False,
-            "stdout": "",
-            "stderr": f"Falha ao executar: {e}",
-            "codigo_saida": None,
-        }
-
-    return {
-        "ok": resultado.returncode == 0,
-        "stdout": resultado.stdout,
-        "stderr": resultado.stderr,
-        "codigo_saida": resultado.returncode,
-    }
-
-
-def hb_commitar_github(caminho_remoto: str, conteudo: str, mensagem: str) -> dict:
-    token = _hb_get_secret("GITHUB_API_KEY") or _hb_get_secret("GITHUB_TOKEN")
-    owner = _hb_get_secret("GITHUB_USER")
-    repo = _hb_get_secret("GITHUB_REPO")
-    branch = _hb_get_secret("GITHUB_BRANCH", "main")
-
-    if not (token and owner and repo):
-        return {
-            "ok": False,
-            "mensagem": "Faltam GITHUB_API_KEY (ou GITHUB_TOKEN), GITHUB_USER ou GITHUB_REPO nos Secrets.",
-            "url": None,
-        }
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{caminho_remoto}"
-
-    try:
-        r_get = _hb_requests.get(url, headers=headers, params={"ref": branch}, timeout=20)
-        sha = r_get.json().get("sha") if r_get.status_code == 200 else None
-    except _hb_requests.RequestException as e:
-        return {"ok": False, "mensagem": f"Falha ao consultar SHA: {e}", "url": None}
-
-    payload = {
-        "message": mensagem,
-        "content": _hb_base64.b64encode(conteudo.encode("utf-8")).decode("utf-8"),
-        "branch": branch,
-    }
-    if sha:
-        payload["sha"] = sha
-
-    try:
-        r_put = _hb_requests.put(url, headers=headers, json=payload, timeout=30)
-    except _hb_requests.RequestException as e:
-        return {"ok": False, "mensagem": f"Falha de conexão no commit: {e}", "url": None}
-
-    if r_put.status_code in (200, 201):
-        return {
-            "ok": True,
-            "mensagem": "Commit e push realizados com sucesso.",
-            "url": r_put.json().get("content", {}).get("html_url"),
-        }
-
-    try:
-        detalhe = r_put.json().get("message", "erro desconhecido")
-    except Exception:
-        detalhe = r_put.text[:200]
-    return {"ok": False, "mensagem": f"({r_put.status_code}) {detalhe}", "url": None}
-
-
-def hb_cadastrar_habilidade(nome: str, codigo: str, pasta_local: str = "habilidades", pasta_remota: str = "habilidades") -> dict:
-    """Fluxo completo de uma vez (grava + valida + publica). Preferir o fluxo em duas etapas da UI."""
-    arquivo = hb_slug(nome) + ".py"
-    caminho_local = _hb_os.path.join(pasta_local, arquivo)
-    caminho_remoto = f"{pasta_remota}/{arquivo}"
-
-    # 1. Validação estática (reutiliza a do Zeus se existir)
-    if "validar_codigo_habilidade" in globals():
-        ok_ast, msg_ast = validar_codigo_habilidade(codigo)
-        if not ok_ast:
-            return {"etapa": "validacao_ast", "ok": False, "mensagem": msg_ast}
-
-    # 2. Grava local
-    res_gravar = hb_gravar_arquivo_local(caminho_local, codigo)
-    if not res_gravar["ok"]:
-        return {"etapa": "gravacao", "ok": False, "mensagem": res_gravar["mensagem"]}
-
-    # 3. Execução real
-    res_validar = hb_validar_execucao(caminho_local)
-    if not res_validar["ok"]:
-        return {
-            "etapa": "validacao",
-            "ok": False,
-            "mensagem": f"Código falhou na execução (saída {res_validar['codigo_saida']}).",
-            "stdout": res_validar["stdout"],
-            "stderr": res_validar["stderr"],
-        }
-
-    # 4. Publica no GitHub
-    res_commit = hb_commitar_github(caminho_remoto, codigo, f"Nova habilidade: {nome}")
-    if not res_commit["ok"]:
-        return {
-            "etapa": "commit",
-            "ok": False,
-            "mensagem": res_commit["mensagem"],
-            "stdout": res_validar["stdout"],
-            "stderr": res_validar["stderr"],
-        }
-
-    # Tenta recarregar se for o módulo principal de skills
-    if "_recarregar_skills" in globals():
-        try:
-            _recarregar_skills()
-        except Exception:
-            pass
-
-    return {
-        "etapa": "concluido",
-        "ok": True,
-        "mensagem": f"Habilidade '{nome}' validada e publicada em '{caminho_remoto}'.",
-        "url": res_commit.get("url"),
-        "stdout": res_validar["stdout"],
-        "stderr": res_validar["stderr"],
-    }
-
-
-def render_cadastro_habilidade():
-    with st.expander("🧩 Cadastrar Nova Habilidade (manual)", expanded=False):
-        st.caption(
-            "1. Cole o código → 2. Clique em **Validar** (grava + testa com subprocess) → "
-            "3. Se o teste estiver ok, clique em **Publicar no GitHub**."
-        )
-
-        nome = st.text_input("Nome da habilidade", key="hb_nome", placeholder="ex: calcular_imc")
-        codigo = st.text_area(
-            "Código Python da habilidade",
-            height=260,
-            key="hb_codigo",
-            placeholder="def calcular_imc(peso, altura):\n    return peso / (altura ** 2)\n\nif __name__ == '__main__':\n    print(calcular_imc(70, 1.75))",
-        )
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            if st.button("🧪 Validar (grava + executa)", key="hb_btn_validar"):
-                if not nome.strip() or not codigo.strip():
-                    st.warning("Preencha o nome e o código.")
-                else:
-                    arquivo = hb_slug(nome) + ".py"
-                    caminho_local = _hb_os.path.join("habilidades", arquivo)
-
-                    # Validação estática primeiro
-                    if "validar_codigo_habilidade" in globals():
-                        ok_ast, msg_ast = validar_codigo_habilidade(codigo)
-                        if not ok_ast:
-                            st.error(f"❌ Validação estática falhou: {msg_ast}")
-                            st.stop()
-
-                    res_gravar = hb_gravar_arquivo_local(caminho_local, codigo)
-                    if not res_gravar["ok"]:
-                        st.error(res_gravar["mensagem"])
-                        st.stop()
-
-                    with st.spinner("Executando em processo separado..."):
-                        res_val = hb_validar_execucao(caminho_local)
-
-                    st.session_state.hb_ultimo_teste = {
-                        "nome": nome.strip(),
-                        "codigo": codigo,
-                        "caminho_local": caminho_local,
-                        "arquivo": arquivo,
-                        "ok": res_val["ok"],
-                        "stdout": res_val["stdout"],
-                        "stderr": res_val["stderr"],
-                        "codigo_saida": res_val["codigo_saida"],
-                    }
-
-                    if res_val["ok"]:
-                        st.success("✅ Código executou sem erro (returncode 0). Pode publicar.")
-                    else:
-                        st.error(f"❌ Falhou na execução (código {res_val['codigo_saida']}).")
-
-        with col2:
-            if st.button("🚀 Publicar no GitHub", key="hb_btn_publicar"):
-                ultimo = st.session_state.get("hb_ultimo_teste")
-                if not ultimo or not ultimo.get("ok"):
-                    st.warning("Valide o código com sucesso antes de publicar.")
-                else:
-                    caminho_remoto = f"habilidades/{ultimo['arquivo']}"
-                    with st.spinner("Enviando para o GitHub..."):
-                        res = hb_commitar_github(
-                            caminho_remoto,
-                            ultimo["codigo"],
-                            f"Nova habilidade: {ultimo['nome']}",
-                        )
-
-                    if res["ok"]:
-                        st.success(f"✅ {res['mensagem']}")
-                        if res.get("url"):
-                            st.markdown(f"[🔗 Ver no GitHub]({res['url']})")
-                        if "_recarregar_skills" in globals():
-                            try:
-                                _recarregar_skills()
-                            except Exception:
-                                pass
-                        st.info("Após o redeploy do Streamlit Cloud a habilidade fica disponível.")
-                    else:
-                        st.error(f"❌ {res['mensagem']}")
-
-        # Mostra o resultado do último teste
-        ultimo = st.session_state.get("hb_ultimo_teste")
-        if ultimo:
-            with st.expander("Saída da última validação", expanded=not ultimo["ok"]):
-                st.write(f"**Arquivo local:** `{ultimo['caminho_local']}`")
-                st.write(f"**Código de saída:** {ultimo['codigo_saida']}")
-                if ultimo.get("stdout"):
-                    st.markdown("**stdout:**")
-                    st.code(ultimo["stdout"])
-                if ultimo.get("stderr"):
-                    st.markdown("**stderr:**")
-                    st.code(ultimo["stderr"])
-
-
-try:
-    render_cadastro_habilidade()
-except Exception as _hb_err:
-    st.caption("⚠️ Cadastro de Habilidade desativado por erro: " + str(_hb_err)[:200])
-AVATAR_MAP = {
-    "Esfera 3D (Cyberpunk)": "sphere",
-    "Olho Cibernético": "eye",
-    "Robô Digital": "robot",
-    "Zeus Mitológico (3D)": "zeus",
+ZF_AVATARES = {
+    "Zeus Classico (raio dourado, pose estatica)": ZF_AVATAR_CLASSICO,
+    "Zeus em acao (lancando dois raios)": ZF_AVATAR_ACAO,
+    "Zeus Supremo (olhos vermelhos, tempestade, animado)": ZF_AVATAR_SUPREMO,
 }
-# ============================================================
-# CADASTRO MANUAL DE HABILIDADE + CARREGAMENTO DINÂMICO
-# Grava local → valida → publica no GitHub → Zeus executa de verdade
-# ============================================================
-import base64 as _hb_base64
-import importlib
-import importlib.util
-import os as _hb_os
-import re as _hb_re
-import subprocess as _hb_subprocess
-import sys as _hb_sys
-import types
-import requests as _hb_requests
 
 
-def _hb_get_secret(key: str, default: str = "") -> str:
+def zf_falar(texto: str, voz: str = None):
+    fn_sint = globals().get("sintetizar")
+    if not fn_sint:
+        return None
+    voz_usar = voz or st.session_state.get("zf_voz_ativa", "pt-BR-FranciscaNeural")
     try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            val = st.secrets[key]
-            if val:
-                return str(val).strip()
+        return fn_sint(texto, voz_usar)
     except Exception:
-        pass
-    return (_hb_os.environ.get(key) or default).strip()
+        return None
 
 
-def hb_slug(nome: str) -> str:
-    base = _hb_re.sub(r"[^a-zA-Z0-9_]+", "_", nome.strip()).strip("_").lower()
-    return base or "habilidade_sem_nome"
-
-
-def hb_gravar_arquivo_local(caminho: str, codigo: str) -> dict:
+def zf_tocar_musica(nome_musica: str) -> str:
+    if not spotipy:
+        return "Biblioteca spotipy nao instalada."
+    nome_musica = (nome_musica or "").strip()
+    if not nome_musica:
+        return "Nome da musica vazio."
     try:
-        pasta = _hb_os.path.dirname(caminho)
-        if pasta:
-            _hb_os.makedirs(pasta, exist_ok=True)
-        # Garante que habilidades seja um pacote
-        init_path = _hb_os.path.join(pasta or "habilidades", "__init__.py")
-        if not _hb_os.path.exists(init_path):
-            with open(init_path, "w", encoding="utf-8") as f:
-                f.write("# Pacote de habilidades do Zeus\n")
-        with open(caminho, "w", encoding="utf-8") as f:
-            f.write(codigo)
-        return {"ok": True, "mensagem": f"Arquivo gravado em '{caminho}'."}
-    except Exception as e:
-        return {"ok": False, "mensagem": f"Erro ao gravar: {e}"}
+        client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
+        client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+        refresh_token = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
+        redirect_uri = st.secrets.get("SPOTIFY_REDIRECT_URI", "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/")
+        if not (client_id and client_secret and refresh_token):
+            return "Faltam credenciais do Spotify nos Secrets."
 
+        auth_manager = SpotifyOAuth(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri,
+                                    scope="user-modify-playback-state user-read-playback-state", cache_path=None)
+        token_info = auth_manager.refresh_access_token(refresh_token)
+        sp = spotipy.Spotify(auth=token_info["access_token"])
 
-def hb_validar_execucao(caminho: str, timeout_s: int = 12) -> dict:
-    try:
-        resultado = _hb_subprocess.run(
-            [_hb_sys.executable, caminho],
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-    except _hb_subprocess.TimeoutExpired:
-        return {
-            "ok": False,
-            "stdout": "",
-            "stderr": f"Execução excedeu {timeout_s}s e foi interrompida.",
-            "codigo_saida": None,
-        }
-    except Exception as e:
-        return {
-            "ok": False,
-            "stdout": "",
-            "stderr": f"Falha ao executar: {e}",
-            "codigo_saida": None,
-        }
-    return {
-        "ok": resultado.returncode == 0,
-        "stdout": resultado.stdout,
-        "stderr": resultado.stderr,
-        "codigo_saida": resultado.returncode,
-    }
+        results = sp.search(q=nome_musica, limit=1, type="track")
+        tracks = results.get("tracks", {}).get("items", [])
+        if not tracks:
+            return f"Nenhuma faixa encontrada para {nome_musica}."
 
-
-def hb_commitar_github(caminho_remoto: str, conteudo: str, mensagem: str) -> dict:
-    token = _hb_get_secret("GITHUB_API_KEY") or _hb_get_secret("GITHUB_TOKEN")
-    owner = _hb_get_secret("GITHUB_USER")
-    repo = _hb_get_secret("GITHUB_REPO")
-    branch = _hb_get_secret("GITHUB_BRANCH", "main")
-
-    if not (token and owner and repo):
-        return {
-            "ok": False,
-            "mensagem": "Faltam GITHUB_API_KEY (ou GITHUB_TOKEN), GITHUB_USER ou GITHUB_REPO nos Secrets.",
-            "url": None,
-        }
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{caminho_remoto}"
-
-    try:
-        r_get = _hb_requests.get(url, headers=headers, params={"ref": branch}, timeout=20)
-        sha = r_get.json().get("sha") if r_get.status_code == 200 else None
-    except _hb_requests.RequestException as e:
-        return {"ok": False, "mensagem": f"Falha ao consultar SHA: {e}", "url": None}
-
-    payload = {
-        "message": mensagem,
-        "content": _hb_base64.b64encode(conteudo.encode("utf-8")).decode("utf-8"),
-        "branch": branch,
-    }
-    if sha:
-        payload["sha"] = sha
-
-    try:
-        r_put = _hb_requests.put(url, headers=headers, json=payload, timeout=30)
-    except _hb_requests.RequestException as e:
-        return {"ok": False, "mensagem": f"Falha de conexão no commit: {e}", "url": None}
-
-    if r_put.status_code in (200, 201):
-        return {
-            "ok": True,
-            "mensagem": "Commit e push realizados com sucesso.",
-            "url": r_put.json().get("content", {}).get("html_url"),
-        }
-    try:
-        detalhe = r_put.json().get("message", "erro desconhecido")
-    except Exception:
-        detalhe = r_put.text[:200]
-    return {"ok": False, "mensagem": f"({r_put.status_code}) {detalhe}", "url": None}
-
-
-# ------------------------------------------------------------
-# CARREGAMENTO DINÂMICO DE MÓDULOS (o que faz o Zeus executar)
-# ------------------------------------------------------------
-def _hb_garantir_pacote_habilidades():
-    pasta = "habilidades"
-    _hb_os.makedirs(pasta, exist_ok=True)
-    init = _hb_os.path.join(pasta, "__init__.py")
-    if not _hb_os.path.exists(init):
-        with open(init, "w", encoding="utf-8") as f:
-            f.write("# Pacote de habilidades do Zeus\n")
-
-
-def carregar_habilidades_dinamicas() -> dict:
-    """
-    Escaneia a pasta habilidades/, importa cada .py e retorna
-    um dicionário {nome_funcao: funcao}.
-    """
-    _hb_garantir_pacote_habilidades()
-    funcoes = {}
-
-    pasta = "habilidades"
-    if pasta not in sys.path:
-        sys.path.insert(0, _hb_os.getcwd())
-
-    for nome_arquivo in _hb_os.listdir(pasta):
-        if not nome_arquivo.endswith(".py") or nome_arquivo.startswith("_"):
-            continue
-        modulo_nome = f"habilidades.{nome_arquivo[:-3]}"
-        caminho = _hb_os.path.join(pasta, nome_arquivo)
-
+        track = tracks[0]
         try:
-            # Remove do cache se já existir (permite reload)
-            if modulo_nome in sys.modules:
-                del sys.modules[modulo_nome]
-
-            spec = importlib.util.spec_from_file_location(modulo_nome, caminho)
-            if spec is None or spec.loader is None:
-                continue
-            mod = importlib.util.module_from_spec(spec)
-            sys.modules[modulo_nome] = mod
-            spec.loader.exec_module(mod)
-
-            for nome, obj in vars(mod).items():
-                if callable(obj) and not nome.startswith("_") and isinstance(obj, types.FunctionType):
-                    # Evita sobrescrever se já existir no zeus_skills
-                    funcoes[nome] = obj
-        except Exception as e:
-            # Não quebra o app se um módulo estiver quebrado
-            st.session_state.setdefault("hb_erros_carga", []).append(f"{nome_arquivo}: {e}")
-
-    return funcoes
-
-
-def listar_todas_habilidades() -> dict:
-    """Junta as habilidades do zeus_skills + as da pasta habilidades/."""
-    todas = {}
-
-    # 1. As que já existem no sistema antigo
-    try:
-        if "listar_habilidades" in globals():
-            todas.update(listar_habilidades())
-    except Exception:
-        pass
-
-    # 2. As dinâmicas da pasta
-    try:
-        todas.update(carregar_habilidades_dinamicas())
-    except Exception:
-        pass
-
-    return todas
-
-
-def executar_habilidade_por_nome(nome_fn: str, *args, **kwargs):
-    """Permite o Zeus (ou a UI) chamar qualquer habilidade pelo nome."""
-    skills = listar_todas_habilidades()
-    fn = skills.get(nome_fn)
-    if fn is None:
-        return f"❌ Habilidade '{nome_fn}' não encontrada. Disponíveis: {', '.join(skills.keys()) or 'nenhuma'}"
-    try:
-        return fn(*args, **kwargs)
-    except TypeError as e:
-        return f"❌ Erro de argumentos em '{nome_fn}': {e}"
+            sp.start_playback(uris=[track["uri"]])
+            artista = track["artists"][0]["name"] if track.get("artists") else "desconhecido"
+            return f"Tocando agora: {track['name']} - {artista}"
+        except spotipy.exceptions.SpotifyException as e:
+            if getattr(e, "http_status", None) == 404:
+                return "Nenhum aparelho ativo. Abra o Spotify e de play em algo primeiro."
+            return f"Erro do Spotify: {str(e)[:150]}"
     except Exception as e:
-        return f"❌ Erro ao executar '{nome_fn}': {e}"
+        return f"Erro no Spotify: {str(e)[:150]}"
 
 
 # ------------------------------------------------------------
-# INTERFACE
+# 5. INTERFACE (tela principal, nao escondida na sidebar)
 # ------------------------------------------------------------
-def render_cadastro_habilidade():
-    with st.expander("🧩 Cadastrar Nova Habilidade (manual)", expanded=False):
-        st.caption(
-            "1. Cole o código → 2. Clique em **Validar** → "
-            "3. Se o teste estiver ok, clique em **Publicar no GitHub**. "
-            "Depois do redeploy o Zeus consegue executar a função."
-        )
+def zf_render_painel():
+    with st.container(border=True):
+        col_av, col_cfg = st.columns([1, 2])
+        with col_av:
+            nome_avatar = st.session_state.get("zf_avatar_nome", list(ZF_AVATARES.keys())[-1])
+            st.image(ZF_AVATARES.get(nome_avatar, ZF_AVATAR_SUPREMO), width=160)
+        with col_cfg:
+            nome_avatar = st.selectbox("Avatar do Zeus", list(ZF_AVATARES.keys()), key="zf_avatar_nome")
+            st.session_state.zeus_avatar_ativo = ZF_AVATARES[nome_avatar]
 
-        nome = st.text_input("Nome da habilidade", key="hb_nome", placeholder="ex: calcular_imc")
-        codigo = st.text_area(
-            "Código Python da habilidade",
-            height=260,
-            key="hb_codigo",
-            placeholder=(
-                "def calcular_imc(peso, altura):\n"
-                "    return round(peso / (altura ** 2), 2)\n\n"
-                "if __name__ == '__main__':\n"
-                "    print(calcular_imc(70, 1.75))"
-            ),
-        )
+            fn_vozes = globals().get("listar_todas_vozes_edge") or globals().get("listar_vozes_edge")
+            vozes_disp = fn_vozes() if fn_vozes else globals().get("FALLBACK_VOZES", {"Francisca (pt-BR)": "pt-BR-FranciscaNeural"})
 
-        col1, col2, col3 = st.columns(3)
+            filtro_voz = st.text_input("Filtrar vozes (ex: pt-BR, en-US)", key="zf_filtro_voz")
+            vozes_filtradas = {k: v for k, v in vozes_disp.items() if filtro_voz.lower() in k.lower()} if filtro_voz else vozes_disp
+            if not vozes_filtradas:
+                vozes_filtradas = vozes_disp
 
-        with col1:
-            if st.button("🧪 Validar (grava + executa)", key="hb_btn_validar"):
-                if not nome.strip() or not codigo.strip():
-                    st.warning("Preencha o nome e o código.")
-                else:
-                    arquivo = hb_slug(nome) + ".py"
-                    caminho_local = _hb_os.path.join("habilidades", arquivo)
+            nome_voz = st.selectbox("Voz do Zeus", list(vozes_filtradas.keys()), key="zf_voz_nome")
+            st.session_state.zf_voz_ativa = vozes_filtradas[nome_voz]
 
-                    # Validação estática (se existir no app)
-                    if "validar_codigo_habilidade" in globals():
-                        ok_ast, msg_ast = validar_codigo_habilidade(codigo)
-                        if not ok_ast:
-                            st.error(f"❌ Validação estática falhou: {msg_ast}")
-                            st.stop()
+            if st.button("Ouvir previa", key="zf_btn_previa"):
+                with st.spinner("Gerando previa..."):
+                    audio_prev = zf_falar("Ola, Danilo. Eu sou Zeus.", vozes_filtradas[nome_voz])
+                st.audio(audio_prev, format="audio/mp3") if audio_prev else st.error("Nao consegui gerar o audio.")
 
-                    res_gravar = hb_gravar_arquivo_local(caminho_local, codigo)
-                    if not res_gravar["ok"]:
-                        st.error(res_gravar["mensagem"])
-                        st.stop()
-
-                    with st.spinner("Executando em processo separado..."):
-                        res_val = hb_validar_execucao(caminho_local)
-
-                    st.session_state.hb_ultimo_teste = {
-                        "nome": nome.strip(),
-                        "codigo": codigo,
-                        "caminho_local": caminho_local,
-                        "arquivo": arquivo,
-                        "ok": res_val["ok"],
-                        "stdout": res_val["stdout"],
-                        "stderr": res_val["stderr"],
-                        "codigo_saida": res_val["codigo_saida"],
-                    }
-
-                    if res_val["ok"]:
-                        st.success("✅ Código executou sem erro. Pode publicar.")
-                        # Já carrega localmente para testar na hora
-                        try:
-                            carregar_habilidades_dinamicas()
-                        except Exception:
-                            pass
-                    else:
-                        st.error(f"❌ Falhou na execução (código {res_val['codigo_saida']}).")
-
-        with col2:
-            if st.button("🚀 Publicar no GitHub", key="hb_btn_publicar"):
-                ultimo = st.session_state.get("hb_ultimo_teste")
-                if not ultimo or not ultimo.get("ok"):
-                    st.warning("Valide o código com sucesso antes de publicar.")
-                else:
-                    caminho_remoto = f"habilidades/{ultimo['arquivo']}"
-                    with st.spinner("Enviando para o GitHub..."):
-                        res = hb_commitar_github(
-                            caminho_remoto,
-                            ultimo["codigo"],
-                            f"Nova habilidade: {ultimo['nome']}",
-                        )
-                    if res["ok"]:
-                        st.success(f"✅ {res['mensagem']}")
-                        if res.get("url"):
-                            st.markdown(f"[🔗 Ver no GitHub]({res['url']})")
-                        st.info("Após o redeploy do Streamlit Cloud a habilidade fica permanente.")
-                    else:
-                        st.error(f"❌ {res['mensagem']}")
-
-        with col3:
-            if st.button("🔄 Recarregar habilidades agora", key="hb_btn_reload"):
-                skills = carregar_habilidades_dinamicas()
-                st.success(f"Carregadas {len(skills)} função(ões): {', '.join(skills.keys()) or 'nenhuma'}")
-
-        # Resultado do último teste
-        ultimo = st.session_state.get("hb_ultimo_teste")
-        if ultimo:
-            with st.expander("Saída da última validação", expanded=not ultimo["ok"]):
-                st.write(f"**Arquivo local:** `{ultimo['caminho_local']}`")
-                st.write(f"**Código de saída:** {ultimo['codigo_saida']}")
-                if ultimo.get("stdout"):
-                    st.markdown("**stdout:**")
-                    st.code(ultimo["stdout"])
-                if ultimo.get("stderr"):
-                    st.markdown("**stderr:**")
-                    st.code(ultimo["stderr"])
-
-        # Lista o que já está carregado
-        with st.expander("Habilidades disponíveis agora", expanded=False):
-            skills = listar_todas_habilidades()
-            if skills:
-                for nome_fn, fn in skills.items():
-                    st.write(f"• `{nome_fn}`")
+    with st.sidebar:
+        st.divider()
+        st.subheader("Controle de Musica")
+        musica_input = st.text_input("Digite a musica:", key="zf_input_musica")
+        if st.button("Tocar no Spotify", key="zf_btn_tocar"):
+            if musica_input.strip():
+                with st.spinner("Sintonizando..."):
+                    resultado = zf_tocar_musica(musica_input)
+                st.success(resultado) if resultado.startswith("Tocando") else st.error(resultado)
             else:
-                st.caption("Nenhuma habilidade carregada ainda.")
+                st.warning("Digite o nome da musica primeiro.")
+
+    with st.expander("Zeus - Nucleo de Aprendizado, Database (zilsy/) e Midia", expanded=False):
+        aba_criar, aba_memoria, aba_midia = st.tabs(["Aprender (Ensemble)", "Memoria GitHub", "Midia Aprimorada"])
+
+        with aba_criar:
+            instrucao = st.text_input("O que o Zeus deve desenvolver?",
+                                      placeholder="Ex: funcao que calcula sensacao termica...", key="zf_instrucao")
+            linguagem = st.selectbox("Linguagem", ["python", "javascript", "cpp", "java"], key="zf_linguagem")
+            st.caption("Python executa automaticamente. Outras linguagens sao geradas e salvas, sem execucao automatica.")
+            if st.button("Gerar, Revisar e Salvar", key="zf_btn_aprender"):
+                if instrucao.strip():
+                    with st.spinner("Gerando, revisando e salvando..."):
+                        resultado = zf_aprender_ensemble(instrucao.strip(), linguagem)
+                    st.markdown(resultado)
+                else:
+                    st.warning("Insira uma instrucao valida.")
+
+        with aba_memoria:
+            pasta_consulta = st.text_input("Pasta no Database (GitHub):", value=_ZF_PASTA_MODULOS, key="zf_pasta_consulta")
+            if st.button("Listar Arquivos", key="zf_btn_listar"):
+                pasta_segura = _zf_sanitizar_pasta(pasta_consulta)
+                arquivos = zf_listar_memoria_github(pasta_segura)
+                st.session_state.zf_arquivos = arquivos
+                st.success(f"Encontrados {len(arquivos)} arquivos.") if arquivos else st.warning("Nenhum arquivo encontrado.")
+            if st.session_state.get("zf_arquivos"):
+                arq_sel = st.selectbox("Selecione um modulo:", st.session_state.zf_arquivos, key="zf_arq_sel")
+                if st.button("Ler Conteudo", key="zf_btn_ler"):
+                    conteudo = zf_ler_arquivo_github(arq_sel)
+                    st.code(conteudo, language="python") if conteudo else st.error("Erro ao recuperar conteudo.")
+
+        with aba_midia:
+            prompt_midia = st.text_area("Descreva a imagem/video:", key="zf_prompt_midia")
+            tipo_midia = st.radio("Tipo:", ["Imagem aprimorada", "Video aprimorado"], key="zf_tipo_midia", horizontal=True)
+            if st.button("Gerar Midia Aprimorada", key="zf_btn_midia"):
+                if prompt_midia.strip():
+                    log_midia = []
+                    with st.spinner("Gerando e aprimorando..."):
+                        if tipo_midia == "Imagem aprimorada":
+                            img = zf_gerar_imagem_aprimorada(prompt_midia.strip(), log_midia)
+                            if img:
+                                st.image(img, caption="Imagem aprimorada")
+                                st.download_button("Baixar", img, file_name="zeus_imagem.png", key="zf_dl_img")
+                            else:
+                                st.error("Nao consegui gerar a imagem.")
+                        else:
+                            vid, img_base = zf_gerar_video_aprimorado(prompt_midia.strip(), log_midia)
+                            if img_base:
+                                st.image(img_base, caption="Quadro base aprimorado")
+                            if vid:
+                                st.video(vid)
+                                st.download_button("Baixar video", vid, file_name="zeus_video.mp4", key="zf_dl_vid")
+                            else:
+                                st.error("Nao consegui gerar o video.")
+                    with st.expander("Log de geracao", expanded=False):
+                        st.write(chr(10).join(log_midia))
+                else:
+                    st.warning("Descreva o que deseja gerar.")
+
+
+def zf_interceptar_musica():
+    msgs = st.session_state.get("messages")
+    if not msgs:
+        return
+    ultima = msgs[-1]
+    if ultima.get("role") != "user":
+        return
+    texto = str(ultima.get("content", "")).lower()
+    if not any(p in texto for p in ("toca ", "tocar ", "toque ", "spotify", "musica ")):
+        return
+    if st.session_state.get("zf_ultima_musica") == ultima["content"]:
+        return
+
+    termo = _re_zf.sub(
+        r"\b(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)\b", "", texto
+    ).strip(" .,!?:-")
+    st.session_state.zf_ultima_musica = ultima["content"]
+    if not termo:
+        return
+
+    with st.spinner(f"Buscando {termo}..."):
+        resultado = zf_tocar_musica(termo)
+    st.toast(resultado, icon="🎵")
+    st.session_state.messages.append({"role": "assistant", "content": resultado})
+    st.rerun()
 
 
 try:
-    render_cadastro_habilidade()
-except Exception as _hb_err:
-    st.caption("⚠️ Cadastro de Habilidade desativado por erro: " + str(_hb_err)[:200])
-
-feat: sistema de habilidades com validação e carga dinâmica
+    zf_render_painel()
+    zf_interceptar_musica()
+except Exception as _zf_err:
+    st.caption("Zeus Final desativado por erro: " + str(_zf_err)[:200])
