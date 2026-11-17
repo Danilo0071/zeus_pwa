@@ -465,3 +465,38 @@ def pesquisar_web_soberana(dados_pesquisa: Dict[str, Any]) -> Dict[str, Any]:
             "status": "erro",
             "resultados": [str(e)]
         }
+
+
+import urllib.request
+import json
+from typing import Dict, Any
+
+def consultar_preco_cripto(dados_consulta: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Consulta o preço em tempo real de ativos cripto diretamente na API pública,
+    evitando bloqueios de web scraping e timeouts.
+    Espera um dicionário com a chave 'par' (ex: 'BTCUSDT').
+    """
+    par = dados_consulta.get("par", "BTCUSDT").upper()
+    url = f"https://api.binance.com/api/v3/ticker/price?symbol={par}"
+    
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            
+        return {
+            "ativo": data.get("symbol"),
+            "preco_atual": float(data.get("price", 0)),
+            "status": "sucesso_soberano",
+            "fonte": "API Publica Direta"
+        }
+    except Exception as e:
+        return {
+            "ativo": par,
+            "status": "erro_conexao",
+            "detalhe": str(e)
+        }
