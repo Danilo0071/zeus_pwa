@@ -3539,3 +3539,12 @@ try:
 except Exception as _hb_err:
     if hasattr(st, "sidebar"):
         st.sidebar.caption("⚠️ Módulo de Habilidades em espera: " + str(_hb_err)[:100])
+
+# ============================================================
+# CHAMANDO O LABORATÓRIO DE HABILIDADES NA BARRA LATERAL
+# ============================================================
+try:
+    import bloco_cadastro_habilidade
+    bloco_cadastro_habilidade.render_cadastro_habilidade()
+except Exception as e:
+    st.sidebar.error(f"Erro ao carregar o laboratório: {e}")
