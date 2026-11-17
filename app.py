@@ -3595,3 +3595,32 @@ def render_cadastro_habilidade():
                                 st.code(resultado["erro"])
                             if resultado.get("stderr"):
                                 st.code(resultado["stderr"])
+
+import streamlit as st
+import streamlit.components.v1 as components
+
+def renderizar_avatar_zeus():
+    st.markdown("### 🤖 Zeus PWA - Avatar Operacional")
+    
+    avatar_html = """
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 25px; background: linear-gradient(135deg, #0f172a, #1e293b); border-radius: 16px; border: 1px solid #38bdf8; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+        <div style="font-size: 64px; animation: pulse 2s infinite ease-in-out;">⚡🤖⚡</div>
+        <h2 style="margin: 15px 0 5px 0; color: #38bdf8; font-size: 22px; text-transform: uppercase; letter-spacing: 1px;">Zeus Core Ativo</h2>
+        <p style="font-size: 14px; color: #94a3b8; margin: 0 0 15px 0;">Sistemas sincronizados com a nuvem e GitHub.</p>
+        <div style="display: flex; gap: 10px;">
+            <span style="background: #0284c7; color: #fff; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold;">Status: Online</span>
+            <span style="background: #10b981; color: #fff; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold;">Modo: Autônomo</span>
+        </div>
+    </div>
+    <style>
+    @keyframes pulse {
+        0% { transform: scale(1); filter: drop-shadow(0 0 5px rgba(56,189,248,0.4)); }
+        50% { transform: scale(1.08); filter: drop-shadow(0 0 15px rgba(56,189,248,0.8)); }
+        100% { transform: scale(1); filter: drop-shadow(0 0 5px rgba(56,189,248,0.4)); }
+    }
+    </style>
+    """
+    components.html(avatar_html, height=240)
+
+# Chame esta função onde quiser que o avatar apareça na tela
+renderizar_avatar_zeus()
