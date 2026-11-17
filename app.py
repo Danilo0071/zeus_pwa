@@ -3797,3 +3797,9 @@ try:
     render_cadastro_habilidade()
 except Exception as _hb_err:
     st.caption("⚠️ Cadastro de Habilidade desativado por erro: " + str(_hb_err)[:200])
+AVATAR_MAP = {
+    "Esfera 3D (Cyberpunk)": "sphere",
+    "Olho Cibernético": "eye",
+    "Robô Digital": "robot",
+    "Zeus Mitológico (3D)": "zeus",
+}
