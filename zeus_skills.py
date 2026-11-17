@@ -414,3 +414,54 @@ def iniciar_ciclo_autonomo(configuracao: Dict[str, Any]) -> Dict[str, Any]:
         "historico_evolucao": logs_evolucao,
         "mensagem": "Zeus operou o ciclo autônomo com sucesso e aprimorou o repertório."
     }
+
+
+import urllib.request
+import urllib.parse
+import re
+from typing import Dict, Any
+
+def pesquisar_web_soberana(dados_pesquisa: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Realiza uma busca web autônoma usando fontes públicas via HTTP nativo,
+    sem depender de chaves de API pagas ou modelos externos.
+    Espera um dicionário com a chave: 'termo'.
+    """
+    termo = dados_pesquisa.get("termo", "")
+    if not termo:
+        return {"erro": "Termo de busca não fornecido"}
+    
+    try:
+        query_encoded = urllib.parse.quote(termo)
+        url = f"https://html.duckduckgo.com/html/?q={query_encoded}"
+        
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html_content = response.read().decode('utf-8')
+            
+        snippets = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', html_content, re.DOTALL)
+        
+        resultados_limpos = []
+        for s in snippets[:5]:
+            clean_text = re.sub(r'<.*?>', '', s).strip()
+            if clean_text:
+                resultados_limpos.append(clean_text)
+                
+        if not resultados_limpos:
+            resultados_limpos = ["Conexão estabelecida com sucesso, mas a estrutura da página retornou vazia."]
+            
+        return {
+            "termo_pesquisado": termo,
+            "status": "sucesso_soberano",
+            "resultados": resultados_limpos
+        }
+    except Exception as e:
+        return {
+            "termo_pesquisado": termo,
+            "status": "erro",
+            "resultados": [str(e)]
+        }
