@@ -3276,4 +3276,180 @@ def zeus_run_script(script_path, timeout=120, extra_args=None, cwd=None):
         result["stderr"] = f"[zeus] Erro ao executar script: {e}"
         return result
 
+# ============================================================
+# CADASTRO DE NOVA HABILIDADE: escreve .py local, valida via
+# subprocess (execução real) e, se passar, comita no GitHub.
+# ============================================================
+import base64 as _hb_base64
+import os as _hb_os
+import re as _hb_re
+import subprocess as _hb_subprocess
+import sys as _hb_sys
+
+import requests as _hb_requests
+
+
+def _hb_get_secret(key: str, default: str = "") -> str:
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            val = st.secrets[key]
+            if val:
+                return str(val).strip()
+    except Exception:
+        pass
+    return _hb_os.environ.get(key, default).strip()
+
+
+def hb_slug(nome: str) -> str:
+    """Converte o nome da habilidade em um nome de arquivo seguro."""
+    base = _hb_re.sub(r"[^a-zA-Z0-9_]+", "_", nome.strip()).strip("_").lower()
+    return base or "habilidade_sem_nome"
+
+
+# ------------------------------------------------------------
+# 1. GRAVAÇÃO LOCAL
+# ------------------------------------------------------------
+def hb_gravar_arquivo_local(caminho: str, codigo: str) -> dict:
+    try:
+        pasta = _hb_os.path.dirname(caminho)
+        if pasta:
+            _hb_os.makedirs(pasta, exist_ok=True)
+        with open(caminho, "w", encoding="utf-8") as f:
+            f.write(codigo)
+        return {"ok": True, "mensagem": f"Arquivo gravado em '{caminho}'."}
+    except Exception as e:
+        return {"ok": False, "mensagem": f"Erro ao gravar o arquivo: {e}"}
+
+
+# ------------------------------------------------------------
+# 2. VALIDAÇÃO DE EXECUÇÃO VIA SUBPROCESS
+# ------------------------------------------------------------
+def hb_validar_execucao(caminho: str, timeout_s: int = 15) -> dict:
+    """Executa o arquivo em um processo Python separado para checar se roda
+    sem erro. Retorna {"ok", "stdout", "stderr", "codigo_saida"}."""
+    try:
+        resultado = _hb_subprocess.run(
+            [_hb_sys.executable, caminho],
+            capture_output=True, text=True, timeout=timeout_s,
+        )
+    except _hb_subprocess.TimeoutExpired:
+        return {"ok": False, "stdout": "", "stderr": f"Execução excedeu {timeout_s}s e foi interrompida.", "codigo_saida": None}
+    except Exception as e:
+        return {"ok": False, "stdout": "", "stderr": f"Falha ao executar: {e}", "codigo_saida": None}
+
+    ok = resultado.returncode == 0
+    return {"ok": ok, "stdout": resultado.stdout, "stderr": resultado.stderr, "codigo_saida": resultado.returncode}
+
+
+# ------------------------------------------------------------
+# COMMIT NO GITHUB VIA API REST (substitui git CLI/subprocess)
+# ------------------------------------------------------------
+def hb_commitar_github(caminho_remoto: str, conteudo: str, mensagem: str) -> dict:
+    token = _hb_get_secret("GITHUB_TOKEN") or _hb_get_secret("GITHUB_API_KEY")
+    owner = _hb_get_secret("GITHUB_USER")
+    repo = _hb_get_secret("GITHUB_REPO")
+    branch = _hb_get_secret("GITHUB_BRANCH", "main")
+
+    if not (token and owner and repo):
+        return {"ok": False, "mensagem": "Faltam GITHUB_TOKEN/GITHUB_API_KEY, GITHUB_USER ou GITHUB_REPO nos Secrets.", "url": None}
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{caminho_remoto}"
+
+    try:
+        r_get = _hb_requests.get(url, headers=headers, params={"ref": branch}, timeout=20)
+        sha = r_get.json().get("sha") if r_get.status_code == 200 else None
+    except _hb_requests.RequestException as e:
+        return {"ok": False, "mensagem": f"Falha ao consultar SHA: {e}", "url": None}
+
+    payload = {"message": mensagem, "content": _hb_base64.b64encode(conteudo.encode("utf-8")).decode("utf-8"), "branch": branch}
+    if sha:
+        payload["sha"] = sha
+
+    try:
+        r_put = _hb_requests.put(url, headers=headers, json=payload, timeout=30)
+    except _hb_requests.RequestException as e:
+        return {"ok": False, "mensagem": f"Falha de conexão no commit: {e}", "url": None}
+
+    if r_put.status_code in (200, 201):
+        return {"ok": True, "mensagem": "Commit e push realizados.", "url": r_put.json().get("content", {}).get("html_url")}
+    try:
+        detalhe = r_put.json().get("message", "erro desconhecido")
+    except Exception:
+        detalhe = r_put.text[:200]
+    return {"ok": False, "mensagem": f"({r_put.status_code}) {detalhe}", "url": None}
+
+
+# ------------------------------------------------------------
+# FLUXO COMPLETO: gravar -> validar -> comitar
+# ------------------------------------------------------------
+def hb_cadastrar_habilidade(nome: str, codigo: str, pasta_local: str = "habilidades", pasta_remota: str = "habilidades") -> dict:
+    arquivo = hb_slug(nome) + ".py"
+    caminho_local = _hb_os.path.join(pasta_local, arquivo)
+    caminho_remoto = f"{pasta_remota}/{arquivo}"
+
+    res_gravar = hb_gravar_arquivo_local(caminho_local, codigo)
+    if not res_gravar["ok"]:
+        return {"etapa": "gravacao", "ok": False, "mensagem": res_gravar["mensagem"]}
+
+    res_validar = hb_validar_execucao(caminho_local)
+    if not res_validar["ok"]:
+        return {
+            "etapa": "validacao", "ok": False,
+            "mensagem": f"Código falhou na execução (código de saída {res_validar['codigo_saida']}).",
+            "stdout": res_validar["stdout"], "stderr": res_validar["stderr"],
+        }
+
+    res_commit = hb_commitar_github(caminho_remoto, codigo, f"Nova habilidade: {nome}")
+    if not res_commit["ok"]:
+        return {"etapa": "commit", "ok": False, "mensagem": res_commit["mensagem"], "stdout": res_validar["stdout"], "stderr": res_validar["stderr"]}
+
+    return {
+        "etapa": "concluido", "ok": True,
+        "mensagem": f"Habilidade '{nome}' validada e publicada em '{caminho_remoto}'.",
+        "url": res_commit.get("url"), "stdout": res_validar["stdout"], "stderr": res_validar["stderr"],
+    }
+
+
+# ------------------------------------------------------------
+# INTERFACE
+# ------------------------------------------------------------
+def render_cadastro_habilidade():
+    with st.expander("🧩 Cadastrar Nova Habilidade", expanded=False):
+        with st.form("hb_form_cadastro"):
+            nome = st.text_input("Nome da habilidade", key="hb_nome")
+            codigo = st.text_area("Código Python da habilidade", height=250, key="hb_codigo",
+                                   placeholder="def minha_funcao():\n    return 'ok'")
+            enviado = st.form_submit_button("🚀 Gravar, Validar e Publicar")
+
+        if enviado:
+            if not nome.strip() or not codigo.strip():
+                st.warning("Preencha o nome e o código antes de enviar.")
+            else:
+                with st.spinner("Gravando arquivo, validando execução e publicando no GitHub..."):
+                    resultado = hb_cadastrar_habilidade(nome.strip(), codigo)
+
+                if resultado["ok"]:
+                    st.success(f"✅ {resultado['mensagem']}")
+                    if resultado.get("url"):
+                        st.markdown(f"[🔗 Ver no GitHub]({resultado['url']})")
+                else:
+                    etapa = resultado["etapa"]
+                    rotulo = {"gravacao": "ao gravar o arquivo", "validacao": "na validação de execução", "commit": "ao publicar no GitHub"}
+                    st.error(f"❌ Falha {rotulo.get(etapa, '')}: {resultado['mensagem']}")
+
+                if resultado.get("stdout") or resultado.get("stderr"):
+                    with st.expander("Saída da execução de validação", expanded=not resultado["ok"]):
+                        if resultado.get("stdout"):
+                            st.markdown("**stdout:**")
+                            st.code(resultado["stdout"])
+                        if resultado.get("stderr"):
+                            st.markdown("**stderr:**")
+                            st.code(resultado["stderr"])
+
+
+try:
+    render_cadastro_habilidade()
+except Exception as _hb_err:
+    st.caption("⚠️ Cadastro de Habilidade desativado por erro: " + str(_hb_err)[:200])
 
