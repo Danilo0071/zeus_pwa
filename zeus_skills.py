@@ -380,3 +380,37 @@ def calcular_lucro_operacao(dados_operacao: dict) -> dict:
         "roi_percentual": round(roi_percentual, 2),
         "operacao_viavel": viavel
     }
+
+
+from datetime import datetime
+import time
+from typing import Dict, Any
+
+def iniciar_ciclo_autonomo(configuracao: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Simula o motor de auto-aprimoramento contínuo em segundo plano.
+    Varre o ambiente, valida rotinas e gera logs de evolução soberana.
+    """
+    iteracoes = int(configuracao.get("iteracoes", 3))
+    intervalo_segundos = float(configuracao.get("intervalo", 1.0))
+    
+    logs_evolucao = []
+    
+    for i in range(1, iteracoes + 1):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        passo_log = {
+            "ciclo": i,
+            "timestamp": timestamp,
+            "status": "otimizado",
+            "acao_executada": f"Varredura de rotinas e refinamento da base de dados #{i}"
+        }
+        logs_evolucao.append(passo_log)
+        time.sleep(intervalo_segundos / 10.0)
+        
+    return {
+        "estado_motor": "ativo_e_soberano",
+        "total_ciclos_concluidos": iteracoes,
+        "historico_evolucao": logs_evolucao,
+        "mensagem": "Zeus operou o ciclo autônomo com sucesso e aprimorou o repertório."
+    }
