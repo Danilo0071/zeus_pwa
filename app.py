@@ -3597,55 +3597,21 @@ def render_cadastro_habilidade():
                                 st.code(resultado["stderr"])
 
 import streamlit as st
-import requests
 
-def leitor_direto_github():
-    st.markdown("---")
-    st.markdown("### ⚡ Zeus Engine - Leitor Direto da API do GitHub")
-    
-    # Seu repositório oficial
-    repo = "Danilo0071/zeus_pwa"
-    api_url = f"https://api.github.com/repos/{repo}/contents/"
-    
-    try:
-        # Consulta a API do GitHub em tempo real
-        headers = {"Accept": "application/vnd.github.v3+json"}
-        response = requests.get(api_url, headers=headers, timeout=5)
-        
-        if response.status_code == 200:
-            contents = response.json()
-            # Filtra apenas arquivos .md e .html criados pelo Zeus
-            arquivos = [item['name'] for item in contents if item['type'] == 'file' and item['name'].endswith(('.md', '.html'))]
-            
-            if not arquivos:
-                st.warning("⚠️ Nenhum arquivo de relatório ou avatar encontrado na raiz do repositório ainda.")
-                return
-                
-            # Selecionador dinâmico
-            arquivo_selecionado = st.selectbox("Selecione o arquivo gerado pelo Zeus na nuvem:", arquivos)
-            
-            if arquivo_selecionado:
-                # Pega o conteúdo bruto (raw) direto do GitHub
-                raw_url = f"https://raw.githubusercontent.com/{repo}/main/{arquivo_selecionado}"
-                raw_response = requests.get(raw_url, timeout=5)
-                
-                if raw_response.status_code == 200:
-                    conteudo = raw_response.text
-                    st.success(f"✅ Sincronizado com sucesso: {arquivo_selecionado}")
-                    
-                    # Renderiza de acordo com o tipo (HTML interativo ou Relatório Markdown)
-                    if arquivo_selecionado.endswith(".html"):
-                        import streamlit.components.v1 as components
-                        components.html(conteudo, height=500, scrolling=True)
-                    else:
-                        st.markdown(conteudo)
-                else:
-                    st.error("❌ Erro ao baixar o conteúdo bruto do arquivo do GitHub.")
-        else:
-            st.warning(f"⚠️ Resposta da API do GitHub: Status {response.status_code}")
-            
-    except Exception as e:
-        st.error(f"❌ Falha de conexão com a API: {e}")
+st.markdown("---")
+st.markdown("### ⚡ Teste de Gatilho Direto do Zeus")
 
-# Executa o painel leitor direto
-leitor_direto_github()
+# Botão explícito para forçar a ação na tela
+if st.button("🚀 Executar Renderização Forçada do Zeus"):
+    st.success("✅ O gatilho funcionou! O painel está respondendo ao comando.")
+    
+    # Exibe HTML/Avatar direto na tela para testar se renderiza visualmente
+    st.markdown("#### Avatar Ativo na Interface:")
+    st.markdown("""
+        <div style="padding: 20px; background: #0f172a; border-radius: 10px; color: #38bdf8; text-align: center; border: 1px solid #38bdf8;">
+            <h2>🤖 ZEUS CORE - INTERATIVIDADE REAL</h2>
+            <p style="color: #fff;">Status: Operando com autonomia soberana.</p>
+        </div>
+    """, unsafe_allow_html=True)
+else:
+    st.info("ℹ️ Clique no botão acima para forçar o Zeus a renderizar a interface visual.")
