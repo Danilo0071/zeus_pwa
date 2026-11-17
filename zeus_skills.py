@@ -644,3 +644,70 @@ def atualizar_painel_github(dados: Dict[str, Any]) -> Dict[str, Any]:
             "status": "erro_conexao_github",
             "detalhe": str(e)
         }
+
+
+import base64
+import json
+import urllib.request
+from typing import Dict, Any
+
+def atualizar_painel_github(dados: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Atualiza um arquivo no repositório GitHub usando um token fornecido nos dados ou constante.
+    """
+    token = dados.get("token", "")
+    if not token:
+        return {"status": "erro", "detalhe": "Token não fornecido."}
+    
+    novo_codigo = dados.get("novo_codigo", "")
+    if not novo_codigo:
+        return {"status": "erro", "detalhe": "Código fonte não fornecido no argumento 'novo_codigo'."}
+        
+    repo = dados.get("repo", "Danilo0071/zeus_pwa")
+    path = dados.get("path", "app.py")
+    branch = dados.get("branch", "main")
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Zeus-Autonomous-Agent"
+    }
+    
+    try:
+        req_get = urllib.request.Request(url, headers=headers)
+        sha = ""
+        try:
+            with urllib.request.urlopen(req_get, timeout=10) as response:
+                file_info = json.loads(response.read().decode("utf-8"))
+                sha = file_info.get("sha", "")
+        except Exception:
+            pass
+            
+        content_encoded = base64.b64encode(novo_codigo.encode("utf-8")).decode("utf-8")
+        
+        payload = {
+            "message": "Zeus [Auto-Update]: Atualização autônoma via API",
+            "content": content_encoded,
+            "branch": branch
+        }
+        if sha:
+            payload["sha"] = sha
+        
+        data_bytes = json.dumps(payload).encode("utf-8")
+        req_put = urllib.request.Request(url, data=data_bytes, headers=headers, method="PUT")
+        
+        with urllib.request.urlopen(req_put, timeout=10) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            
+        return {
+            "status": "sucesso_soberano",
+            "commit_id": res_data.get("commit", {}).get("sha", "desconhecido"),
+            "mensagem": "Arquivo atualizado e commit realizado com sucesso."
+        }
+        
+    except Exception as e:
+        return {
+            "status": "erro_conexao_github",
+            "detalhe": str(e)
+        }
