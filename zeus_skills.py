@@ -537,3 +537,49 @@ def consultar_preco_cripto(dados_consulta: Dict[str, Any]) -> Dict[str, Any]:
             "status": "erro_conexao",
             "detalhe": str(e)
         }
+
+
+from typing import Dict, Any
+
+def generate_app_py_code(dados: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Gera o código fonte atualizado para o app.py do Streamlit,
+    incorporando o núcleo visual 3D interativo do Zeus no painel principal.
+    """
+    codigo_app = """
+import streamlit as st
+import streamlit.components.v1 as components
+
+st.set_page_config(page_title="Zeus Sentry PWA", page_icon="⚡", layout="wide")
+
+def renderizar_avatar_zeus_3d():
+    \"\"\"Renderiza o avatar e núcleo 3D interativo do Zeus no topo do painel.\"\"\"
+    html_3d = \"\"\"
+    <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; background: linear-gradient(135deg, #0e1117 0%, #161b22 100%); border-radius: 16px; border: 1px solid #30363d; box-shadow: 0 8px 32px rgba(0,242,254,0.15);">
+        <div class="zeus-core" style="width: 120px; height: 120px; border-radius: 50%; background: radial-gradient(circle, #00f2fe 0%, #4facfe 50%, #000000 100%); box-shadow: 0 0 40px #00f2fe, inset 0 0 20px rgba(255,255,255,0.5); animation: pulse-core 3s infinite ease-in-out;"></div>
+        <h3 style="color: #00f2fe; font-family: monospace; margin-top: 20px; font-weight: 800; letter-spacing: 3px; text-shadow: 0 0 10px rgba(0,242,254,0.5);">ZEUS [CORE 3D SOBERANO]</h3>
+        <p style="color: #8b949e; font-size: 13px; font-family: monospace; margin: 0;">Sistemas Ativos: Online | Autonomia: 100%</p>
+    </div>
+    <style>
+    @keyframes pulse-core {
+        0% { transform: scale(1); box-shadow: 0 0 20px #00f2fe, inset 0 0 10px rgba(255,255,255,0.3); }
+        50% { transform: scale(1.08); box-shadow: 0 0 50px #4facfe, inset 0 0 30px rgba(255,255,255,0.8); filter: hue-rotate(15deg); }
+        100% { transform: scale(1); box-shadow: 0 0 20px #00f2fe, inset 0 0 10px rgba(255,255,255,0.3); }
+    }
+    </style>
+    \"\"\"
+    components.html(html_3d, height=230)
+
+st.title("⚡ Zeus - Painel Soberano de Autonomia")
+renderizar_avatar_zeus_3d()
+
+st.markdown("---")
+st.info("Painel atualizado com sucesso e integrado ao ecossistema autônomo.")
+"""
+    
+    return {
+        "status": "sucesso_soberano",
+        "modulo": "app.py",
+        "codigo_gerado": codigo_app,
+        "mensagem": "Código do painel com o Avatar 3D gerado com sucesso pelo motor."
+    }
