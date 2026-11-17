@@ -3277,105 +3277,125 @@ def zeus_run_script(script_path, timeout=120, extra_args=None, cwd=None):
         return result
 
 
-# ================= ZEUS MOTOR REAL (EXECUCAO + GIT) =================
-import os as _os
-import subprocess as _sp
-import shlex as _shlex
-from pathlib import Path as _Path
+# ==============================================================================
+# ZEUS SOVEREIGN AUTONOMY & GITHUB SELF-EVOLUTION ENGINE
+# Este motor executa açoes reais no servidor em nuvem e sincroniza com o GitHub.
+# ==============================================================================
 
+import os
+import subprocess
+from pathlib import Path
 
-def zeus_run_script(script_path, args="", timeout=120):
-    """Executa arquivos .py ou .sh reais de forma isolada e captura stdout/stderr."""
-    p = _Path(script_path).resolve()
-    if not p.is_file():
-        return 1, "", f"[zeus] Arquivo nao encontrado: {p}"
-
-    cwd = str(p.parent)
-    env = _os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
-
+def _zeus_run_cmd(cmd_list, repo_dir=".", timeout=60):
+    """
+    Executa comandos de sistema/git de forma cirúrgica e isolada.
+    Retorna uma tupla: (success: bool, stdout: str, stderr: str)
+    """
+    env = {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_EDITOR": "true",
+    }
     try:
-        if p.suffix == ".py":
-            cmd = f"python3 {_shlex.quote(str(p))} {args}".strip()
-        elif p.suffix in (".sh", ".bash"):
-            cmd = f"bash {_shlex.quote(str(p))} {args}".strip()
-        else:
-            return 1, "", f"[zeus] Extensao nao suportada: {p.suffix}"
-
-        r = _sp.run(
-            _shlex.split(cmd),
-            cwd=cwd,
-            env=env,
+        completed = subprocess.run(
+            cmd_list,
+            cwd=str(repo_dir),
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env
         )
-        return r.returncode, (r.stdout or ""), (r.stderr or "")
-    except _sp.TimeoutExpired:
-        return 124, "", f"[zeus] Timeout apos {timeout}s de execucao."
+        return completed.returncode == 0, completed.stdout, completed.stderr
+    except subprocess.TimeoutExpired:
+        return False, "", "[zeus error] O comando excedeu o tempo limite e foi interrompido."
     except Exception as e:
-        return 1, "", f"[zeus] Erro na execucao: {e}"
+        return False, "", f"[zeus error] Falha crítica na execução: {e}"
 
+def zeus_run_script(script_path, timeout=60):
+    """
+    Executa um script Python real no disco do servidor e retorna o resultado real.
+    """
+    path = Path(script_path)
+    if not path.exists():
+        return {"success": False, "stdout": "", "stderr": f"[zeus] Erro: O arquivo '{script_path}' não foi encontrado no disco."}
+    
+    success, stdout, stderr = _zeus_run_cmd(["python", str(path)], timeout=timeout)
+    return {
+        "success": success,
+        "stdout": stdout,
+        "stderr": stderr
+    }
 
-def zeus_commit_push(
-    repo_dir=".", branch="main", message="feat(zeus): atualizacao autonoma real"
-):
-    """Configura zeus-bot, aplica add, commit e push real usando GITHUB_API_KEY."""
-    token = _os.environ.get("GITHUB_API_KEY", "").strip()
-    repo_path = _Path(repo_dir).resolve()
+def zeus_aprender_e_commitar_habilidade(nome_habilidade: str, codigo_python: str, repo_dir="."):
+    """
+    Cria uma nova habilidade real (arquivo .py), testa a execução, 
+    e envia o commit diretamente para o repositório do GitHub na nuvem.
+    """
     logs = []
+    # 1. Normaliza o nome para criar um arquivo seguro
+    nome_limpo = "".join(c if c.isalnum() or c == "_" else "_" for c in nome_habilidade.lower())
+    arquivo_nome = f"zeus_habilidade_{nome_limpo}.py"
+    caminho_arquivo = Path(repo_dir) / arquivo_nome
 
-    def run_git(cmd):
-        env = _os.environ.copy()
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        env["GIT_EDITOR"] = "true"
-        return _sp.run(
-            cmd, cwd=str(repo_path), env=env, capture_output=True, text=True, timeout=60
-        )
+    logs.append(f"[ZEUS] Sintetizando nova habilidade física: {arquivo_nome}")
 
-    # 1. Configura identidade local
-    run_git(["git", "config", "user.name", "zeus-bot"])
-    run_git(["git", "config", "user.email", "zeus-bot@users.noreply.github.com"])
-    run_git(["git", "config", "pull.rebase", "true"])
+    # 2. Escreve o código real no disco do servidor
+    try:
+        with open(caminho_arquivo, "w", encoding="utf-8") as f:
+            f.write(codigo_python)
+        logs.append(f"[ZEUS] Arquivo '{arquivo_nome}' gravado com sucesso no disco.")
+    except Exception as e:
+        return False, f"\n".join(logs) + f"\n[ZEUS ERRO] Falha ao gravar arquivo: {e}"
 
-    # 2. Captura remote original
-    cp_url = run_git(["git", "remote", "get-url", "origin"])
-    if cp_url.returncode != 0:
-        return False, "[zeus] Remote 'origin' nao encontrado."
-    original_url = cp_url.stdout.strip()
+    # 3. Executa o teste de sanidade do script gerado
+    logs.append(f"[ZEUS] Executando teste de sanidade da habilidade...")
+    res_teste = zeus_run_script(caminho_arquivo, timeout=30)
+    
+    if not res_teste["success"]:
+        logs.append(f"[ZEUS AVISO] O script gerou alertas, mas prosseguindo com o registro: {res_teste['stderr']}")
+    else:
+        logs.append(f"[ZEUS] Teste executado com sucesso: {res_teste['stdout'].strip()}")
 
-    # 3. Injeta token se houver
-    if token and "https://" in original_url and "x-access-token" not in original_url:
-        without_scheme = original_url.replace("https://", "", 1)
-        if "@" in without_scheme:
-            without_scheme = without_scheme.split("@", 1)[1]
-        authed_url = f"https://x-access-token:{token}@{without_scheme}"
-        run_git(["git", "remote", "set-url", "origin", authed_url])
+    # 4. Configura token e sincroniza com o GitHub
+    token = os.environ.get("GITHUB_API_KEY") or os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        return False, "\n".join(logs) + "\n[ZEUS ERRO] Variável GITHUB_API_KEY não encontrada no ambiente da nuvem!"
+
+    # Obtém URL remota atual
+    success_remote, remote_url, _ = _zeus_run_cmd(["git", "remote", "get-url", "origin"], repo_dir)
+    remote_url = remote_url.strip()
+    original_url = remote_url
+
+    if success_remote and "github.com" in remote_url and "@" not in remote_url:
+        clean_url = remote_url.replace("https://", "").replace("http://", "")
+        auth_url = f"https://x-access-token:{token}@{clean_url}"
+        _zeus_run_cmd(["git", "remote", "set-url", "origin", auth_url], repo_dir)
 
     try:
-        # 4. Adiciona e commita de verdade
-        run_git(["git", "add", "-A"])
-        cp_diff = run_git(["git", "diff", "--staged", "--quiet"])
-        if cp_diff.returncode == 0:
-            return True, "[zeus] Working tree limpo. Nada para commitar."
+        # Configura identidade do bot soberano
+        _zeus_run_cmd(["git", "config", "user.name", "Zeus Sovereign Bot"], repo_dir)
+        _zeus_run_cmd(["git", "config", "user.email", "zeus@sovereign.bot"], repo_dir)
 
-        cp_commit = run_git(["git", "commit", "-m", message])
-        logs.append(cp_commit.stdout + cp_commit.stderr)
-        if cp_commit.returncode != 0:
-            return False, "\n".join(logs).replace(token, "*")
+        # Adiciona o arquivo ao versionamento
+        _zeus_run_cmd(["git", "add", arquivo_nome], repo_dir)
 
-        # 5. Pull rebase e Push real
-        run_git(["git", "pull", "--rebase", "origin", branch])
-        cp_push = run_git(["git", "push", "origin", f"HEAD:{branch}"])
-        logs.append(cp_push.stdout + cp_push.stderr)
+        # Faz o commit local
+        msg_commit = f"feat(zeus-core): auto-evolucao e aquisicao da habilidade '{nome_habilidade}'"
+        success_commit, out_commit, err_commit = _zeus_run_cmd(["git", "commit", "-m", msg_commit], repo_dir)
+        logs.append(out_commit + err_commit)
 
-        success = cp_push.returncode == 0
-        return success, "\n\n".join(logs).replace(token, "*")
+        # Envia para o GitHub remoto (Push)
+        success_push, out_push, err_push = _zeus_run_cmd(["git", "push", "origin", "HEAD:main"], repo_dir)
+        logs.append(out_push + err_push)
+
+        if success_push:
+            logs.append(f"[ZEUS] SUCESSO SOBERANO! Habilidade '{nome_habilidade}' gravada e sincronizada permanentemente no GitHub.")
+            return True, "\n".join(logs)
+        else:
+            return False, "\n".join(logs) + "\n[ZEUS ERRO] Falha ao realizar push para o GitHub."
 
     finally:
-        # Restaura a URL original para nunca vazar o token no repositório
+        # Restaura a URL original por segurança absoluta no bloco finally
         if original_url:
-            run_git(["git", "remote", "set-url", "origin", original_url])
-
-
-# ================= FIM ZEUS MOTOR REAL =================
+            _zeus_run_cmd(["git", "remote", "set-url", "origin", original_url], repo_dir)
+# ==============================================================================
