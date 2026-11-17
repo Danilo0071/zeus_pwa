@@ -3295,254 +3295,105 @@ def _zeus_git(cmd_list, repo_dir, timeout=60):
     return completed
 
 
-def zeus_commit_push(repo_dir, branch, message):
-    """
-    Configura identidade zeus-bot, faz pull --rebase,
-    add + commit + push injetando GITHUB_API_KEY com segurança.
-    Uso: zeus_commit_push(".", "main", "update: via zeus panel")
-    """
-    result = {
-        "success": False,
-        "stdout": "",
-        "stderr": "",
-        "pushed": False,
-        "commit_hash": None,
-    }
+# ================= ZEUS MOTOR REAL (EXECUCAO + GIT) =================
+import os as _os
+import subprocess as _sp
+import shlex as _shlex
+from pathlib import Path as _Path
 
-    logs_out = []
-    logs_err = []
 
-    def log_out(t):
-        if t:
-            logs_out.append(t)
+def zeus_run_script(script_path, args="", timeout=120):
+    """Executa arquivos .py ou .sh reais de forma isolada e captura stdout/stderr."""
+    p = _Path(script_path).resolve()
+    if not p.is_file():
+        return 1, "", f"[zeus] Arquivo nao encontrado: {p}"
 
-    def log_err(t):
-        if t:
-            logs_err.append(t)
-
-    def mask_token(text, token):
-        if text and token and token in text:
-            return text.replace(token, "***REDACTED***")
-        return text
-
-    repo_path = Path(repo_dir)
-    token = os.environ.get("GITHUB_API_KEY", "").strip()
-    original_url = None
+    cwd = str(p.parent)
+    env = _os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
 
     try:
-        if not repo_path.is_dir():
-            result["stderr"] = f"[zeus] repo_dir não existe: {repo_dir}"
-            return result
+        if p.suffix == ".py":
+            cmd = f"python3 {_shlex.quote(str(p))} {args}".strip()
+        elif p.suffix in (".sh", ".bash"):
+            cmd = f"bash {_shlex.quote(str(p))} {args}".strip()
+        else:
+            return 1, "", f"[zeus] Extensao nao suportada: {p.suffix}"
 
-        if not (repo_path / ".git").exists():
-            result["stderr"] = f"[zeus] Não é um repositório git: {repo_dir}"
-            return result
-
-        if not branch or not str(branch).strip():
-            result["stderr"] = "[zeus] branch inválida."
-            return result
-        branch = str(branch).strip()
-
-        if not message or not str(message).strip():
-            message = "update: via zeus panel"
-        message = str(message).strip()
-
-        # 1) Identidade zeus-bot (local, não global)
-        for cmd in [
-            ["git", "config", "user.name", "zeus-bot"],
-            ["git", "config", "user.email", "zeus-bot@users.noreply.github.com"],
-        ]:
-            cp = _zeus_git(cmd, repo_path)
-            log_out(cp.stdout)
-            log_err(cp.stderr)
-            if cp.returncode != 0:
-                result["stdout"] = "\n".join(logs_out)
-                result[
-                    "stderr"
-                ] = f"[zeus] Falha ao configurar identidade git:\n" + "\n".join(
-                    logs_err
-                )
-                return result
-
-        # 2) Garante branch local
-        cp = _zeus_git(["git", "rev-parse", "--abbrev-ref", "HEAD"], repo_path)
-        current = (cp.stdout or "").strip()
-        if current != branch:
-            # tenta checkout, cria tracking se necessário
-            cp_chk = _zeus_git(["git", "checkout", branch], repo_path)
-            log_out(cp_chk.stdout)
-            log_err(cp_chk.stderr)
-            if cp_chk.returncode != 0:
-                cp_new = _zeus_git(
-                    ["git", "checkout", "-b", branch, f"origin/{branch}"], repo_path
-                )
-                log_out(cp_new.stdout)
-                log_err(cp_new.stderr)
-                if cp_new.returncode != 0:
-                    # segue mesmo assim; pull/push vão acusar erro real
-                    pass
-
-        # 3) Captura remote original
-        cp = _zeus_git(["git", "remote", "get-url", "origin"], repo_path)
-        if cp.returncode != 0 or not (cp.stdout or "").strip():
-            result["stdout"] = "\n".join(logs_out)
-            result["stderr"] = (
-                "[zeus] Remote 'origin' não encontrado.\n"
-                + "\n".join(logs_err)
-                + "\n"
-                + (cp.stderr or "")
-            )
-            return result
-
-        original_url = (cp.stdout or "").strip()
-
-        # 4) pull --rebase (não trava, não gera merge commit)
-        cp = _zeus_git(
-            ["git", "pull", "--rebase", "origin", branch], repo_path, timeout=90
+        r = _sp.run(
+            _shlex.split(cmd),
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
-        log_out(cp.stdout)
-        # pull pode falhar se remote vazio; não aborta, segue para push
-        if cp.returncode != 0:
-            log_err(cp.stderr)
-            # se houver conflito de rebase, aborta para não deixar repo travado
-            _zeus_git(["git", "rebase", "--abort"], repo_path)
-        else:
-            if cp.stderr:
-                log_err(cp.stderr)
-
-        # 5) add -A
-        cp = _zeus_git(["git", "add", "-A"], repo_path)
-        log_out(cp.stdout)
-        log_err(cp.stderr)
-        if cp.returncode != 0:
-            result["stdout"] = "\n".join(logs_out)
-            result["stderr"] = mask_token("\n".join(logs_err), token)
-            return result
-
-        # 6) Verifica se há algo para commitar
-        cp = _zeus_git(["git", "diff", "--cached", "--quiet"], repo_path)
-        if cp.returncode == 0:
-            # nada staged -> tenta pegar hash atual e retorna sucesso sem push
-            cp_rev = _zeus_git(["git", "rev-parse", "HEAD"], repo_path)
-            if cp_rev.returncode == 0:
-                result["commit_hash"] = (cp_rev.stdout or "").strip()
-            result["success"] = True
-            result["pushed"] = False
-            result["stdout"] = (
-                "\n".join(logs_out) + "\n[zeus] Nada para commitar. Working tree limpo."
-            )
-            result["stderr"] = mask_token("\n".join(logs_err), token)
-            return result
-
-        # 7) commit
-        cp = _zeus_git(["git", "commit", "-m", message], repo_path)
-        log_out(cp.stdout)
-        log_err(cp.stderr)
-        if cp.returncode != 0:
-            result["stdout"] = "\n".join(logs_out)
-            result["stderr"] = mask_token("\n".join(logs_err), token)
-            return result
-
-        cp_rev = _zeus_git(["git", "rev-parse", "HEAD"], repo_path)
-        if cp_rev.returncode == 0:
-            result["commit_hash"] = (cp_rev.stdout or "").strip()
-
-        # 8) Injeta GITHUB_API_KEY na URL remota com segurança
-        if not token:
-            result["stdout"] = "\n".join(logs_out)
-            result[
-                "stderr"
-            ] = "[zeus] GITHUB_API_KEY não encontrada no ambiente. Commit criado localmente, push não executado."
-            result["success"] = False
-            return result
-
-        authed_url = original_url
-        if original_url.startswith("https://"):
-            # remove credencial antiga se existir (https://old@github.com/...)
-            without_scheme = original_url[len("https://") :]
-            if "@" in without_scheme:
-                without_scheme = without_scheme.split("@", 1)[1]
-            authed_url = f"https://{token}@{without_scheme}"
-        else:
-            result["stdout"] = "\n".join(logs_out)
-            result[
-                "stderr"
-            ] = f"[zeus] Remote origin não é HTTPS, push com token não suportado: {original_url}"
-            return result
-
-        # troca temporariamente para push
-        cp = _zeus_git(["git", "remote", "set-url", "origin", authed_url], repo_path)
-        if cp.returncode != 0:
-            result["stdout"] = "\n".join(logs_out)
-            result["stderr"] = "[zeus] Falha ao configurar remote temporário."
-            return result
-
-        try:
-            cp = _zeus_git(
-                ["git", "push", "origin", f"HEAD:{branch}"], repo_path, timeout=90
-            )
-            log_out(cp.stdout)
-            log_err(cp.stderr)
-            if cp.returncode != 0:
-                result["stdout"] = "\n".join(logs_out)
-                result["stderr"] = mask_token("\n".join(logs_err), token)
-                # tenta pull --rebase + push uma vez (caso rejeição por remote avançado)
-                cp2 = _zeus_git(
-                    ["git", "pull", "--rebase", "origin", branch], repo_path, timeout=90
-                )
-                log_out(cp2.stdout)
-                log_err(cp2.stderr)
-                cp3 = _zeus_git(
-                    ["git", "push", "origin", f"HEAD:{branch}"], repo_path, timeout=90
-                )
-                log_out(cp3.stdout)
-                log_err(cp3.stderr)
-                if cp3.returncode != 0:
-                    result["stdout"] = mask_token("\n".join(logs_out), token)
-                    result["stderr"] = mask_token("\n".join(logs_err), token)
-                    result["success"] = False
-                    return result
-
-            result["success"] = True
-            result["pushed"] = True
-            result["stdout"] = mask_token("\n".join(logs_out), token)
-            result["stderr"] = mask_token("\n".join(logs_err), token)
-            return result
-
-        finally:
-            # 9) Restaura URL original sem token (nunca deixa token no .git/config)
-            try:
-                if original_url:
-                    _zeus_git(
-                        ["git", "remote", "set-url", "origin", original_url], repo_path
-                    )
-            except Exception:
-                pass
-
-    except subprocess.TimeoutExpired:
-        result["stdout"] = mask_token("\n".join(logs_out), token)
-        result[
-            "stderr"
-        ] = "[zeus] Timeout na operação git. Painel não travado. Tente novamente."
-        return result
-
+        return r.returncode, (r.stdout or ""), (r.stderr or "")
+    except _sp.TimeoutExpired:
+        return 124, "", f"[zeus] Timeout apos {timeout}s de execucao."
     except Exception as e:
-        result["stdout"] = mask_token("\n".join(logs_out), token)
-        err = mask_token("\n".join(logs_err), token)
-        result["stderr"] = f"{err}\n[zeus] Erro: {e}".strip()
-        return result
+        return 1, "", f"[zeus] Erro na execucao: {e}"
+
+
+def zeus_commit_push(
+    repo_dir=".", branch="main", message="feat(zeus): atualizacao autonoma real"
+):
+    """Configura zeus-bot, aplica add, commit e push real usando GITHUB_API_KEY."""
+    token = _os.environ.get("GITHUB_API_KEY", "").strip()
+    repo_path = _Path(repo_dir).resolve()
+    logs = []
+
+    def run_git(cmd):
+        env = _os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_EDITOR"] = "true"
+        return _sp.run(
+            cmd, cwd=str(repo_path), env=env, capture_output=True, text=True, timeout=60
+        )
+
+    # 1. Configura identidade local
+    run_git(["git", "config", "user.name", "zeus-bot"])
+    run_git(["git", "config", "user.email", "zeus-bot@users.noreply.github.com"])
+    run_git(["git", "config", "pull.rebase", "true"])
+
+    # 2. Captura remote original
+    cp_url = run_git(["git", "remote", "get-url", "origin"])
+    if cp_url.returncode != 0:
+        return False, "[zeus] Remote 'origin' nao encontrado."
+    original_url = cp_url.stdout.strip()
+
+    # 3. Injeta token se houver
+    if token and "https://" in original_url and "x-access-token" not in original_url:
+        without_scheme = original_url.replace("https://", "", 1)
+        if "@" in without_scheme:
+            without_scheme = without_scheme.split("@", 1)[1]
+        authed_url = f"https://x-access-token:{token}@{without_scheme}"
+        run_git(["git", "remote", "set-url", "origin", authed_url])
+
+    try:
+        # 4. Adiciona e commita de verdade
+        run_git(["git", "add", "-A"])
+        cp_diff = run_git(["git", "diff", "--staged", "--quiet"])
+        if cp_diff.returncode == 0:
+            return True, "[zeus] Working tree limpo. Nada para commitar."
+
+        cp_commit = run_git(["git", "commit", "-m", message])
+        logs.append(cp_commit.stdout + cp_commit.stderr)
+        if cp_commit.returncode != 0:
+            return False, "\n".join(logs).replace(token, "*")
+
+        # 5. Pull rebase e Push real
+        run_git(["git", "pull", "--rebase", "origin", branch])
+        cp_push = run_git(["git", "push", "origin", f"HEAD:{branch}"])
+        logs.append(cp_push.stdout + cp_push.stderr)
+
+        success = cp_push.returncode == 0
+        return success, "\n\n".join(logs).replace(token, "*")
 
     finally:
-        # garantia extra: se algo falhou antes do restore, restaura aqui
-        try:
-            if original_url:
-                cp_check = _zeus_git(["git", "remote", "get-url", "origin"], repo_path)
-                cur = (
-                    (cp_check.stdout or "").strip() if cp_check.returncode == 0 else ""
-                )
-                if cur and token and token in cur:
-                    _zeus_git(
-                        ["git", "remote", "set-url", "origin", original_url], repo_path
-                    )
-        except Exception:
-            pass
+        # Restaura a URL original para nunca vazar o token no repositório
+        if original_url:
+            run_git(["git", "remote", "set-url", "origin", original_url])
+
+
+# ================= FIM ZEUS MOTOR REAL =================
