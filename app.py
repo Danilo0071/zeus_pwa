@@ -112,7 +112,7 @@ def get_recent_context(session_id, limit=6):
         return []
 
 def _limpar_chave(v: str) -> str:
-    v = re.sub(r"\s+", "", v).strip("\'"'")
+    v = re.sub(r"\s+", "", v).strip("'\"")
     return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
 
 def _secret(key: str, default: str = "") -> str:
