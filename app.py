@@ -3206,154 +3206,52 @@ except Exception as _zf_err:
 # Secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 #          SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM
 # ============================================================
+# ============================================================
+# ROTEADOR DE COMANDOS REAIS DO ZEUS (Sem Teatro, 100% Autônomo)
+# ============================================================
 def zf_enviar_telegram(texto: str) -> str:
-    token = _secret("TELEGRAM_BOT_TOKEN")
-    chat_id = _secret("TELEGRAM_CHAT_ID")
+    token = st.secrets.get("TELEGRAM_BOT_TOKEN") or st.secrets.get("telegram", {}).get("token", "")
+    chat_id = st.secrets.get("TELEGRAM_CHAT_ID") or st.secrets.get("telegram", {}).get("chat_id", "")
+    
     if not token or not chat_id:
-        return "Telegram não configurado. Coloque TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID nos Secrets."
+        return "❌ ERRO CRÍTICO: Token do Telegram ou Chat ID não encontrados no secrets.toml."
+    
     texto = (texto or "").strip()
     if not texto:
-        return "Mensagem vazia. Diga o que devo enviar no Telegram."
+        texto = "Teste de telemetria e protocolo de bunker acionado por Danilo."
+        
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": f"🚨 *[ZEUS - PROTOCOLO DE BUNKER]* 🚨\n\nCriador: *Danilo*\n\n{texto}",
+        "parse_mode": "Markdown"
+    }
+    
     try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": texto[:4000]},
-            timeout=30,
-        )
+        r = requests.post(url, json=payload, timeout=30)
         if r.status_code == 200 and r.json().get("ok"):
-            return f"✅ Mensagem enviada no Telegram."
-        return f"❌ Falha no Telegram ({r.status_code}): {r.text[:180]}"
+            return "✅ SUCESSO REAL: Mensagem disparada diretamente nos servidores do Telegram para o Danilo!"
+        else:
+            return f"❌ FALHA NA API DO TELEGRAM (Status {r.status_code}): {r.text}"
     except Exception as e:
-        return f"❌ Erro Telegram: {str(e)[:150]}"
-
-
-def zf_enviar_email(para: str, assunto: str, corpo: str) -> str:
-    import smtplib
-    from email.mime.text import MIMEText
-    host = _secret("SMTP_HOST") or "smtp.gmail.com"
-    port = int(_secret("SMTP_PORT") or "587")
-    user = _secret("SMTP_USER")
-    password = _secret("SMTP_PASS")
-    remetente = _secret("EMAIL_FROM") or user
-    if not user or not password:
-        return "E-mail não configurado. Coloque SMTP_USER, SMTP_PASS (e opcionalmente SMTP_HOST, SMTP_PORT, EMAIL_FROM) nos Secrets."
-    para = (para or "").strip()
-    if not para or "@" not in para:
-        return "Destinatário inválido. Use: envia email para alguém@dominio.com assunto ... corpo ..."
-    try:
-        msg = MIMEText(corpo or "", "plain", "utf-8")
-        msg["Subject"] = assunto or "Mensagem do Zeus"
-        msg["From"] = remetente
-        msg["To"] = para
-        with smtplib.SMTP(host, port, timeout=30) as s:
-            s.starttls()
-            s.login(user, password)
-            s.sendmail(remetente, [para], msg.as_string())
-        return f"✅ E-mail enviado para {para}."
-    except Exception as e:
-        return f"❌ Erro ao enviar e-mail: {str(e)[:180]}"
+        return f"❌ EXCEÇÃO DE REDE NO TELEGRAM: {str(e)}"
 
 
 def _rt_comando_telegram(texto):
-    # Exemplos: "manda no telegram oi danilo", "telegram: reunião às 15h", "envia no telegram ..."
     t = re.sub(
         r"(?i)\b(zeus[,:]?\s*)?(manda|envie|enviar|envia|toque|mande)?\s*(no\s+|pelo\s+|via\s+)?(telegram|tg)\s*[:\-]?\s*",
         "",
         texto,
     ).strip(" .,!?:-")
     if not t:
-        return "O que devo enviar no Telegram? Ex: manda no telegram Reunião confirmada às 15h"
+        t = "Alerta de telemetria e bunker disparado pelo criador Danilo."
     return zf_enviar_telegram(t)
 
 
-def _rt_comando_email(texto):
-    # Formato preferido: envia email para x@y.com assunto ASSUNTO corpo CORPO
-    low = texto.lower()
-    para = assunto = corpo = ""
-    m_para = re.search(r"(?i)(?:para|to)\s+([^\s]+@[^\s]+)", texto)
-    if m_para:
-        para = m_para.group(1).strip(" .,;:")
-    m_ass = re.search(r"(?i)assunto\s+(.+?)(?:\s+corpo\s+|$)", texto)
-    if m_ass:
-        assunto = m_ass.group(1).strip(" .,;:")
-    m_corpo = re.search(r"(?i)corpo\s+(.+)$", texto)
-    if m_corpo:
-        corpo = m_corpo.group(1).strip()
-    if not corpo and not m_ass:
-        # fallback: tudo depois de "email" como corpo, se tiver email
-        resto = re.sub(r"(?i).*?\b(e-?mail|email)\b\s*(para\s+[^\s]+@[^\s]+\s*)?", "", texto).strip()
-        if para and resto:
-            corpo = resto
-        elif not para:
-            return (
-                "Formato: envia email para alguem@dominio.com assunto Título corpo Texto da mensagem"
-            )
-    if not corpo:
-        corpo = assunto or "Mensagem enviada pelo Zeus."
-        if not assunto:
-            assunto = "Mensagem do Zeus"
-    if not assunto:
-        assunto = "Mensagem do Zeus"
-    return zf_enviar_email(para, assunto, corpo)
-
-
-_processar_prompt_original = processar_prompt
-
-
-def _rt_extrair_pedido(texto, remover):
-    t = texto
-    for termo in remover:
-        t = re.sub(termo, " ", t, flags=re.I)
-    return re.sub(r"\s+", " ", t).strip(" .,!?:-")
-
-
-def _rt_comando_criar_habilidade(texto):
-    pedido = _rt_extrair_pedido(texto, [r"\bzeus\b", r"\bcria(r)?\b", r"\bfaça\b", r"\bfaca\b",
-                                        r"\buma?\b", r"\bhabilidade\b", r"\bfun[cç][aã]o\b", r"\bscript\b", r"\bpor favor\b"])
-    if not pedido:
-        return "Me diga o que a habilidade deve fazer. Ex: 'Zeus, cria uma habilidade que calcula o IMC'."
-    fn = globals().get("zf_aprender_ensemble")
-    if not fn:
-        return "❌ Módulo de aprendizado (zf_aprender_ensemble) não está carregado neste app."
-    resultado = fn(pedido, "python")
-    st.session_state["rt_ultimo_codigo_gerado"] = {"pedido": pedido}
-    return "⚡ Comando recebido: criar habilidade.\n\n" + resultado
-
-
-def _rt_comando_criar_imagem(texto):
-    pedido = _rt_extrair_pedido(texto, [r"\bzeus\b", r"\bcria(r)?\b", r"\bgera(r)?\b", r"\bum(a)?\b",
-                                        r"\bimagem\b", r"\bavatar\b", r"\bfoto\b", r"\bilustra[cç][aã]o\b", r"\bpor favor\b"])
-    if not pedido:
-        return "Descreva a imagem que devo gerar. Ex: 'Zeus, cria uma imagem de um dragão de cristal'."
-    fn = globals().get("zf_gerar_imagem_aprimorada") or globals().get("make_image")
-    if not fn:
-        return "❌ Módulo de geração de imagem não está carregado neste app."
-    log_midia = []
-    img = fn(pedido, log_midia)
-    if img:
-        st.session_state["rt_imagem_gerada"] = img
-        return f'🎨 Imagem gerada a partir de: "{pedido}". Ela aparece logo abaixo do painel principal.'
-    return "❌ Não consegui gerar a imagem agora. Log: " + " | ".join(log_midia[-3:])
-
-
-def _rt_comando_publicar_github(texto):
-    pendente = st.session_state.get("rt_ultimo_codigo_gerado")
-    if not pendente:
-        return "Não há nenhuma habilidade gerada recentemente nesta sessão para publicar."
-    return "✅ A última habilidade já foi salva automaticamente no GitHub durante a criação (veja o link na resposta anterior)."
-
-
-_RT_REGRAS = [
-    (r"\b(cria|criar|faça|faca)\b.*\b(habilidade|fun[cç][aã]o|script)\b", _rt_comando_criar_habilidade),
-    (r"\b(cria|criar|gera|gerar)\b.*\b(imagem|avatar|foto|ilustra[cç][aã]o)\b", _rt_comando_criar_imagem),
-    (r"\b(salva|publica|comita)\b.*\bgithub\b", _rt_comando_publicar_github),
-    (r"\b(telegram|tg)\b", _rt_comando_telegram),
-    (r"\b(e-?mail|email)\b", _rt_comando_email),
-]
-
-
 def interceptar_comando_autonomo(texto):
-    """Retorna (tratado: bool, resposta: str)."""
+    low = texto.lower()
+    if "telegram" in low or "tg" in low or "bunker" in low or "telemetria" in low:
+        return True, _rt_comando_telegram(texto)
     for padrao, fn in _RT_REGRAS:
         if re.search(padrao, texto, re.I):
             return True, fn(texto)
@@ -3361,8 +3259,6 @@ def interceptar_comando_autonomo(texto):
 
 
 def processar_prompt(prompt):
-    """Substitui a versão original: primeiro verifica se é um comando de
-    ação reconhecido; se não for, cai no comportamento normal de chat."""
     tratado, resposta = interceptar_comando_autonomo(prompt)
     if tratado:
         sid = st.session_state.session_id
@@ -3370,12 +3266,9 @@ def processar_prompt(prompt):
         add_message(sid, "user", prompt)
         st.session_state.messages.append({"role": "assistant", "content": resposta})
         add_message(sid, "assistant", resposta)
-        st.session_state.last_info = "⚡ Comando autônomo executado"
+        st.session_state.last_info = "⚡ Comando autônomo executado com sucesso"
         return resposta
-    return _processar_prompt_original(prompt)
-
-
-try:
+    return _processar_prompt_original(prompt)\n\ntry:
     _rt_img_pendente = st.session_state.get("rt_imagem_gerada")
     if _rt_img_pendente:
         st.markdown("### 🎨 Última imagem gerada por comando")
