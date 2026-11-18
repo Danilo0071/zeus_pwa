@@ -3429,28 +3429,28 @@ except Exception as _rt_err:
     st.caption("⚠️ Roteador de comandos desativado por erro: " + str(_rt_err)[:200])
 
 # ============================================================
-# ZEUS - MÓDULO DE ENVIO DE E-MAIL (GMAIL) INTEGRADO AO CHAT
+# ZEUS - MÓDULO DEFINITIVO DE ENVIO DE E-MAIL (GMAIL / SECRETS)
 # ============================================================
 import smtplib
 from email.mime.text import MIMEText
 
-def zf_enviar_email_gmail(para: str, assunto: str, corpo: str) -> str:
+def zf_enviar_email_definitivo(assunto: str, corpo: str) -> str:
+    # O e-mail de destino configurado por você
+    para = "daniloemanueldasilva078872@gmail.com"
+    
+    # Busca as credenciais de envio salvas nos Secrets do seu repositório no GitHub/Streamlit
     host = _secret("SMTP_HOST") or "smtp.gmail.com"
-    port = int(_secret("SMTP_PORT") or "587")
+    port = int(_secret("SMTP_PORT") or 587)
     user = _secret("SMTP_USER") or _secret("GMAIL_USER")
     password = _secret("SMTP_PASS") or _secret("GMAIL_APP_PASSWORD")
     remetente = _secret("EMAIL_FROM") or user
 
     if not user or not password:
-        return "❌ E-mail não configurado. Adicione SMTP_USER e SMTP_PASS (ou GMAIL_USER e GMAIL_APP_PASSWORD) nos seus Secrets."
-    
-    para = (para or "").strip()
-    if not para or "@" not in para:
-        return "❌ Destinatário inválido. Use o formato: envia e-mail para seu_email@dominio.com assunto [Assunto] corpo [Mensagem]"
+        return "❌ As credenciais do Gmail (SMTP_USER e SMTP_PASS) não foram encontradas nos Secrets do projeto no GitHub. Configure-as para liberar o envio."
 
     try:
         msg = MIMEText(corpo or "", "plain", "utf-8")
-        msg["Subject"] = assunto or "Mensagem do Zeus"
+        msg["Subject"] = assunto or "Notificação do Zeus"
         msg["From"] = remetente
         msg["To"] = para
 
@@ -3458,48 +3458,37 @@ def zf_enviar_email_gmail(para: str, assunto: str, corpo: str) -> str:
             s.starttls()
             s.login(user, password)
             s.sendmail(remetente, [para], msg.as_string())
-        return f"✅ E-mail enviado com sucesso para {para} através do Gmail!"
+        return f"✅ E-mail enviado com sucesso para o seu endereço ({para})!"
     except Exception as e:
-        return f"❌ Erro ao disparar o e-mail pelo Gmail: {str(e)[:180]}"
+        return f"❌ Erro ao conectar no servidor de e-mail: {str(e)[:160]}"
 
-def _rt_comando_email_direto(texto):
-    low = texto.lower()
-    para = ""
+def _rt_comando_email_automatico(texto):
     assunto = "Mensagem do Zeus"
     corpo = ""
 
-    # Extrai o e-mail do destinatário
-    m_para = re.search(r"(?i)(?:para|to)\s+([^\s]+@[^\s]+)", texto)
-    if m_para:
-        para = m_para.group(1).strip(" .,;:")
-
-    # Extrai o assunto se houver
+    # Extrai assunto se especificado
     m_ass = re.search(r"(?i)assunto\s+(.+?)(?:\s+corpo\s+|$)", texto)
     if m_ass:
         assunto = m_ass.group(1).strip(" .,;:")
 
-    # Extrai o corpo se houver
+    # Extrai corpo se especificado
     m_corpo = re.search(r"(?i)corpo\s+(.+)$", texto)
     if m_corpo:
         corpo = m_corpo.group(1).strip()
 
-    # Se não achou estruturado, pega o texto restante
+    # Se não usou as palavras-chave, pega o texto todo após a palavra e-mail como corpo
     if not corpo:
-        resto = re.sub(r"(?i).?\b(e-?mail|email)\b\s(para\s+[^\s]+@[^\s]+\s*)?", "", texto).strip()
-        if para and resto:
+        resto = re.sub(r"(?i).*?\b(e-?mail|email)\b", "", texto).strip()
+        if resto:
             corpo = resto
-        elif not para:
-            return "📌 Formato correto: 'envia e-mail para email@exemplo.com assunto Olá corpo Esta é a mensagem'."
+        else:
+            corpo = "Relatório de status enviado pelo Zeus."
 
-    if not corpo:
-        corpo = "Mensagem enviada pelo Zeus."
+    return zf_enviar_email_definitivo(assunto, corpo)
 
-    return zf_enviar_email_gmail(para, assunto, corpo)
-
-# Adiciona a regra de e-mail no roteador de comandos autônomos
+# Injeção automática da regra no roteador de comandos do Zeus
 try:
-    # Verifica se a lista de regras já existe para injetar a regra de e-mail
     if '_RT_REGRAS' in globals():
-        _RT_REGRAS.append((r"\b(e-?mail|email)\b", _rt_comando_email_direto))
+        _RT_REGRAS.append((r"\b(e-?mail|email)\b", _rt_comando_email_automatico))
 except Exception:
     pass
