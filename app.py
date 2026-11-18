@@ -125,7 +125,9 @@ CHAVES_PADRAO = {
 }
 
 def _limpar_chave(v: str) -> str:
-    v = re.sub(r"\s+", "", v).strip('"'')
+    if not v:
+        return ""
+    v = re.sub(r"\s+", "", str(v)).strip('"\'\n\r')
     return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
 
 def _secret(key: str, default: str = "") -> str:
