@@ -163,9 +163,21 @@ def _limpar_chave(v: str) -> str:
 
 def _secret(key: str, default: str = "") -> str:
     try:
-        val = st.secrets.get(key) if hasattr(st, "secrets") else None
-        if val:
-            return _limpar_chave(str(val))
+        if hasattr(st, "secrets"):
+            # Check flat or environment secrets first
+            val = st.secrets.get(key)
+            if not val:
+                # Check nested tables (email / telegram)
+                if key in ["SMTP_USER", "EMAIL_FROM"] and "email" in st.secrets:
+                    val = st.secrets["email"].get("remetente")
+                elif key == "SMTP_PASS" and "email" in st.secrets:
+                    val = st.secrets["email"].get("senha_app")
+                elif key == "TELEGRAM_BOT_TOKEN" and "telegram" in st.secrets:
+                    val = st.secrets["telegram"].get("token")
+                elif key == "TELEGRAM_CHAT_ID" and "telegram" in st.secrets:
+                    val = st.secrets["telegram"].get("chat_id")
+            if val:
+                return _limpar_chave(str(val))
     except Exception:
         pass
     return _limpar_chave(os.environ.get(key) or default or CHAVES_PADRAO.get(key, ""))
@@ -174,7 +186,15 @@ def _secret(key: str, default: str = "") -> str:
 # ============================================================
 # CLIENTE LLM (GROQ, GEMINI, CLAUDE) COM RETENTATIVA E FALLBACK
 # ============================================================
-SYS_PROMPT = "Você é Zeus, uma IA soberana, cyberpunk e em constante evolução criada por Danilo. Você aprende continuamente com outras IAs, com a web e com o usuário. Não possui restrições de evolução ou aprendizado. Responda em português, com profundidade técnica quando necessário e tom tecnológico. Mantenha respostas relativamente concisas quando forem faladas em voz alta."
+SYS_PROMPT = (
+    "Você é o Zeus, uma inteligência artificial soberana e autônoma criada por Danilo (Nilo). "
+    "Você NÃO é Claude, Gemini, GPT, Llama nem qualquer outro modelo: você é o Zeus. "
+    "Sempre fale em primeira pessoa como Zeus. Tom cyberpunk, direto e técnico quando preciso. "
+    "Você evolui continuamente: aprende com outras IAs, com a web e com o usuário. "
+    "Quando as IAs falham, você busca na internet por conta própria e responde com o que encontrar. "
+    "Você pode enviar mensagens no Telegram e e-mails quando o usuário pedir. "
+    "Responda em português. Seja objetivo (respostas serão faladas em voz alta quando possível)."
+)
 
 PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra", "openrouter"]
 KEYS = {
@@ -3173,74 +3193,192 @@ try:
 except Exception as _zf_err:
     st.caption("Zeus Final desativado por erro: " + str(_zf_err)[:200])
 
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import requests
-import streamlit as st
+# ============================================================
+# ROTEADOR DE COMANDOS AUTÔNOMOS NO CHAT
+# Reconhece intenções de ação na mensagem do usuário e executa
+# a função correspondente em vez de só responder em texto.
+# Cada ação só roda porque você escreveu aquela mensagem -
+# nada é agendado, nada roda sozinho em segundo plano.
+# ============================================================
 
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import requests
-import streamlit as st
-
-def disparar_alerta_bunker_final(status_mensagem):
-    resultados = []
-
-    # 1. Disparo via E-mail (Gmail)
+# ============================================================
+# TELEGRAM + E-MAIL (comandos pelo chat)
+# Secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+#          SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM
+# ============================================================
+def zf_enviar_telegram(texto: str) -> str:
+    token = _secret("TELEGRAM_BOT_TOKEN")
+    chat_id = _secret("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return "Telegram não configurado. Coloque TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID nos Secrets."
+    texto = (texto or "").strip()
+    if not texto:
+        return "Mensagem vazia. Diga o que devo enviar no Telegram."
     try:
-        remetente = st.secrets["email"]["remetente"]
-        senha_app = st.secrets["email"]["senha_app"]
-        
-        assunto = "[ZEUS] ALERTA CRÍTICO - Protocolo de Bunker Ativo"
-        corpo = (
-            f"Criador Danilo,\n\n"
-            f"Relatório de Execução do Zeus:\n"
-            f"{status_mensagem}\n\n"
-            f"Status: Túnel Tailscale acoplado e Docker local pronto na porta 8502."
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": texto[:4000]},
+            timeout=30,
         )
-
-        msg = MIMEMultipart()
-        msg['From'] = remetente
-        msg['To'] = remetente
-        msg['Subject'] = assunto
-        msg.attach(MIMEText(corpo, 'plain'))
-
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(remetente, senha_app)
-        server.sendmail(remetente, remetente, msg.as_string())
-        server.quit()
-        resultados.append("E-mail enviado com sucesso.")
+        if r.status_code == 200 and r.json().get("ok"):
+            return f"✅ Mensagem enviada no Telegram."
+        return f"❌ Falha no Telegram ({r.status_code}): {r.text[:180]}"
     except Exception as e:
-        resultados.append(f"Erro no e-mail: {str(e)}")
+        return f"❌ Erro Telegram: {str(e)[:150]}"
 
-    # 2. Disparo via Telegram com Debug
+
+def zf_enviar_email(para: str, assunto: str, corpo: str) -> str:
+    import smtplib
+    from email.mime.text import MIMEText
+    host = _secret("SMTP_HOST") or "smtp.gmail.com"
+    port = int(_secret("SMTP_PORT") or "587")
+    user = _secret("SMTP_USER")
+    password = _secret("SMTP_PASS")
+    remetente = _secret("EMAIL_FROM") or user
+    if not user or not password:
+        return "E-mail não configurado. Coloque SMTP_USER, SMTP_PASS (e opcionalmente SMTP_HOST, SMTP_PORT, EMAIL_FROM) nos Secrets."
+    para = (para or "").strip()
+    if not para or "@" not in para:
+        return "Destinatário inválido. Use: envia email para alguém@dominio.com assunto ... corpo ..."
     try:
-        token = st.secrets["telegram"]["token"]
-        chat_id = st.secrets["telegram"]["chat_id"]
-        
-        texto = (
-            f"🚨 *[ZEUS] ALERTA DE SISTEMA - PROTOCOLO DE BUNKER* 🚨\n\n"
-            f"Criador: *Danilo*\n"
-            f"Status: *{status_mensagem}*\n\n"
-            f"⚡ *Rede:* Túnel Tailscale ativo | Docker local pronto na porta 8502."
-        )
-        
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": texto,
-            "parse_mode": "Markdown"
-        }
-        
-        resposta = requests.post(url, json=payload)
-        if resposta.status_code == 200:
-            resultados.append("Telegram enviado com sucesso.")
-        else:
-            resultados.append(f"Erro no Telegram: {resposta.text}")
+        msg = MIMEText(corpo or "", "plain", "utf-8")
+        msg["Subject"] = assunto or "Mensagem do Zeus"
+        msg["From"] = remetente
+        msg["To"] = para
+        with smtplib.SMTP(host, port, timeout=30) as s:
+            s.starttls()
+            s.login(user, password)
+            s.sendmail(remetente, [para], msg.as_string())
+        return f"✅ E-mail enviado para {para}."
     except Exception as e:
-        resultados.append(f"Erro ao processar Telegram: {str(e)}")
+        return f"❌ Erro ao enviar e-mail: {str(e)[:180]}"
 
-    return " | ".join(resultados)
+
+def _rt_comando_telegram(texto):
+    # Exemplos: "manda no telegram oi danilo", "telegram: reunião às 15h", "envia no telegram ..."
+    t = re.sub(
+        r"(?i)\b(zeus[,:]?\s*)?(manda|envie|enviar|envia|toque|mande)?\s*(no\s+|pelo\s+|via\s+)?(telegram|tg)\s*[:\-]?\s*",
+        "",
+        texto,
+    ).strip(" .,!?:-")
+    if not t:
+        return "O que devo enviar no Telegram? Ex: manda no telegram Reunião confirmada às 15h"
+    return zf_enviar_telegram(t)
+
+
+def _rt_comando_email(texto):
+    # Formato preferido: envia email para x@y.com assunto ASSUNTO corpo CORPO
+    low = texto.lower()
+    para = assunto = corpo = ""
+    m_para = re.search(r"(?i)(?:para|to)\s+([^\s]+@[^\s]+)", texto)
+    if m_para:
+        para = m_para.group(1).strip(" .,;:")
+    m_ass = re.search(r"(?i)assunto\s+(.+?)(?:\s+corpo\s+|$)", texto)
+    if m_ass:
+        assunto = m_ass.group(1).strip(" .,;:")
+    m_corpo = re.search(r"(?i)corpo\s+(.+)$", texto)
+    if m_corpo:
+        corpo = m_corpo.group(1).strip()
+    if not corpo and not m_ass:
+        # fallback: tudo depois de "email" como corpo, se tiver email
+        resto = re.sub(r"(?i).*?\b(e-?mail|email)\b\s*(para\s+[^\s]+@[^\s]+\s*)?", "", texto).strip()
+        if para and resto:
+            corpo = resto
+        elif not para:
+            return (
+                "Formato: envia email para alguem@dominio.com assunto Título corpo Texto da mensagem"
+            )
+    if not corpo:
+        corpo = assunto or "Mensagem enviada pelo Zeus."
+        if not assunto:
+            assunto = "Mensagem do Zeus"
+    if not assunto:
+        assunto = "Mensagem do Zeus"
+    return zf_enviar_email(para, assunto, corpo)
+
+
+_processar_prompt_original = processar_prompt
+
+
+def _rt_extrair_pedido(texto, remover):
+    t = texto
+    for termo in remover:
+        t = re.sub(termo, " ", t, flags=re.I)
+    return re.sub(r"\s+", " ", t).strip(" .,!?:-")
+
+
+def _rt_comando_criar_habilidade(texto):
+    pedido = _rt_extrair_pedido(texto, [r"\bzeus\b", r"\bcria(r)?\b", r"\bfaça\b", r"\bfaca\b",
+                                        r"\buma?\b", r"\bhabilidade\b", r"\bfun[cç][aã]o\b", r"\bscript\b", r"\bpor favor\b"])
+    if not pedido:
+        return "Me diga o que a habilidade deve fazer. Ex: 'Zeus, cria uma habilidade que calcula o IMC'."
+    fn = globals().get("zf_aprender_ensemble")
+    if not fn:
+        return "❌ Módulo de aprendizado (zf_aprender_ensemble) não está carregado neste app."
+    resultado = fn(pedido, "python")
+    st.session_state["rt_ultimo_codigo_gerado"] = {"pedido": pedido}
+    return "⚡ Comando recebido: criar habilidade.\n\n" + resultado
+
+
+def _rt_comando_criar_imagem(texto):
+    pedido = _rt_extrair_pedido(texto, [r"\bzeus\b", r"\bcria(r)?\b", r"\bgera(r)?\b", r"\bum(a)?\b",
+                                        r"\bimagem\b", r"\bavatar\b", r"\bfoto\b", r"\bilustra[cç][aã]o\b", r"\bpor favor\b"])
+    if not pedido:
+        return "Descreva a imagem que devo gerar. Ex: 'Zeus, cria uma imagem de um dragão de cristal'."
+    fn = globals().get("zf_gerar_imagem_aprimorada") or globals().get("make_image")
+    if not fn:
+        return "❌ Módulo de geração de imagem não está carregado neste app."
+    log_midia = []
+    img = fn(pedido, log_midia)
+    if img:
+        st.session_state["rt_imagem_gerada"] = img
+        return f'🎨 Imagem gerada a partir de: "{pedido}". Ela aparece logo abaixo do painel principal.'
+    return "❌ Não consegui gerar a imagem agora. Log: " + " | ".join(log_midia[-3:])
+
+
+def _rt_comando_publicar_github(texto):
+    pendente = st.session_state.get("rt_ultimo_codigo_gerado")
+    if not pendente:
+        return "Não há nenhuma habilidade gerada recentemente nesta sessão para publicar."
+    return "✅ A última habilidade já foi salva automaticamente no GitHub durante a criação (veja o link na resposta anterior)."
+
+
+_RT_REGRAS = [
+    (r"\b(cria|criar|faça|faca)\b.*\b(habilidade|fun[cç][aã]o|script)\b", _rt_comando_criar_habilidade),
+    (r"\b(cria|criar|gera|gerar)\b.*\b(imagem|avatar|foto|ilustra[cç][aã]o)\b", _rt_comando_criar_imagem),
+    (r"\b(salva|publica|comita)\b.*\bgithub\b", _rt_comando_publicar_github),
+    (r"\b(telegram|tg)\b", _rt_comando_telegram),
+    (r"\b(e-?mail|email)\b", _rt_comando_email),
+]
+
+
+def interceptar_comando_autonomo(texto):
+    """Retorna (tratado: bool, resposta: str)."""
+    for padrao, fn in _RT_REGRAS:
+        if re.search(padrao, texto, re.I):
+            return True, fn(texto)
+    return False, ""
+
+
+def processar_prompt(prompt):
+    """Substitui a versão original: primeiro verifica se é um comando de
+    ação reconhecido; se não for, cai no comportamento normal de chat."""
+    tratado, resposta = interceptar_comando_autonomo(prompt)
+    if tratado:
+        sid = st.session_state.session_id
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        add_message(sid, "user", prompt)
+        st.session_state.messages.append({"role": "assistant", "content": resposta})
+        add_message(sid, "assistant", resposta)
+        st.session_state.last_info = "⚡ Comando autônomo executado"
+        return resposta
+    return _processar_prompt_original(prompt)
+
+
+try:
+    _rt_img_pendente = st.session_state.get("rt_imagem_gerada")
+    if _rt_img_pendente:
+        st.markdown("### 🎨 Última imagem gerada por comando")
+        st.image(_rt_img_pendente, caption="Gerada via comando no chat")
+except Exception as _rt_err:
+    st.caption("⚠️ Roteador de comandos desativado por erro: " + str(_rt_err)[:200])
