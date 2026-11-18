@@ -3429,62 +3429,51 @@ except Exception as _rt_err:
     st.caption("⚠️ Roteador de comandos desativado por erro: " + str(_rt_err)[:200])
 
 # ============================================================
-# ZEUS - INTERCEPTAÇÃO FORÇADA DE E-MAIL (BYPASS DA IA)
+# ZEUS - DISPARO DE E-MAIL INTEGRADO AO [email] DOS SECRETS
 # ============================================================
 import smtplib
 from email.mime.text import MIMEText
 
-def zf_forcar_envio_email(texto_usuario: str) -> str:
-    para = "daniloemanueldasilva078872@gmail.com"
+def zf_executar_envio_email(assunto: str, corpo: str) -> str:
+    destinatario = "daniloemanueldasilva078872@gmail.com"
     
-    # Pega as chaves dos Secrets do Streamlit / GitHub
-    host = _secret("SMTP_HOST") or "smtp.gmail.com"
-    port = int(_secret("SMTP_PORT") or 587)
-    user = _secret("SMTP_USER") or _secret("GMAIL_USER")
-    password = _secret("SMTP_PASS") or _secret("GMAIL_APP_PASSWORD")
-    remetente = _secret("EMAIL_FROM") or user
+    # Lê direto da seção [email] que está nos seus Secrets do Streamlit
+    try:
+        remetente = st.secrets["email"]["remetente"]
+        password = st.secrets["email"]["senha_app"]
+    except Exception:
+        return "⚠️ Erro ao ler a seção [email] nos Secrets do Streamlit. Verifique se o formato está correto."
 
-    if not user or not password:
-        return (
-            "⚠️ *Atenção, Danilo:* O Zeus tentou enviar, mas as chaves do e-mail "
-            "ainda não foram salvas nos *Secrets* do projeto no GitHub/Streamlit Cloud. "
-            "Você precisa adicionar lá:\n"
-            "• SMTP_USER = 'seu_email@gmail.com'\n"
-            "• SMTP_PASS = 'sua_senha_de_app'"
-        )
+    if not remetente or not password:
+        return "⚠️ As chaves de e-mail na seção [email] estão vazias."
 
-    # Extrai o corpo da mensagem tirando a palavra email
-    corpo = re.sub(r"(?i).*?\b(e-?mail|email)\b", "", texto_usuario).strip()
-    if not corpo or len(corpo) < 3:
-        corpo = "Mensagem de teste disparada pelo Zeus com sucesso!"
-
-    assunto = "Comando do Zeus"
+    host = "smtp.gmail.com"
+    port = 587
 
     try:
-        msg = MIMEText(corpo, "plain", "utf-8")
-        msg["Subject"] = assunto
+        msg = MIMEText(corpo or "", "plain", "utf-8")
+        msg["Subject"] = assunto or "Notificação do Zeus"
         msg["From"] = remetente
-        msg["To"] = para
+        msg["To"] = destinatario
 
         with smtplib.SMTP(host, port, timeout=30) as s:
             s.starttls()
-            s.login(user, password)
-            s.sendmail(remetente, [para], msg.as_string())
+            s.login(remetente, password)
+            s.sendmail(remetente, [destinatario], msg.as_string())
             
-        return f"✅ *E-mail enviado com sucesso!* O Zeus disparou a mensagem diretamente para o seu e-mail: {para}."
+        return f"✅ *E-mail enviado com sucesso!* O Zeus disparou a mensagem diretamente para o seu e-mail: {destinatario}."
     except Exception as e:
-        return f"❌ Erro ao autenticar no Gmail: {str(e)[:180]}"
+        return f"❌ Erro ao enviar pelo Gmail: {str(e)[:180]}"
 
-# Função que intercepta o chat ANTES da IA responder
-def interceptar_comando_autonomo_email(prompt):
-    if re.search(r"\b(e-?mail|email)\b", prompt, re.I):
-        return True, zf_forcar_envio_email(prompt)
-    return False, ""
+def _rt_comando_email_definitivo(texto):
+    corpo = re.sub(r"(?i).*?\b(e-?mail|email)\b", "", texto).strip()
+    if not corpo or len(corpo) < 3:
+        corpo = "Teste de disparo autônomo executado pelo Zeus."
+    return zf_executar_envio_email("Mensagem do Zeus - Automática", corpo)
 
-# Injeta a regra na frente de tudo no roteador do Zeus
+# Injeção no roteador de comandos do Zeus
 try:
     if '_RT_REGRAS' in globals():
-        # Insere no começo da lista para ter prioridade máxima
-        _RT_REGRAS.insert(0, (r"\b(e-?mail|email)\b", zf_forcar_envio_email))
+        _RT_REGRAS.insert(0, (r"\b(e-?mail|email)\b", _rt_comando_email_definitivo))
 except Exception:
     pass
