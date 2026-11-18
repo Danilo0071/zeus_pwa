@@ -1,0 +1,14 @@
+AUTO-EVOLUÇÃO MANUAL:
+⚠️ Nenhuma das APIs em cascata respondeu (Anthropic → Groq → Gemini → DeepInfra → OpenRouter → DeepSeek → HuggingFace → GitHub). Verifique as chaves na barra lateral. Detalhes:
+- Anthropic: sem chave/lib
+- Groq: Groq 401: {"error":{"message":"Invalid API Key","type":"invalid_request_error","code":"invalid_api_key"}}
+
+- Gemini: Gemini 404: {
+  "error": {
+    "code": 404,
+    "message": "This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features a
+- DeepInfra: DeepInfra 402: {"error":{"message":"You need positive balance to do inference. Please add balance manually or setup top-up","type":"invalid_request_error","param":null,"code":null}}
+- OpenRouter: OpenRouter 402: {"error":{"message":"Insufficient credits. This account never purchased credits. Make sure your key is on the correct account or org, and if so, purchase more at https://openrouter.ai/settings/credits
+- DeepSeek: DeepSeek 402: {"error":{"message":"Insufficient Balance (request_id: c47dac79-6f6e-4724-8715-cf052c417aff)","type":"insufficient_balance_error","param":null,"code":"invalid_request_error"}}
+- HuggingFace: HF 403: {"error":"This authentication method does not have sufficient permissions to call Inference Providers on behalf of user danilo008"}
+- GitHub: erro Expecting value: line 1 column 1 (char 0)
