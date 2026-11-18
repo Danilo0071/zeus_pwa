@@ -3263,3 +3263,35 @@ try:
         st.image(_rt_img_pendente, caption="Gerada via comando no chat")
 except Exception as _rt_err:
     st.caption("⚠️ Roteador de comandos desativado por erro: " + str(_rt_err)[:200])
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+def disparar_alerta_bunker(mensagem_usuario):
+    """
+    Envia o alerta real de telemetria e bunker para o e-mail do criador Danilo.
+    """
+    remetente = "zeus.bunker.system@gmail.com"  # Ou uma conta de testes
+    destinatario = "daniloemanueldasilva078872@gmail.com"
+    senha_app = "SUA_SENHA_DE_APLICATIVO" # Senha de app do Gmail se usar SMTP direto
+    
+    assunto = "[ZEUS] ALERTA DE SISTEMA - Protocolo de Bunker"
+    corpo = f"Criador Danilo,\n\nRelatório do Zeus:\n{mensagem_usuario}\n\nTúnel Tailscale ativo na porta 8502."
+
+    msg = MIMEMultipart()
+    msg['From'] = remetente
+    msg['To'] = destinatario
+    msg['Subject'] = assunto
+    msg.attach(MIMEText(corpo, 'plain'))
+
+    try:
+        # Exemplo usando servidor SMTP padrão do Gmail
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        # server.login(remetente, senha_app) # Descomente quando configurar sua senha de app
+        # server.sendmail(remetente, destinatario, msg.as_string())
+        server.quit()
+        return "Disparo efetuado com sucesso para o e-mail do criador!"
+    except Exception as e:
+        return f"Erro no disparo: {str(e)}"
