@@ -3214,18 +3214,22 @@ def disparar_alerta_bunker_final(status_mensagem):
     except Exception as e:
         resultados.append(f"Erro no e-mail: {str(e)}")
 
-    # 2. Disparo via Telegram
+   import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import requests
+import streamlit as st
+
+def disparar_alerta_bunker_debug(status_mensagem):
+    """
+    Protocolo de Bunker com Debug Real: Exibe qualquer falha de rede ou credencial na tela.
+    """
+    # 1. Teste de Telegram com exibição de erro bruto
     try:
         token = st.secrets["telegram"]["token"]
         chat_id = st.secrets["telegram"]["chat_id"]
         
-        texto = (
-            f"🚨 [ZEUS] ALERTA DE SISTEMA - PROTOCOLO DE BUNKER 🚨\n\n"
-            f"Criador: Danilo\n"
-            f"Status: {status_mensagem}\n\n"
-            f"⚡ Rede: Túnel Tailscale ativo | Docker local pronto na porta 8502."
-        )
-        
+        texto = f"🚨 [ZEUS DEBUG]\nStatus: {status_mensagem}"
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {
             "chat_id": chat_id,
@@ -3234,11 +3238,33 @@ def disparar_alerta_bunker_final(status_mensagem):
         }
         
         resposta = requests.post(url, json=payload)
-        if resposta.status_code == 200:
-            resultados.append("Telegram enviado com sucesso.")
+        
+        # Se o Telegram recusar, ele vai mostrar o motivo exato na tela (ex: Bot not found, Bad Request)
+        if resposta.status_code != 200:
+            st.error(f"❌ Erro bruto do Telegram (Status {resposta.status_code}): {resposta.text}")
         else:
-            resultados.append(f"Erro no Telegram: {resposta.text}")
+            st.success("✅ Telegram disparado e aceito pela API do Telegram!")
+            
     except Exception as e:
-        resultados.append(f"Erro ao processar Telegram: {str(e)}")
+        st.error(f"❌ Exceção crítica no Telegram: {str(e)}")
 
-    return " | ".join(resultados)
+    # 2. Teste de E-mail com exibição de erro bruto
+    try:
+        remetente = st.secrets["email"]["remetente"]
+        senha_app = st.secrets["email"]["senha_app"]
+        
+        msg = MIMEMultipart()
+        msg['From'] = remetente
+        msg['To'] = remetente
+        msg['Subject'] = "[ZEUS DEBUG] Teste de Conexão"
+        msg.attach(MIMEText(f"Relatório de depuração: {status_mensagem}", 'plain'))
+
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(remetente, senha_app)
+        server.sendmail(remetente, remetente, msg.as_string())
+        server.quit()
+        st.success("✅ E-mail enviado e aceito pelo SMTP do Gmail!")
+        
+    except Exception as e:
+        st.error(f"❌ Exceção crítica no Gmail (SMTP): {str(e)}")
