@@ -65,5 +65,5 @@ def escutar_telegram():
             print(f"Erro no loop: {e}")
             time.sleep(5)
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     escutar_telegram()
