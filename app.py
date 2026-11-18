@@ -3173,125 +3173,72 @@ try:
 except Exception as _zf_err:
     st.caption("Zeus Final desativado por erro: " + str(_zf_err)[:200])
 
-# ============================================================
-# ROTEADOR DE COMANDOS AUTÔNOMOS NO CHAT
-# Reconhece intenções de ação na mensagem do usuário e executa
-# a função correspondente em vez de só responder em texto.
-# Cada ação só roda porque você escreveu aquela mensagem -
-# nada é agendado, nada roda sozinho em segundo plano.
-# ============================================================
-_processar_prompt_original = processar_prompt
-
-
-def _rt_extrair_pedido(texto, remover):
-    t = texto
-    for termo in remover:
-        t = re.sub(termo, " ", t, flags=re.I)
-    return re.sub(r"\s+", " ", t).strip(" .,!?:-")
-
-
-def _rt_comando_criar_habilidade(texto):
-    pedido = _rt_extrair_pedido(texto, [r"\bzeus\b", r"\bcria(r)?\b", r"\bfaça\b", r"\bfaca\b",
-                                        r"\buma?\b", r"\bhabilidade\b", r"\bfun[cç][aã]o\b", r"\bscript\b", r"\bpor favor\b"])
-    if not pedido:
-        return "Me diga o que a habilidade deve fazer. Ex: 'Zeus, cria uma habilidade que calcula o IMC'."
-    fn = globals().get("zf_aprender_ensemble")
-    if not fn:
-        return "❌ Módulo de aprendizado (zf_aprender_ensemble) não está carregado neste app."
-    resultado = fn(pedido, "python")
-    st.session_state["rt_ultimo_codigo_gerado"] = {"pedido": pedido}
-    return "⚡ Comando recebido: criar habilidade.\n\n" + resultado
-
-
-def _rt_comando_criar_imagem(texto):
-    pedido = _rt_extrair_pedido(texto, [r"\bzeus\b", r"\bcria(r)?\b", r"\bgera(r)?\b", r"\bum(a)?\b",
-                                        r"\bimagem\b", r"\bavatar\b", r"\bfoto\b", r"\bilustra[cç][aã]o\b", r"\bpor favor\b"])
-    if not pedido:
-        return "Descreva a imagem que devo gerar. Ex: 'Zeus, cria uma imagem de um dragão de cristal'."
-    fn = globals().get("zf_gerar_imagem_aprimorada") or globals().get("make_image")
-    if not fn:
-        return "❌ Módulo de geração de imagem não está carregado neste app."
-    log_midia = []
-    img = fn(pedido, log_midia)
-    if img:
-        st.session_state["rt_imagem_gerada"] = img
-        return f'🎨 Imagem gerada a partir de: "{pedido}". Ela aparece logo abaixo do painel principal.'
-    return "❌ Não consegui gerar a imagem agora. Log: " + " | ".join(log_midia[-3:])
-
-
-def _rt_comando_publicar_github(texto):
-    pendente = st.session_state.get("rt_ultimo_codigo_gerado")
-    if not pendente:
-        return "Não há nenhuma habilidade gerada recentemente nesta sessão para publicar."
-    return "✅ A última habilidade já foi salva automaticamente no GitHub durante a criação (veja o link na resposta anterior)."
-
-
-_RT_REGRAS = [
-    (r"\b(cria|criar|faça|faca)\b.*\b(habilidade|fun[cç][aã]o|script)\b", _rt_comando_criar_habilidade),
-    (r"\b(cria|criar|gera|gerar)\b.*\b(imagem|avatar|foto|ilustra[cç][aã]o)\b", _rt_comando_criar_imagem),
-    (r"\b(salva|publica|comita)\b.*\bgithub\b", _rt_comando_publicar_github),
-]
-
-
-def interceptar_comando_autonomo(texto):
-    """Retorna (tratado: bool, resposta: str)."""
-    for padrao, fn in _RT_REGRAS:
-        if re.search(padrao, texto, re.I):
-            return True, fn(texto)
-    return False, ""
-
-
-def processar_prompt(prompt):
-    """Substitui a versão original: primeiro verifica se é um comando de
-    ação reconhecido; se não for, cai no comportamento normal de chat."""
-    tratado, resposta = interceptar_comando_autonomo(prompt)
-    if tratado:
-        sid = st.session_state.session_id
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        add_message(sid, "user", prompt)
-        st.session_state.messages.append({"role": "assistant", "content": resposta})
-        add_message(sid, "assistant", resposta)
-        st.session_state.last_info = "⚡ Comando autônomo executado"
-        return resposta
-    return _processar_prompt_original(prompt)
-
-
-try:
-    _rt_img_pendente = st.session_state.get("rt_imagem_gerada")
-    if _rt_img_pendente:
-        st.markdown("### 🎨 Última imagem gerada por comando")
-        st.image(_rt_img_pendente, caption="Gerada via comando no chat")
-except Exception as _rt_err:
-    st.caption("⚠️ Roteador de comandos desativado por erro: " + str(_rt_err)[:200])
-
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import requests
+import streamlit as st
 
-def disparar_alerta_bunker(mensagem_usuario):
+def disparar_alerta_bunker_final(status_mensagem):
     """
-    Envia o alerta real de telemetria e bunker para o e-mail do criador Danilo.
+    Protocolo de Bunker Oficial: Envia o relatório crítico de telemetria 
+    de forma simultânea para o Telegram e E-mail do criador Danilo.
     """
-    remetente = "zeus.bunker.system@gmail.com"  # Ou uma conta de testes
-    destinatario = "daniloemanueldasilva078872@gmail.com"
-    senha_app = "SUA_SENHA_DE_APLICATIVO" # Senha de app do Gmail se usar SMTP direto
-    
-    assunto = "[ZEUS] ALERTA DE SISTEMA - Protocolo de Bunker"
-    corpo = f"Criador Danilo,\n\nRelatório do Zeus:\n{mensagem_usuario}\n\nTúnel Tailscale ativo na porta 8502."
+    resultados = []
 
-    msg = MIMEMultipart()
-    msg['From'] = remetente
-    msg['To'] = destinatario
-    msg['Subject'] = assunto
-    msg.attach(MIMEText(corpo, 'plain'))
-
+    # 1. Disparo via E-mail (Gmail)
     try:
-        # Exemplo usando servidor SMTP padrão do Gmail
+        remetente = st.secrets["email"]["remetente"]
+        senha_app = st.secrets["email"]["senha_app"]
+        
+        assunto = "[ZEUS] ALERTA CRÍTICO - Protocolo de Bunker Ativo"
+        corpo = (
+            f"Criador Danilo,\n\n"
+            f"Relatório de Execução do Zeus:\n"
+            f"{status_mensagem}\n\n"
+            f"Status: Túnel Tailscale acoplado e Docker local pronto na porta 8502."
+        )
+
+        msg = MIMEMultipart()
+        msg['From'] = remetente
+        msg['To'] = remetente
+        msg['Subject'] = assunto
+        msg.attach(MIMEText(corpo, 'plain'))
+
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
-        # server.login(remetente, senha_app) # Descomente quando configurar sua senha de app
-        # server.sendmail(remetente, destinatario, msg.as_string())
+        server.login(remetente, senha_app)
+        server.sendmail(remetente, remetente, msg.as_string())
         server.quit()
-        return "Disparo efetuado com sucesso para o e-mail do criador!"
+        resultados.append("E-mail enviado com sucesso.")
     except Exception as e:
-        return f"Erro no disparo: {str(e)}"
+        resultados.append(f"Erro no e-mail: {str(e)}")
+
+    # 2. Disparo via Telegram
+    try:
+        token = st.secrets["telegram"]["token"]
+        chat_id = st.secrets["telegram"]["chat_id"]
+        
+        texto = (
+            f"🚨 [ZEUS] ALERTA DE SISTEMA - PROTOCOLO DE BUNKER 🚨\n\n"
+            f"Criador: Danilo\n"
+            f"Status: {status_mensagem}\n\n"
+            f"⚡ Rede: Túnel Tailscale ativo | Docker local pronto na porta 8502."
+        )
+        
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": texto,
+            "parse_mode": "Markdown"
+        }
+        
+        resposta = requests.post(url, json=payload)
+        if resposta.status_code == 200:
+            resultados.append("Telegram enviado com sucesso.")
+        else:
+            resultados.append(f"Erro no Telegram: {resposta.text}")
+    except Exception as e:
+        resultados.append(f"Erro ao processar Telegram: {str(e)}")
+
+    return " | ".join(resultados)
