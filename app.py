@@ -3430,51 +3430,51 @@ except Exception as _rt_err:
     st.caption("⚠️ Roteador de comandos desativado por erro: " + str(_rt_err)[:200])
 
 # ============================================================
-# ZEUS - DISPARO DE E-MAIL INTEGRADO AO [email] DOS SECRETS
+# ZEUS - DISPARO FORÇADO E DIRETO PARA O DANILO
 # ============================================================
 import smtplib
 from email.mime.text import MIMEText
 
 def zf_executar_envio_email(assunto: str, corpo: str) -> str:
+    # Destinatário fixo obrigatório do Danilo
     destinatario = "daniloemanueldasilva078872@gmail.com"
     
-    # Lê direto da seção [email] que está nos seus Secrets do Streamlit
     try:
         remetente = st.secrets["email"]["remetente"]
         password = st.secrets["email"]["senha_app"]
-    except Exception:
-        return "⚠️ Erro ao ler a seção [email] nos Secrets do Streamlit. Verifique se o formato está correto."
+    except Exception as e:
+        return f"❌ Erro crítico nos Secrets do e-mail: {str(e)}"
 
     if not remetente or not password:
-        return "⚠️ As chaves de e-mail na seção [email] estão vazias."
-
-    host = "smtp.gmail.com"
-    port = 587
+        return "❌ As chaves [email] remetente ou senha_app estão vazias nos Secrets."
 
     try:
-        msg = MIMEText(corpo or "", "plain", "utf-8")
-        msg["Subject"] = assunto or "Notificação do Zeus"
+        msg = MIMEText(corpo or "Sistema operacional!", "plain", "utf-8")
+        msg["Subject"] = assunto or "Zeus - Alerta do Sistema"
         msg["From"] = remetente
         msg["To"] = destinatario
 
-        with smtplib.SMTP(host, port, timeout=30) as s:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as s:
             s.starttls()
             s.login(remetente, password)
             s.sendmail(remetente, [destinatario], msg.as_string())
             
-        return f"✅ *E-mail enviado com sucesso!* O Zeus disparou a mensagem diretamente para o seu e-mail: {destinatario}."
+        return f"✅ *E-mail disparado com sucesso!* Mensagem enviada diretamente para {destinatario}."
     except Exception as e:
-        return f"❌ Erro ao enviar pelo Gmail: {str(e)[:180]}"
+        return f"❌ Erro de conexão SMTP com o Gmail: {str(e)}"
 
 def _rt_comando_email_definitivo(texto):
+    # Pega qualquer texto que você mandou após a palavra email para usar como corpo
     corpo = re.sub(r"(?i).*?\b(e-?mail|email)\b", "", texto).strip()
     if not corpo or len(corpo) < 3:
-        corpo = "Teste de disparo autônomo executado pelo Zeus."
-    return zf_executar_envio_email("Mensagem do Zeus - Automática", corpo)
+        corpo = "Relatório do Zeus: O sistema está 100% operacional!"
+    return zf_executar_envio_email("Status do Zeus", corpo)
 
-# Injeção no roteador de comandos do Zeus
+# Força o roteador a interceptar qualquer comando de e-mail na hora
 try:
     if '_RT_REGRAS' in globals():
+        # Remove regras antigas de e-mail se houver e coloca esta com prioridade absoluta
+        _RT_REGRAS = [r for r in _RT_REGRAS if not "email" in str(r[0])]
         _RT_REGRAS.insert(0, (r"\b(e-?mail|email)\b", _rt_comando_email_definitivo))
 except Exception:
     pass
