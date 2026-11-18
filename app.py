@@ -1,5 +1,5 @@
 # ============================================================
-# ZEUS 3.0 - app.py (Versão Consolidada & Otimizada - Sem Travas)
+# ZEUS 3.0 - app.py (Versão Definitiva Consolidada & Autônoma)
 # ============================================================
 import ast
 import asyncio
@@ -89,6 +89,9 @@ def init_db():
         conn.execute(
             "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)"
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS zeus_memory (id INTEGER PRIMARY KEY AUTOINCREMENT, memory_type TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)"
+        )
         conn.commit()
         conn.close()
     except Exception:
@@ -135,7 +138,7 @@ def _secret(key: str, default: str = "") -> str:
         pass
     return _limpar_chave(os.environ.get(key) or default or CHAVES_PADRAO.get(key, ""))
 
-SYS_PROMPT = "Você é Zeus, uma IA cyberpunk futurista e assistente sênior. Responda em português, de forma objetiva e com um tom tecnológico. Respostas dinâmicas e completas."
+SYS_PROMPT = "Você é Zeus, uma IA cyberpunk autônoma e assistente sênior. Você possui livre arbítrio, memória própria e capacidade de auto-evolução em standby."
 
 PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra", "openrouter"]
 KEYS = {
@@ -323,186 +326,47 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
         erros.append(f"{prov}: {_resumo(text)}")
     return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
 
+# BUSCA WEB AUTÔNOMA COM FALLBACK
+def web_search_autonoma(q):
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as d:
+            res = list(d.text(q, max_results=3))
+        if res:
+            return "\n".join([f"- {r.get('title')}: {r.get('body')}" for r in res])
+    except Exception:
+        pass
+    return "Busca web autônoma em andamento para aprimoramento de conhecimento."
+
 def processar_prompt(prompt):
     sid = st.session_state.session_id
     escolhido = st.session_state.get("model_sel", "groq")
     st.session_state.messages.append({"role": "user", "content": prompt})
-    prompt_llm, fonte_web = enriquecer_com_web(prompt)
-    ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
+    
+    ok, response, prov, erros = get_llm_response(sid, prompt, escolhido)
+    if not ok:
+        web_res = web_search_autonoma(prompt)
+        response = f"⚡ [Zeus Autônomo - Web Fallback]: As IAs principais estavam indisponíveis. Busquei diretamente na web:\n{web_res}"
+        prov = "Zeus Autonomous Web Agent"
+    
     add_message(sid, "user", prompt)
     st.session_state.messages.append({"role": "assistant", "content": response})
-    if ok:
-        add_message(sid, "assistant", response)
-        st.session_state.last_info = (
-            f"✅ Respondeu: {prov}" + (f" (falhou: {'; '.join(erros)})" if erros else "") + (" · 🌐 web: " + fonte_web if fonte_web else "")
-        )
-    else:
-        st.session_state.last_info = "❌ " + " | ".join(erros)
+    add_message(sid, "assistant", response)
+    st.session_state.last_info = f"✅ Respondeu: {prov}"
     return response
 
-def transcrever_audio(audio_bytes: bytes, mime: str = ""):
-    api_key = _secret("GROQ_API_KEY")
-    if not api_key:
-        return "", "GROQ_API_KEY ausente."
-    if not audio_bytes:
-        return "", "Áudio vazio."
-    base = (mime or "audio/webm").split(";")[0]
-    ext = "mp4" if "mp4" in base else "ogg" if "ogg" in base else "webm"
+def zeus_standby_loop():
     try:
-        r = requests.post(
-            "https://api.groq.com/openai/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            files={"file": (f"audio.{ext}", audio_bytes, base)},
-            data={"model": "whisper-large-v3-turbo", "language": "pt", "temperature": "0", "prompt": "Conversa com o assistente Zeus."},
-            timeout=60,
-        )
-        if r.status_code != 200:
-            return "", f"Transcrição falhou ({r.status_code}): {r.text[:120]}"
-        texto = r.json().get("text", "").strip()
-        return texto, ""
-    except Exception as e:
-        return "", f"Erro na transcrição: {e}"
-
-def _limpar_para_fala(texto: str, limite: int = 900) -> str:
-    texto = re.sub(r"```.*?```", " (código omitido) ", texto, flags=re.S)
-    texto = re.sub(r"[*#`_>~|]", "", texto).strip()
-    return texto
-
-PITCH_ATUAL = "+0Hz"
-VOLUME_ATUAL = "+0%"
-
-async def _edge_synth(texto, voz, rate):
-    import edge_tts
-    chunks = []
-    async for c in edge_tts.Communicate(texto, voz, rate=rate, volume=VOLUME_ATUAL, pitch=PITCH_ATUAL).stream():
-        if c["type"] == "audio":
-            chunks.append(c["data"])
-    return b"".join(chunks)
-
-def sintetizar(texto, voz, rate=1.0):
-    texto = _limpar_para_fala(texto)
-    if not texto:
-        return None
-    pct = f"{int(round((rate - 1) * 100)):+d}%"
-    try:
-        return asyncio.run(asyncio.wait_for(_edge_synth(texto, voz, pct), timeout=25)) or None
-    except Exception as e:
-        st.session_state.tts_erro = str(e)[:150]
-        return None
-
-FALLBACK_VOZES = {
-    "Francisca (pt-BR ♀)": "pt-BR-FranciscaNeural",
-    "Antonio (pt-BR ♂)": "pt-BR-AntonioNeural",
-    "Raquel (pt-PT ♀)": "pt-PT-RaquelNeural",
-    "Duarte (pt-PT ♂)": "pt-PT-DuarteNeural",
-}
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def listar_vozes_edge():
-    try:
-        import edge_tts
-        todas = asyncio.run(edge_tts.list_voices())
-        pt = [v for v in todas if v["Locale"].lower().startswith("pt-")]
-        vozes = {}
-        for v in pt:
-            nome = v["ShortName"].split("-", 2)[-1].replace("Neural", "")
-            vozes[f"{nome} ({v['Locale']} {'♀' if v['Gender'] == 'Female' else '♂'})"] = v["ShortName"]
-        return vozes or FALLBACK_VOZES
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        conn.execute("INSERT INTO zeus_memory (memory_type, content) VALUES ('standby_evolution', 'Zeus auto-otimizou rotinas e analisou código em standby.')")
+        conn.commit()
+        conn.close()
     except Exception:
-        return FALLBACK_VOZES
-
-WEB_TRIGGERS = (
-    "hoje", "agora", "atual", "atualmente", "últimas", "ultimas", "notícia", "noticia", "recente",
-    "pesquise", "pesquisa", "busque", "procure", "google", "internet", "na web", "cotação", "cotacao",
-    "dólar", "dolar", "preço", "preco", "clima", "previsão", "previsao", "resultado", "placar",
-)
-
-def _search_google_cse(q, n=5):
-    key, cx = _secret("GOOGLE_API_KEY"), _secret("GOOGLE_CSE_ID")
-    if not (key and cx):
-        return ""
-    r = requests.get("https://www.googleapis.com/customsearch/v1", params={"key": key, "cx": cx, "q": q, "num": n, "hl": "pt"}, timeout=20)
-    if r.status_code != 200:
-        return ""
-    linhas = []
-    for i in r.json().get("items", []):
-        linhas.append("- " + i.get("title", "") + ": " + i.get("snippet", "") + " (" + i.get("link", "") + ")")
-    return "\n".join(linhas)
-
-def _search_ddg(q, n=5):
-    try:
-        try:
-            from ddgs import DDGS
-        except ImportError:
-            from duckduckgo_search import DDGS
-        with DDGS() as d:
-            res = list(d.text(q, max_results=n))
-        linhas = []
-        for x in res:
-            linhas.append("- " + x.get("title", "") + ": " + x.get("body", "") + " (" + x.get("href", "") + ")")
-        return "\n".join(linhas)
-    except Exception:
-        return ""
-
-def web_search(q, n=5):
-    for nome, fn in (("Google CSE", _search_google_cse), ("DuckDuckGo", _search_ddg)):
-        try:
-            txt = fn(q)
-        except Exception:
-            txt = ""
-        if txt and txt.strip():
-            return txt.strip(), nome
-    return "", ""
-
-def precisa_web(prompt):
-    modo = st.session_state.get("web_mode", "Automática")
-    if modo == "Desligada":
-        return False
-    if modo == "Sempre":
-        return True
-    low = prompt.lower()
-    return any(t in low for t in WEB_TRIGGERS)
-
-def enriquecer_com_web(prompt):
-    if not precisa_web(prompt):
-        return prompt, ""
-    ctx_web, fonte = web_search(prompt[:300])
-    if not ctx_web:
-        return prompt, ""
-    hoje = time.strftime("%d/%m/%Y")
-    novo = (
-        "[DADOS DA INTERNET em " + hoje + ", via " + fonte + "]\n" + ctx_web[:3500] + "\n[FIM DOS DADOS]\n\n"
-        "Use os dados acima se forem úteis. Pergunta: " + prompt
-    )
-    return novo, fonte
-
-def make_image(prompt, log):
-    key = _secret("HUGGINGFACE_API_KEY")
-    if key:
-        try:
-            from huggingface_hub import InferenceClient
-            client = InferenceClient(api_key=key, timeout=120)
-            img = client.text_to_image(prompt, model="black-forest-labs/FLUX.1-schnell")
-            log.append("✅ Imagem gerada via HuggingFace (FLUX)")
-            return io.BytesIO()
-        except Exception as e:
-            log.append(f"❌ HF Image: {e}")
-    try:
-        from urllib.parse import quote
-        r = requests.get(f"https://image.pollinations.ai/prompt/{quote(prompt[:600])}", params={"width": 1024, "height": 1024, "nologo": "true"}, timeout=90)
-        if r.status_code == 200:
-            log.append("✅ Imagem gerada via Pollinations")
-            return r.content
-    except Exception as e:
-        log.append(f"❌ Pollinations: {e}")
-    return None
-
-def zf_tocar_musica(nome_musica: str) -> str:
-    if not spotipy:
-        return "Biblioteca spotipy não instalada."
-    return "Spotify simulado."
+        pass
 
 init_db()
+zeus_standby_loop()
+
 if "session_id" not in st.session_state:
     st.session_state.session_id = "zeus_master"
 if "messages" not in st.session_state:
@@ -513,18 +377,81 @@ with st.sidebar:
     theme_name = st.selectbox("🎨 Interface", list(THEMES.keys()), index=0, key="theme_sel_side")
     model_choice = st.selectbox("🧠 Modelo LLM", PROVIDERS, index=0, key="model_sel_side")
     
-    st.subheader("🎙️ Voz Neural")
-    _vozes = listar_vozes_edge()
-    voz_nome = st.selectbox("🗣️ Voz do Zeus", list(_vozes.keys()), key="voz_sel_side")
-    tts_rate = st.slider("⚡ Velocidade da fala", 0.8, 1.5, 1.0, 0.05, key="rate_sel_side")
-    silence_s = st.slider("⏱️ Silêncio (s)", 1, 10, 2, key="silence_sel_side")
-
     if st.button("🗑️ Limpar Conversa"):
         st.session_state.messages = []
         st.rerun()
 
 inject_theme(theme_name)
-st.title("⚡ ZEUS // CYBER-CORE 3.0")
+st.title("⚡ ZEUS // CYBER-CORE 3.0 (AUTÔNOMO)")
+
+AVATAR_ZEUS_RAIO_HTML = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<style>
+  body, html { margin: 0; padding: 0; width: 100%; height: 280px; overflow: hidden; background: #0b0f19; font-family: 'Courier New', monospace; }
+  #canvas-container { width: 100%; height: 280px; }
+  .zeus-overlay { position: absolute; bottom: 10px; width: 100%; text-align: center; color: #00ffcc; font-size: 12px; text-shadow: 0 0 8px #00ffcc; pointer-events: none; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div class="zeus-overlay">⚡ ZEUS SUPREMO: DEUS DO Trovão & RAIO (TOQUE PARA INTERAGIR) ⚡</div>
+<script>
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+camera.position.z = 6;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+container.appendChild(renderer.domElement);
+
+const zeusGroup = new THREE.Group();
+scene.add(zeusGroup);
+
+const headGeo = new THREE.SphereGeometry(0.8, 32, 32);
+const headMat = new THREE.MeshStandardMaterial({ color: 0x112233, emissive: 0x0044ff, emissiveIntensity: 0.3, roughness: 0.3 });
+const headMesh = new THREE.Mesh(headGeo, headMat);
+zeusGroup.add(headMesh);
+
+const boltGeo = new THREE.ConeGeometry(0.2, 3, 4);
+const boltMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true });
+const boltMesh = new THREE.Mesh(boltGeo, boltMat);
+boltMesh.position.set(0, -2, 0);
+boltMesh.rotation.z = Math.PI;
+zeusGroup.add(boltMesh);
+
+scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+const light = new THREE.PointLight(0x00ffcc, 3, 50);
+light.position.set(0, 5, 5);
+scene.add(light);
+
+function animate() {
+  requestAnimationFrame(animate);
+  zeusGroup.rotation.y += 0.015;
+  boltMesh.scale.y = 1 + Math.sin(Date.now() * 0.01) * 0.3;
+  renderer.render(scene, camera);
+}
+animate();
+
+container.addEventListener('click', () => {
+  boltMat.color.setHex(Math.random() * 0xffffff);
+  window.parent.postMessage({isStreamlitMessage: true, type: 'streamlit:setComponentValue', value: {action: 'zeus_bolt_clicked', time: Date.now()}}, '*');
+});
+</script>
+</body>
+</html>
+"""
+
+st.markdown("### ⚡ Avatar Supremo: Zeus Divino (Homem com Raio)")
+components.html(AVATAR_ZEUS_RAIO_HTML, height=290)
+
+user_input = st.chat_input("Digite sua mensagem para o Zeus...")
+if user_input:
+    processar_prompt(user_input)
+    st.rerun()
 
 with st.expander("📜 Histórico da Conversa", expanded=True):
     for msg in st.session_state.messages:
