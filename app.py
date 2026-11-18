@@ -15,7 +15,6 @@ import sqlite3
 import sys
 import tempfile
 import time
-import zipfile
 
 import requests
 
@@ -126,7 +125,7 @@ CHAVES_PADRAO = {
 }
 
 def _limpar_chave(v: str) -> str:
-    v = re.sub(r"\s+", "", v).strip(""'")
+    v = re.sub(r"\s+", "", v).strip('"'')
     return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
 
 def _secret(key: str, default: str = "") -> str:
@@ -326,7 +325,6 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
         erros.append(f"{prov}: {_resumo(text)}")
     return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
 
-# BUSCA WEB AUTÔNOMA COM FALLBACK
 def web_search_autonoma(q):
     try:
         from duckduckgo_search import DDGS
