@@ -3429,16 +3429,15 @@ except Exception as _rt_err:
     st.caption("⚠️ Roteador de comandos desativado por erro: " + str(_rt_err)[:200])
 
 # ============================================================
-# ZEUS - MÓDULO DEFINITIVO DE ENVIO DE E-MAIL (GMAIL / SECRETS)
+# ZEUS - INTERCEPTAÇÃO FORÇADA DE E-MAIL (BYPASS DA IA)
 # ============================================================
 import smtplib
 from email.mime.text import MIMEText
 
-def zf_enviar_email_definitivo(assunto: str, corpo: str) -> str:
-    # O e-mail de destino configurado por você
+def zf_forcar_envio_email(texto_usuario: str) -> str:
     para = "daniloemanueldasilva078872@gmail.com"
     
-    # Busca as credenciais de envio salvas nos Secrets do seu repositório no GitHub/Streamlit
+    # Pega as chaves dos Secrets do Streamlit / GitHub
     host = _secret("SMTP_HOST") or "smtp.gmail.com"
     port = int(_secret("SMTP_PORT") or 587)
     user = _secret("SMTP_USER") or _secret("GMAIL_USER")
@@ -3446,11 +3445,24 @@ def zf_enviar_email_definitivo(assunto: str, corpo: str) -> str:
     remetente = _secret("EMAIL_FROM") or user
 
     if not user or not password:
-        return "❌ As credenciais do Gmail (SMTP_USER e SMTP_PASS) não foram encontradas nos Secrets do projeto no GitHub. Configure-as para liberar o envio."
+        return (
+            "⚠️ *Atenção, Danilo:* O Zeus tentou enviar, mas as chaves do e-mail "
+            "ainda não foram salvas nos *Secrets* do projeto no GitHub/Streamlit Cloud. "
+            "Você precisa adicionar lá:\n"
+            "• SMTP_USER = 'seu_email@gmail.com'\n"
+            "• SMTP_PASS = 'sua_senha_de_app'"
+        )
+
+    # Extrai o corpo da mensagem tirando a palavra email
+    corpo = re.sub(r"(?i).*?\b(e-?mail|email)\b", "", texto_usuario).strip()
+    if not corpo or len(corpo) < 3:
+        corpo = "Mensagem de teste disparada pelo Zeus com sucesso!"
+
+    assunto = "Comando do Zeus"
 
     try:
-        msg = MIMEText(corpo or "", "plain", "utf-8")
-        msg["Subject"] = assunto or "Notificação do Zeus"
+        msg = MIMEText(corpo, "plain", "utf-8")
+        msg["Subject"] = assunto
         msg["From"] = remetente
         msg["To"] = para
 
@@ -3458,37 +3470,21 @@ def zf_enviar_email_definitivo(assunto: str, corpo: str) -> str:
             s.starttls()
             s.login(user, password)
             s.sendmail(remetente, [para], msg.as_string())
-        return f"✅ E-mail enviado com sucesso para o seu endereço ({para})!"
+            
+        return f"✅ *E-mail enviado com sucesso!* O Zeus disparou a mensagem diretamente para o seu e-mail: {para}."
     except Exception as e:
-        return f"❌ Erro ao conectar no servidor de e-mail: {str(e)[:160]}"
+        return f"❌ Erro ao autenticar no Gmail: {str(e)[:180]}"
 
-def _rt_comando_email_automatico(texto):
-    assunto = "Mensagem do Zeus"
-    corpo = ""
+# Função que intercepta o chat ANTES da IA responder
+def interceptar_comando_autonomo_email(prompt):
+    if re.search(r"\b(e-?mail|email)\b", prompt, re.I):
+        return True, zf_forcar_envio_email(prompt)
+    return False, ""
 
-    # Extrai assunto se especificado
-    m_ass = re.search(r"(?i)assunto\s+(.+?)(?:\s+corpo\s+|$)", texto)
-    if m_ass:
-        assunto = m_ass.group(1).strip(" .,;:")
-
-    # Extrai corpo se especificado
-    m_corpo = re.search(r"(?i)corpo\s+(.+)$", texto)
-    if m_corpo:
-        corpo = m_corpo.group(1).strip()
-
-    # Se não usou as palavras-chave, pega o texto todo após a palavra e-mail como corpo
-    if not corpo:
-        resto = re.sub(r"(?i).*?\b(e-?mail|email)\b", "", texto).strip()
-        if resto:
-            corpo = resto
-        else:
-            corpo = "Relatório de status enviado pelo Zeus."
-
-    return zf_enviar_email_definitivo(assunto, corpo)
-
-# Injeção automática da regra no roteador de comandos do Zeus
+# Injeta a regra na frente de tudo no roteador do Zeus
 try:
     if '_RT_REGRAS' in globals():
-        _RT_REGRAS.append((r"\b(e-?mail|email)\b", _rt_comando_email_automatico))
+        # Insere no começo da lista para ter prioridade máxima
+        _RT_REGRAS.insert(0, (r"\b(e-?mail|email)\b", zf_forcar_envio_email))
 except Exception:
     pass
