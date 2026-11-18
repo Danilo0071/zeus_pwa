@@ -26,7 +26,8 @@ import sys
 import tempfile
 import time
 import zipfile
-
+import smtplib
+from email.mime.text import MIMEText
 import requests
 
 try:
