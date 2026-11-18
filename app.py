@@ -153,12 +153,11 @@ def get_recent_context(session_id, limit=6):
 # ============================================================
 # CHAVES
 # ============================================================
-CHAVES_PADRAO = {  # Nunca coloque chaves reais aqui. Use .streamlit/secrets.toml
-}
+CHAVES_PADRAO = {}
 
 
 def _limpar_chave(v: str) -> str:
-    v = re.sub(r"\s+", "", v).strip(""'")
+    v = re.sub(r"\s+", "", v).strip('"\'')
     return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
 
 
@@ -173,7 +172,7 @@ def _secret(key: str, default: str = "") -> str:
 
 
 # ============================================================
-# ZEUS E-MAIL REAL (Adicionado mantendo o design original)
+# ZEUS E-MAIL REAL (Integrado e corrigido)
 # ============================================================
 def zf_enviar_email_direto(texto: str) -> str:
     destinatario = "daniloemanueldasilva078872@gmail.com"
@@ -461,7 +460,7 @@ def zf_enviar_telegram(texto: str) -> str:
     try:
         r = requests.post(url, json=payload, timeout=30)
         if r.status_code == 200 and r.json().get("ok"):
-            return "✅ SUCESSO REAL: Mensagem disparada diretamente nos servidores do Telegram para o Danilo!"
+            return "✅ SUCESSO REAL: Mensagem disparada diretamente nos servidores du Telegram para o Danilo!"
         else:
             return f"❌ FALHA NA API DO TELEGRAM (Status {r.status_code}): {r.text}"
     except Exception as e:
@@ -638,7 +637,7 @@ def main():
         st.session_state.messages = []
 
     st.sidebar.title("⚡ Painel de Controle")
-    st.sidebar.info("Criador: Danilo\nE-mail: daniloemanueldasilva078872@gmail.com")
+    st.sidebar.info("Criador: Danilo\ne-mail: daniloemanueldasilva078872@gmail.com")
 
     st.title("⚡ Zeus 3.0 - Núcleo Autônomo")
     
