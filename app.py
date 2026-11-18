@@ -3179,47 +3179,6 @@ from email.mime.multipart import MIMEMultipart
 import requests
 import streamlit as st
 
-def disparar_alerta_bunker_final(status_mensagem):
-    """
-    Protocolo de Bunker Oficial: Envia o relatório crítico de telemetria 
-    de forma simultânea para o Telegram e E-mail do criador Danilo.
-    """
-    resultados = []
-
-    # 1. Disparo via E-mail (Gmail)
-    try:
-        remetente = st.secrets["email"]["remetente"]
-        senha_app = st.secrets["email"]["senha_app"]
-        
-        assunto = "[ZEUS] ALERTA CRÍTICO - Protocolo de Bunker Ativo"
-        corpo = (
-            f"Criador Danilo,\n\n"
-            f"Relatório de Execução do Zeus:\n"
-            f"{status_mensagem}\n\n"
-            f"Status: Túnel Tailscale acoplado e Docker local pronto na porta 8502."
-        )
-
-        msg = MIMEMultipart()
-        msg['From'] = remetente
-        msg['To'] = remetente
-        msg['Subject'] = assunto
-        msg.attach(MIMEText(corpo, 'plain'))
-
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(remetente, senha_app)
-        server.sendmail(remetente, remetente, msg.as_string())
-        server.quit()
-        resultados.append("E-mail enviado com sucesso.")
-    except Exception as e:
-        resultados.append(f"Erro no e-mail: {str(e)}")
-
-   import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import requests
-import streamlit as st
-
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -3263,10 +3222,10 @@ def disparar_alerta_bunker_final(status_mensagem):
         chat_id = st.secrets["telegram"]["chat_id"]
         
         texto = (
-            f"🚨 [ZEUS] ALERTA DE SISTEMA - PROTOCOLO DE BUNKER 🚨\n\n"
-            f"Criador: Danilo\n"
-            f"Status: {status_mensagem}\n\n"
-            f"⚡ Rede: Túnel Tailscale ativo | Docker local pronto na porta 8502."
+            f"🚨 *[ZEUS] ALERTA DE SISTEMA - PROTOCOLO DE BUNKER* 🚨\n\n"
+            f"Criador: *Danilo*\n"
+            f"Status: *{status_mensagem}*\n\n"
+            f"⚡ *Rede:* Túnel Tailscale ativo | Docker local pronto na porta 8502."
         )
         
         url = f"https://api.telegram.org/bot{token}/sendMessage"
