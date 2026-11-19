@@ -994,7 +994,7 @@ except Exception as e:
             ok, text = False, f"erro de conexão: {e}"
 if ok:
             return True, text or "(resposta vazia)", prov, erros
-        erros.append(f"{prov}: {_resumo(text)}")
+erros.append(f"{prov}: {_resumo(text)}")
 return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
 
 
