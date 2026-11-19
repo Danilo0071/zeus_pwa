@@ -63,6 +63,16 @@ _log = logging.getLogger("zeus.cofre")
 CHAVES_PADRAO = {  # Nunca coloque chaves reais aqui. Use .streamlit/secrets.toml
 }
 
+if "THEMES" not in globals():
+    THEMES = {
+        "Padrão": {
+            "bg": "#0b0f19",
+            "sidebar": "#111827",
+            "text": "#f3f4f6",
+            "accent": "#3b82f6",
+        }
+    }
+
 
 def _limpar_chave(v: str) -> str:
     v = re.sub(r"\s+", "", v).strip("\"'")
@@ -284,7 +294,7 @@ def baixar_db_cofre() -> bool:
             _baixar_e_mesclar(cliente, bucket)
             return True
         except Exception as e:
-            detalhe = f"{type(e)._name_}: {repr(e)}"
+            detalhe = f"{type(e).__name__}: {repr(e)}"
             with contextlib.suppress(Exception):
                 ctx["erro"] = detalhe
                 _log.warning("Cofre B2 (download) -> %s", detalhe)
@@ -331,7 +341,7 @@ def sincronizar_db_cofre(forcar: bool = True) -> bool:
             )
             return True
         except Exception as e:
-            detalhe = f"{type(e)._name_}: {repr(e)}"
+            detalhe = f"{type(e).__name__}: {repr(e)}"
             with contextlib.suppress(Exception):
                 ctx["erro"] = detalhe
                 ctx["bloqueado_ate"] = time.time() + COFRE_BACKOFF_SEG
@@ -415,7 +425,7 @@ def diagnostico_cofre():
 
     try:
         import boto3
-        add("Pacote boto3", True, boto3._version_)
+        add("Pacote boto3", True, boto3.__version__)
     except ImportError:
         add("Pacote boto3", False, "não instalado: adicione 'boto3' ao requirements.txt")
 
@@ -443,10 +453,10 @@ def diagnostico_cofre():
                 add(
                     f"Arquivo {COFRE_DB_KEY} na nuvem",
                     False,
-                    "ainda não existe" if eh_nao_encontrado(e) else f"{type(e).name_}",
+                    "ainda não existe" if _eh_nao_encontrado(e) else f"{type(e).__name__}",
                 )
     except Exception as e:
-        add("Acesso ao bucket", False, f"{type(e)._name}: {_dica(type(e).name_ + str(e))}")
+        add("Acesso ao bucket", False, f"{type(e).__name__}: {_dica(type(e).__name__ + str(e))}")
 
     add(
         "Banco local",
@@ -470,9 +480,10 @@ def mostrar_diagnostico_cofre():
                 f"Envio concluído ({_cofre_ctx()['ultimo_tamanho']} bytes)." if ok else "Envio falhou, veja abaixo."
             )
             for nome, ok_, det in diagnostico_cofre():
-                st.write(f"{'✅' if ok_ else '❌'} *{nome}* — {det}")
+                st.write(f"{'✅' if ok_ else '❌'} **{nome}** — {det}")
         else:
             st.caption("Toque no botão para testar a conexão e ver o motivo exato de qualquer falha.")
+
 # ============================================================
 # CLIENTE LLM (GROQ, GEMINI, CLAUDE) COM RETENTATIVA E FALLBACK
 # ============================================================
