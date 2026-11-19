@@ -986,8 +986,8 @@ if resposta_cofre is not None:
 if not api_key:
             erros.append(f"{prov}: chave ausente")
             continue
-        override = _secret(MODEL_SECRET[prov])
-        candidates = [override] if override else MODELS[prov]
+override = _secret(MODEL_SECRET[prov])
+candidates = [override] if override else MODELS[prov]
         try:
             ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
         except Exception as e:
