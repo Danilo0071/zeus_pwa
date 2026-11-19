@@ -974,12 +974,16 @@ def _resumo(text):
 
 
 def get_llm_response(session_id, prompt, model_choice, system=None, use_history=True):
+
+    resposta_cofre = tratar_comando_cofre_chat(prompt)
+if resposta_cofre is not None:
+    return resposta_cofre, "cofre_b2", None
     msgs = _normalize((get_recent_context(session_id) if use_history else []) + [{"role": "user", "content": prompt}])
     order = [model_choice] + [p for p in PROVIDERS if p != model_choice]
     erros = []
     for prov in order:
         api_key = _secret(KEYS[prov])
-        if not api_key:
+if not api_key:
             erros.append(f"{prov}: chave ausente")
             continue
         override = _secret(MODEL_SECRET[prov])
@@ -1105,9 +1109,7 @@ def processar_prompt(prompt):
                 st.session_state.last_info = "⚠️ IAs e web indisponíveis no momento"
                 add_message(sid, "user", prompt)
                 resposta_cofre = tratar_comando_cofre_chat(prompt)
-        if resposta_cofre is not None:
-            st.markdown(resposta_cofre)
-            st.stop()
+        
             st.session_state.messages.append({"role": "assistant", "content": response})
             add_message(sid, "assistant", response)
             return response
