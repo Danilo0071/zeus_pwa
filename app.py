@@ -633,7 +633,145 @@ def mostrar_diagnostico_cofre():
                 st.write(f"{'✅' if ok_ else '❌'} *{nome}* — {det}")
         else:
             st.caption("Toque no botão para testar a conexão e ver o motivo exato de qualquer falha.")
+# ------------------------------------------------------------
+# COMANDOS DIRETOS NO CHAT PARA TESTAR O COFRE B2
+# ------------------------------------------------------------
+def salvar_arquivo_cofre(nome_arquivo: str, conteudo: str) -> tuple[bool, str]:
+    nome_limpo = re.sub(r"[^a-zA-Z0-9./-]", "", (nome_arquivo or "").strip()).lstrip("/")
+    if not nome_limpo:
+        nome_limpo = "cofre/teste_chat.txt"
+    elif "/" not in nome_limpo:
+        nome_limpo = f"cofre/{nome_limpo}"
 
+    dados = (conteudo or "").encode("utf-8")
+    cliente, bucket = _obter_cliente_cofre()
+    ctx = _cofre_ctx()
+    _, _, key_id, app_key = _obter_config_cofre()
+
+    if not bucket:
+        return False, "Bucket do B2 não configurado."
+
+    try:
+        if cliente and ctx.get("modo_ativo") != "b2sdk":
+            cliente.put_object(
+                Bucket=bucket,
+                Key=nome_limpo,
+                Body=dados,
+                ContentType="text/plain; charset=utf-8",
+            )
+            ctx["modo_ativo"] = "s3"
+            return True, f"Arquivo salvo no B2 ({nome_limpo}, {len(dados)} bytes) via S3."
+    except Exception as e_s3:
+        if not (key_id and app_key):
+            return False, f"Falha ao salvar no B2: {_detalhe_erro(e_s3)}"
+
+    try:
+        if not (key_id and app_key):
+            return False, "Credenciais B2_KEY_ID / B2_APP_KEY ausentes."
+        api = _criar_cliente_b2_nativo(key_id, app_key)
+        b2_bucket = api.get_bucket_by_name(bucket)
+        b2_bucket.upload_bytes(dados, nome_limpo)
+        ctx["modo_ativo"] = "b2sdk"
+        return True, f"Arquivo salvo no B2 ({nome_limpo}, {len(dados)} bytes) via b2sdk."
+    except Exception as e_b2:
+        return False, f"Falha ao salvar no B2: {_detalhe_erro(e_b2)}"
+
+
+def apagar_arquivo_cofre(nome_arquivo: str) -> tuple[bool, str]:
+    nome_limpo = (nome_arquivo or "").strip().lstrip("/")
+    if not nome_limpo:
+        return False, "Informe o nome do arquivo para apagar."
+
+    candidatos = [nome_limpo]
+    if "/" not in nome_limpo:
+        candidatos.append(f"cofre/{nome_limpo}")
+
+    cliente, bucket = _obter_cliente_cofre()
+    ctx = _cofre_ctx()
+    _, _, key_id, app_key = _obter_config_cofre()
+
+    if not bucket:
+        return False, "Bucket do B2 não configurado."
+
+    for chave in candidatos:
+        try:
+            if cliente and ctx.get("modo_ativo") != "b2sdk":
+                cliente.delete_object(Bucket=bucket, Key=chave)
+                return True, f"Arquivo apagado do B2 ({chave})."
+        except Exception:
+            pass
+
+        try:
+            if key_id and app_key:
+                api = _criar_cliente_b2_nativo(key_id, app_key)
+                b2_bucket = api.get_bucket_by_name(bucket)
+                versao = b2_bucket.get_file_info_by_name(chave)
+                b2_bucket.delete_file_version(versao.id_, chave)
+                return True, f"Arquivo apagado do B2 ({chave})."
+        except Exception:
+            pass
+
+    return False, f"Não foi possível apagar {nome_limpo} (verifique se o nome está exato no bucket)."
+
+
+def listar_arquivos_cofre(limite: int = 20) -> tuple[bool, str]:
+    cliente, bucket = _obter_cliente_cofre()
+    _, _, key_id, app_key = _obter_config_cofre()
+    if not bucket:
+        return False, "Bucket do B2 não configurado."
+
+    try:
+        if cliente:
+            resp = cliente.list_objects_v2(Bucket=bucket, MaxKeys=limite)
+            itens = [obj["Key"] for obj in resp.get("Contents", [])]
+            if not itens:
+                return True, "Bucket vazio no momento (0 arquivos)."
+            return True, "Arquivos no B2:\n- " + "\n- ".join(itens)
+    except Exception:
+        pass
+
+    try:
+        if key_id and app_key:
+            api = _criar_cliente_b2_nativo(key_id, app_key)
+            b2_bucket = api.get_bucket_by_name(bucket)
+            itens = [fv.file_name for fv, _ in b2_bucket.ls(latest_only=True, show_versions=False)]
+            itens = itens[:limite]
+            if not itens:
+                return True, "Bucket vazio no momento (0 arquivos)."
+            return True, "Arquivos no B2:\n- " + "\n- ".join(itens)
+    except Exception as e:
+        return False, f"Falha ao listar arquivos do B2: {_detalhe_erro(e)}"
+
+    return False, "Sem credenciais válidas para listar o B2."
+
+
+def tratar_comando_cofre_chat(mensagem: str) -> str | None:
+    """
+    Se a mensagem começar com b2_salvar:, b2_apagar: ou b2_listar, executa direto no B2
+    e devolve a resposta pronta para o chat. Retorna None se não for comando de cofre.
+    """
+    txt = (mensagem or "").strip()
+    baixo = txt.lower()
+
+    if baixo == "b2_listar" or baixo.startswith("b2_listar"):
+        _, msg = listar_arquivos_cofre()
+        return msg
+
+    if baixo.startswith("b2_salvar:"):
+        corpo_cmd = txt[len("b2_salvar:"):].strip()
+        if "|" in corpo_cmd:
+            nome, conteudo = corpo_cmd.split("|", 1)
+        else:
+            nome, conteudo = "cofre/teste_chat.txt", corpo_cmd
+        _, msg = salvar_arquivo_cofre(nome.strip(), conteudo.strip())
+        return msg
+
+    if baixo.startswith("b2_apagar:"):
+        nome = txt[len("b2_apagar:"):].strip()
+        _, msg = apagar_arquivo_cofre(nome)
+        return msg
+
+    return None
 
 # ============================================================
 # CLIENTE LLM (GROQ, GEMINI, CLAUDE) COM RETENTATIVA E FALLBACK
