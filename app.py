@@ -26,7 +26,9 @@ import sys
 import tempfile
 import time
 import zipfile
-
+import contextlib
+import logging
+import threading
 import requests
 
 try:
