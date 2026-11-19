@@ -8,3 +8,4 @@ spotipy
 pywhatkit
 plotly
 numpy
+boto3
