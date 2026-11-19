@@ -115,8 +115,10 @@ def inject_theme_classico(theme_name: str):
 # CHAVES + BANCO DE DADOS + COFRE BACKBLAZE B2  (bloco único)
 # Substitui AS DUAS seções antigas ("BANCO DE DADOS + COFRE" e "CHAVES").
 # Requer no requirements.txt:  boto3
+# Opcional (fallback direto B2): b2sdk
 # ============================================================
 import contextlib
+import io
 import logging
 import os
 import re
@@ -171,34 +173,64 @@ COFRE_BACKOFF_SEG = 30      # após uma falha, espera antes de tentar de novo
 @st.cache_resource
 def _cofre_ctx():
     """Estado compartilhado do processo (sobrevive aos reruns do Streamlit)."""
-    return {"lock": threading.RLock(), "nuvem_ok": False, "inicializado": False,
-            "pendente": False, "ultimo_envio": 0.0, "bloqueado_ate": 0.0,
-            "erro": "", "ultimo_tamanho": 0, "resultado_download": ""}
+    return {
+        "lock": threading.RLock(),
+        "nuvem_ok": False,
+        "inicializado": False,
+        "pendente": False,
+        "ultimo_envio": 0.0,
+        "bloqueado_ate": 0.0,
+        "erro": "",
+        "ultimo_tamanho": 0,
+        "resultado_download": "",
+        "modo_ativo": "s3",
+    }
 
 
 @st.cache_resource
 def _criar_cliente_s3(endpoint: str, key_id: str, app_key: str):
     import boto3
     from botocore.config import Config
+
     m = re.search(r"s3\.([a-z0-9-]+)\.backblazeb2\.com", endpoint)
     return boto3.client(
         "s3",
         endpoint_url=endpoint,
         aws_access_key_id=key_id,
         aws_secret_access_key=app_key,
-        region_name=m.group(1) if m else None,   # a região do B2 vem do endpoint
-        config=Config(signature_version="s3v4", connect_timeout=10, read_timeout=30,
-                      retries={"max_attempts": 3, "mode": "standard"}),
+        region_name=m.group(1) if m else None,
+        config=Config(
+            signature_version="s3v4",
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+            connect_timeout=10,
+            read_timeout=30,
+            retries={"max_attempts": 3, "mode": "standard"},
+        ),
     )
 
 
-def _obter_cliente_cofre():
-    """Conecta ao bucket Backblaze B2 usando _secret() ou conectar_cofre()."""
+def _criar_cliente_b2_nativo(key_id: str, app_key: str):
+    from b2sdk.v2 import B2Api, InMemoryAccountInfo
+
+    info = InMemoryAccountInfo()
+    api = B2Api(info)
+    api.authorize_account("production", key_id, app_key)
+    return api
+
+
+def _obter_config_cofre():
     endpoint = _secret("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
     if endpoint and not endpoint.startswith("http"):
         endpoint = "https://" + endpoint
     bucket = _secret("B2_BUCKET", "zeus-cofre-danilo")
     key_id, app_key = _secret("B2_KEY_ID"), _secret("B2_APP_KEY")
+    return endpoint, bucket, key_id, app_key
+
+
+def _obter_cliente_cofre():
+    """Conecta ao bucket Backblaze B2 usando _secret() ou conectar_cofre()."""
+    endpoint, bucket, key_id, app_key = _obter_config_cofre()
 
     if key_id and app_key:
         return _criar_cliente_s3(endpoint, key_id, app_key), bucket
@@ -213,9 +245,20 @@ def _eh_nao_encontrado(e: Exception) -> bool:
     resp = getattr(e, "response", None) or {}
     codigo = (resp.get("Error") or {}).get("Code", "")
     status = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
-    if codigo == "NoSuchBucket":      # bucket errado NÃO é "arquivo ainda não existe"
+    if codigo == "NoSuchBucket":
         return False
     return codigo in ("NoSuchKey", "404", "NotFound") or status == 404
+
+
+def _detalhe_erro(e: Exception) -> str:
+    resp = getattr(e, "response", None) or {}
+    err = resp.get("Error") or {}
+    codigo = err.get("Code", "")
+    msg = err.get("Message", "")
+    base = f"{type(e)._name_}: {e}"
+    if codigo or msg:
+        return f"{base} [{codigo} - {msg}]"
+    return base
 
 
 def _dica(erro: str) -> str:
@@ -242,7 +285,8 @@ def _conectar():
     conn = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, "
-        "role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        "role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_sessao ON messages(session_id, id)")
     conn.commit()
     return conn
@@ -282,16 +326,20 @@ def _mesclar_banco(corpo: bytes):
         try:
             conn.execute("ATTACH DATABASE ? AS nuvem", (tmp,))
             tem = conn.execute(
-                "SELECT 1 FROM nuvem.sqlite_master WHERE type='table' AND name='messages'").fetchone()
+                "SELECT 1 FROM nuvem.sqlite_master WHERE type='table' AND name='messages'"
+            ).fetchone()
             if tem:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO main.messages (session_id, role, content, timestamp)
                     SELECT n.session_id, n.role, n.content, n.timestamp FROM nuvem.messages n
                     WHERE NOT EXISTS (
                         SELECT 1 FROM main.messages m
                         WHERE m.session_id = n.session_id AND m.role = n.role
                           AND m.content = n.content AND m.timestamp IS n.timestamp)
-                    ORDER BY n.id""")
+                    ORDER BY n.id
+                    """
+                )
             conn.commit()
             conn.execute("DETACH DATABASE nuvem")
         finally:
@@ -301,17 +349,41 @@ def _mesclar_banco(corpo: bytes):
             os.remove(tmp)
 
 
-def _baixar_e_mesclar(cliente, bucket) -> str:
-    """Retorna 'mesclado' | 'ausente' | 'vazio'. Levanta exceção em qualquer falha REAL."""
-    ctx = _cofre_ctx()
+def _baixar_corpo_s3(cliente, bucket: str) -> bytes:
+    return cliente.get_object(Bucket=bucket, Key=COFRE_DB_KEY)["Body"].read()
+
+
+def _enviar_corpo_s3(cliente, bucket: str, corpo: bytes):
+    cliente.put_object(
+        Bucket=bucket,
+        Key=COFRE_DB_KEY,
+        Body=corpo,
+        ContentType="application/octet-stream",
+    )
+
+
+def _baixar_corpo_b2_nativo(key_id: str, app_key: str, bucket_nome: str) -> bytes:
+    api = _criar_cliente_b2_nativo(key_id, app_key)
+    bucket = api.get_bucket_by_name(bucket_nome)
+    buf = io.BytesIO()
     try:
-        corpo = cliente.get_object(Bucket=bucket, Key=COFRE_DB_KEY)["Body"].read()
+        bucket.download_file_by_name(COFRE_DB_KEY).save(buf)
+        return buf.getvalue()
     except Exception as e:
-        if _eh_nao_encontrado(e):
-            ctx["nuvem_ok"], ctx["resultado_download"] = True, "ausente"
-            return "ausente"
+        if "file_not_found" in str(e).lower() or "404" in str(e):
+            return b""
         raise
-    if not corpo:                                   # objeto de 0 bytes: nada a preservar
+
+
+def _enviar_corpo_b2_nativo(key_id: str, app_key: str, bucket_nome: str, corpo: bytes):
+    api = _criar_cliente_b2_nativo(key_id, app_key)
+    bucket = api.get_bucket_by_name(bucket_nome)
+    bucket.upload_bytes(corpo, COFRE_DB_KEY)
+
+
+def _processar_bytes_nuvem(corpo: bytes) -> str:
+    ctx = _cofre_ctx()
+    if not corpo:
         ctx["nuvem_ok"], ctx["resultado_download"] = True, "vazio"
         return "vazio"
     if not corpo.startswith(b"SQLite format 3\x00"):
@@ -319,6 +391,51 @@ def _baixar_e_mesclar(cliente, bucket) -> str:
     _mesclar_banco(corpo)
     ctx["nuvem_ok"], ctx["resultado_download"] = True, "mesclado"
     return "mesclado"
+
+
+def _baixar_e_mesclar(cliente, bucket: str) -> str:
+    """Retorna 'mesclado' | 'ausente' | 'vazio'. Levanta exceção em qualquer falha REAL."""
+    ctx = _cofre_ctx()
+    _, _, key_id, app_key = _obter_config_cofre()
+    try:
+        corpo = _baixar_corpo_s3(cliente, bucket)
+        ctx["modo_ativo"] = "s3"
+        return _processar_bytes_nuvem(corpo)
+    except Exception as e_s3:
+        if _eh_nao_encontrado(e_s3):
+            ctx["nuvem_ok"], ctx["resultado_download"], ctx["modo_ativo"] = True, "ausente", "s3"
+            return "ausente"
+        if key_id and app_key:
+            try:
+                corpo = _baixar_corpo_b2_nativo(key_id, app_key, bucket)
+                ctx["modo_ativo"] = "b2sdk"
+                if not corpo:
+                    ctx["nuvem_ok"], ctx["resultado_download"] = True, "ausente"
+                    return "ausente"
+                return _processar_bytes_nuvem(corpo)
+            except Exception:
+                pass
+        raise RuntimeError(_detalhe_erro(e_s3)) from e_s3
+
+
+def _enviar_para_nuvem(cliente, bucket: str, corpo: bytes):
+    ctx = _cofre_ctx()
+    _, _, key_id, app_key = _obter_config_cofre()
+    if ctx.get("modo_ativo") == "b2sdk" and key_id and app_key:
+        _enviar_corpo_b2_nativo(key_id, app_key, bucket, corpo)
+        return
+    try:
+        _enviar_corpo_s3(cliente, bucket, corpo)
+        ctx["modo_ativo"] = "s3"
+    except Exception as e_s3:
+        if key_id and app_key:
+            try:
+                _enviar_corpo_b2_nativo(key_id, app_key, bucket, corpo)
+                ctx["modo_ativo"] = "b2sdk"
+                return
+            except Exception:
+                pass
+        raise RuntimeError(_detalhe_erro(e_s3)) from e_s3
 
 
 # ------------------------------------------------------------
@@ -336,9 +453,10 @@ def baixar_db_cofre() -> bool:
                 ctx["erro"] = "Credenciais do B2 não encontradas (B2_KEY_ID / B2_APP_KEY)."
                 return False
             _baixar_e_mesclar(cliente, bucket)
+            ctx["erro"] = ""
             return True
         except Exception as e:
-            ctx["erro"] = f"{type(e).__name__}: {e}"
+            ctx["erro"] = _detalhe_erro(e)
             _log.warning("Cofre B2 (download): %s", ctx["erro"])
             return False
 
@@ -367,13 +485,17 @@ def sincronizar_db_cofre(forcar: bool = False) -> bool:
                 return False
             _baixar_e_mesclar(cliente, bucket)
             corpo = _snapshot_local()
-            cliente.put_object(Bucket=bucket, Key=COFRE_DB_KEY, Body=corpo,
-                               ContentType="application/octet-stream")
-            ctx.update(ultimo_envio=time.time(), pendente=False, erro="",
-                       ultimo_tamanho=len(corpo), bloqueado_ate=0.0)
+            _enviar_para_nuvem(cliente, bucket, corpo)
+            ctx.update(
+                ultimo_envio=time.time(),
+                pendente=False,
+                erro="",
+                ultimo_tamanho=len(corpo),
+                bloqueado_ate=0.0,
+            )
             return True
         except Exception as e:
-            ctx["erro"] = f"{type(e).__name__}: {e}"
+            ctx["erro"] = _detalhe_erro(e)
             ctx["bloqueado_ate"] = time.time() + COFRE_BACKOFF_SEG
             ctx["pendente"] = True
             _log.warning("Cofre B2 (envio): %s", ctx["erro"])
@@ -399,8 +521,10 @@ def init_db():
 def add_message(session_id, role, content):
     try:
         with contextlib.closing(_conectar()) as conn:
-            conn.execute("INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-                         (session_id, role, content))
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                (session_id, role, content),
+            )
             conn.commit()
     except Exception as e:
         _log.warning("add_message: %s", e)
@@ -415,7 +539,8 @@ def get_recent_context(session_id, limit=6):
         with contextlib.closing(_conectar()) as conn:
             rows = conn.execute(
                 "SELECT role, content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
-                (session_id, limit)).fetchall()
+                (session_id, limit),
+            ).fetchall()
         return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
     except Exception:
         return []
@@ -433,31 +558,62 @@ def diagnostico_cofre():
 
     try:
         import boto3
-        add("Pacote boto3", True, boto3.__version__)
+
+        add("Pacote boto3", True, boto3._version_)
     except ImportError:
         add("Pacote boto3", False, "não instalado: adicione 'boto3' ao requirements.txt")
-    endpoint = _secret("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
-    bucket = _secret("B2_BUCKET", "zeus-cofre-danilo")
-    key_id, app_key = _secret("B2_KEY_ID"), _secret("B2_APP_KEY")
-    add("B2_KEY_ID", key_id, f"{key_id[:6]}… ({len(key_id)} caracteres)" if key_id else "não encontrado nos secrets")
-    add("B2_APP_KEY", app_key, f"{len(app_key)} caracteres" if app_key else "não encontrado nos secrets")
+
+    try:
+        import b2sdk
+
+        add("Pacote b2sdk", True, getattr(b2sdk, "_version_", "instalado"))
+    except ImportError:
+        add("Pacote b2sdk", False, "opcional: só usado se o endpoint S3 falhar")
+
+    endpoint, bucket, key_id, app_key = _obter_config_cofre()
+    add(
+        "B2_KEY_ID",
+        key_id,
+        f"{key_id[:6]}… ({len(key_id)} caracteres)" if key_id else "não encontrado nos secrets",
+    )
+    add(
+        "B2_APP_KEY",
+        app_key,
+        f"{len(app_key)} caracteres" if app_key else "não encontrado nos secrets",
+    )
     add("B2_ENDPOINT", endpoint, endpoint)
     add("B2_BUCKET", bucket, bucket)
+    add("Modo ativo", True, _cofre_ctx().get("modo_ativo", "s3"))
+
     try:
         cliente, _ = _obter_cliente_cofre()
         if cliente:
             cliente.head_bucket(Bucket=bucket)
-            add("Acesso ao bucket", True, "ok")
+            add("Acesso ao bucket (S3)", True, "ok")
             try:
                 tam = cliente.head_object(Bucket=bucket, Key=COFRE_DB_KEY).get("ContentLength", 0)
-                add(f"Arquivo {COFRE_DB_KEY} na nuvem", tam > 0, f"{tam} bytes" if tam else "existe mas tem 0 bytes")
+                add(
+                    f"Arquivo {COFRE_DB_KEY} na nuvem",
+                    tam > 0,
+                    f"{tam} bytes" if tam else "existe mas tem 0 bytes",
+                )
             except Exception as e:
-                add(f"Arquivo {COFRE_DB_KEY} na nuvem", False,
-                    "ainda não existe" if _eh_nao_encontrado(e) else f"{type(e).__name__}")
+                add(
+                    f"Arquivo {COFRE_DB_KEY} na nuvem",
+                    False,
+                    "ainda não existe" if _eh_nao_encontrado(e) else _detalhe_erro(e),
+                )
     except Exception as e:
-        add("Acesso ao bucket", False, f"{type(e).__name__}: {_dica(type(e).__name__ + str(e))}")
-    add("Banco local", os.path.exists(DB_FILE), f"{os.path.getsize(DB_FILE)} bytes · {contar_mensagens()} mensagens"
-        if os.path.exists(DB_FILE) else "ainda não criado")
+        det_erro = _detalhe_erro(e)
+        add("Acesso ao bucket (S3)", False, f"{det_erro} — {_dica(det_erro)}")
+
+    add(
+        "Banco local",
+        os.path.exists(DB_FILE),
+        f"{os.path.getsize(DB_FILE)} bytes · {contar_mensagens()} mensagens"
+        if os.path.exists(DB_FILE)
+        else "ainda não criado",
+    )
     ctx = _cofre_ctx()
     if ctx["erro"]:
         add("Último erro", False, f"{ctx['erro']} — {_dica(ctx['erro'])}")
@@ -469,12 +625,14 @@ def mostrar_diagnostico_cofre():
         if st.button("Testar envio agora", key="cofre_diag_btn", use_container_width=True):
             ok = sincronizar_db_cofre(forcar=True)
             (st.success if ok else st.error)(
-                f"Envio concluído ({_cofre_ctx()['ultimo_tamanho']} bytes)." if ok else "Envio falhou, veja abaixo.")
+                f"Envio concluído ({_cofre_ctx()['ultimo_tamanho']} bytes)."
+                if ok
+                else "Envio falhou, veja abaixo."
+            )
             for nome, ok_, det in diagnostico_cofre():
-                st.write(f"{'✅' if ok_ else '❌'} **{nome}** — {det}")
+                st.write(f"{'✅' if ok_ else '❌'} *{nome}* — {det}")
         else:
             st.caption("Toque no botão para testar a conexão e ver o motivo exato de qualquer falha.")
-
 
 
 # ============================================================
