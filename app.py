@@ -1109,8 +1109,8 @@ def processar_prompt(prompt):
             st.markdown(resposta_cofre)
             st.stop()
             st.session_state.messages.append({"role": "assistant", "content": response})
-                add_message(sid, "assistant", response)
-                return response
+            add_message(sid, "assistant", response)
+            return response
 
     add_message(sid, "user", prompt)
     st.session_state.messages.append({"role": "assistant", "content": response})
