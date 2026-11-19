@@ -45,7 +45,13 @@ try:
     from github_manager import salvar_no_github
 except Exception:
     salvar_no_github = None
-
+try:
+    from cofre_b2 import salvar_texto, ler_texto, salvar_json, ler_json
+except Exception:
+    salvar_texto = None
+    ler_texto = None
+    salvar_json = None
+    ler_json = None
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
