@@ -112,19 +112,83 @@ def inject_theme_classico(theme_name: str):
 
 
 # ============================================================
-# BANCO DE DADOS
+# BANCO DE DADOS + COFRE BACKBLAZE B2
 # ============================================================
 DB_FILE = "zeus_chat.db"
+COFRE_DB_KEY = "banco/zeus_chat.db"
+
+
+def _obter_cliente_cofre():
+    """Conecta ao bucket Backblaze B2 usando _secret() ou cofre_b2."""
+    endpoint = _secret("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
+    bucket = _secret("B2_BUCKET", "zeus-cofre-danilo")
+    key_id = _secret("B2_KEY_ID")
+    app_key = _secret("B2_APP_KEY")
+
+    if key_id and app_key:
+        import boto3
+        from botocore.config import Config
+
+        cliente = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=key_id,
+            aws_secret_access_key=app_key,
+            config=Config(signature_version="s3v4"),
+        )
+        return cliente, bucket
+
+    if "conectar_cofre" in globals() and callable(globals()["conectar_cofre"]):
+        return globals()["conectar_cofre"]()
+
+    return None, bucket
+
+
+def baixar_db_cofre():
+    """Baixa o zeus_chat.db do Backblaze B2 se ainda não existir localmente."""
+    try:
+        if os.path.exists(DB_FILE) and os.path.getsize(DB_FILE) > 0:
+            return
+        cliente, bucket = _obter_cliente_cofre()
+        if not cliente or not bucket:
+            return
+        resposta = cliente.get_object(Bucket=bucket, Key=COFRE_DB_KEY)
+        conteudo = resposta["Body"].read()
+        if conteudo:
+            with open(DB_FILE, "wb") as f:
+                f.write(conteudo)
+    except Exception:
+        pass
+
+
+def sincronizar_db_cofre():
+    """Envia o arquivo local zeus_chat.db para o Backblaze B2."""
+    try:
+        if not os.path.exists(DB_FILE):
+            return
+        cliente, bucket = _obter_cliente_cofre()
+        if not cliente or not bucket:
+            return
+        with open(DB_FILE, "rb") as f:
+            cliente.put_object(
+                Bucket=bucket,
+                Key=COFRE_DB_KEY,
+                Body=f.read(),
+            )
+    except Exception:
+        pass
 
 
 def init_db():
     try:
+        baixar_db_cofre()
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)"
         )
         conn.commit()
         conn.close()
+        sincronizar_db_cofre()
     except Exception:
         pass
 
@@ -138,12 +202,15 @@ def add_message(session_id, role, content):
         )
         conn.commit()
         conn.close()
+        sincronizar_db_cofre()
     except Exception:
         pass
 
 
 def get_recent_context(session_id, limit=6):
     try:
+        if not os.path.exists(DB_FILE):
+            baixar_db_cofre()
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         rows = conn.execute(
             "SELECT role, content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
