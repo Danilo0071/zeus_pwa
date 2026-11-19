@@ -355,33 +355,35 @@ def baixar_db_cofre() -> bool:
             _baixar_e_mesclar(cliente, bucket)
             return True
         except Exception as e:
-            ctx["erro"] = f"{type(e)._name_}: {e}"
-            _log.warning("Cofre B2 (download): %s", ctx["erro"])
+            with contextlib.suppress(Exception):
+                ctx["erro"] = f"{type(e)._name_}: {e}"
+                _log.warning("Cofre B2 (download): %s", ctx["erro"])
             return False
 
 
 def sincronizar_db_cofre(forcar: bool = False) -> bool:
     """
-    Mescla o que há na nuvem e envia o banco local. Se o download falhar por qualquer motivo
-    real, NADA é enviado (isso evita sobrescrever o cofre com um banco vazio).
+    Mescla o que há na nuvem e envia o banco local. Nunca derruba a tela se o B2 falhar.
     """
     ctx = _cofre_ctx()
     with ctx["lock"]:
         agora = time.time()
-        if not forcar:
-            if agora < ctx["bloqueado_ate"]:
-                ctx["pendente"] = True
-                return False
-            if agora - ctx["ultimo_envio"] < COFRE_INTERVALO_SEG:
-                ctx["pendente"] = True
-                return False
         try:
+            if not forcar:
+                if agora < ctx["bloqueado_ate"]:
+                    ctx["pendente"] = True
+                    return False
+                if agora - ctx["ultimo_envio"] < COFRE_INTERVALO_SEG:
+                    ctx["pendente"] = True
+                    return False
+
             _conectar().close()
             cliente, bucket = _obter_cliente_cofre()
             if not cliente or not bucket:
                 ctx["erro"] = "Credenciais do B2 não encontradas (B2_KEY_ID / B2_APP_KEY)."
                 ctx["bloqueado_ate"] = agora + COFRE_BACKOFF_SEG
                 return False
+
             _baixar_e_mesclar(cliente, bucket)
             corpo = _snapshot_local()
             cliente.put_object(
@@ -399,10 +401,12 @@ def sincronizar_db_cofre(forcar: bool = False) -> bool:
             )
             return True
         except Exception as e:
-            ctx["erro"] = f"{type(e)._name_}: {e}"
-            ctx["bloqueado_ate"] = time.time() + COFRE_BACKOFF_SEG
-            ctx["pendente"] = True
-            _log.warning("Cofre B2 (envio): %s", ctx["erro"])
+            with contextlib.suppress(Exception):
+                ctx["erro"] = f"{type(e)._name_}: {e}"
+                ctx["bloqueado_ate"] = time.time() + COFRE_BACKOFF_SEG
+                ctx["pendente"] = True
+            with contextlib.suppress(Exception):
+                _log.warning("Cofre B2 (envio): %s", ctx["erro"])
             return False
 
 
@@ -422,7 +426,8 @@ def salvar_arquivo_cofre(chave_remota: str, dados_ou_caminho) -> bool:
         cliente.put_object(Bucket=bucket, Key=chave_remota, Body=corpo)
         return True
     except Exception as e:
-        _log.warning("Cofre B2 (salvar_arquivo_cofre): %s", e)
+        with contextlib.suppress(Exception):
+            _log.warning("Cofre B2 (salvar_arquivo_cofre): %s", e)
         return False
 
 
@@ -439,7 +444,8 @@ def init_db():
         elif ctx["pendente"]:
             sincronizar_db_cofre()
     except Exception as e:
-        _log.warning("init_db: %s", e)
+        with contextlib.suppress(Exception):
+            _log.warning("init_db: %s", e)
 
 
 def add_message(session_id, role, content):
@@ -451,9 +457,11 @@ def add_message(session_id, role, content):
             )
             conn.commit()
     except Exception as e:
-        _log.warning("add_message: %s", e)
+        with contextlib.suppress(Exception):
+            _log.warning("add_message: %s", e)
         return
-    sincronizar_db_cofre()
+    with contextlib.suppress(Exception):
+        sincronizar_db_cofre()
 
 
 def get_recent_context(session_id, limit=6):
@@ -540,8 +548,6 @@ def mostrar_diagnostico_cofre():
                 st.write(f"{'✅' if ok_ else '❌'} *{nome}* — {det}")
         else:
             st.caption("Toque no botão para testar a conexão e ver o motivo exato de qualquer falha.")
-
-
 # ============================================================
 # CLIENTE LLM (GROQ, GEMINI, CLAUDE) COM RETENTATIVA E FALLBACK
 # ============================================================
