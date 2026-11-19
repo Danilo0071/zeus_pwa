@@ -988,9 +988,9 @@ if not api_key:
             continue
 override = _secret(MODEL_SECRET[prov])
 candidates = [override] if override else MODELS[prov]
-        try:
+try:
             ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
-        except Exception as e:
+except Exception as e:
             ok, text = False, f"erro de conexão: {e}"
         if ok:
             return True, text or "(resposta vazia)", prov, erros
