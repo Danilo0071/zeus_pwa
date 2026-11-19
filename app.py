@@ -992,10 +992,10 @@ try:
             ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
 except Exception as e:
             ok, text = False, f"erro de conexão: {e}"
-        if ok:
+if ok:
             return True, text or "(resposta vazia)", prov, erros
         erros.append(f"{prov}: {_resumo(text)}")
-    return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
+return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
 
 
 
