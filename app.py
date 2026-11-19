@@ -225,26 +225,430 @@ def get_recent_context(session_id, limit=6):
 
 
 # ============================================================
-# CHAVES
+# ZEUS - BLOCO ÚNICO FINAL - NÃO MUDA NOME DE CHAVE
+# Chaves usadas: B2_ENDPOINT, B2_BUCKET, B2_KEY_ID, B2_APP_KEY, GITHUB_TOKEN, GITHUB_REPO
+# NUNCA apaga app.py
 # ============================================================
-CHAVES_PADRAO = {  # Nunca coloque chaves reais aqui. Use .streamlit/secrets.toml
-}
+_log = logging.getLogger("zeus.cofre")
 
+CHAVES_PADRAO = {}
+
+if "THEMES" not in globals():
+    THEMES = {"Padrão": {"bg": "#0b0f19", "sidebar": "#111827", "text": "#f3f4f6", "accent": "#3b82f6"}}
 
 def _limpar_chave(v: str) -> str:
     v = re.sub(r"\s+", "", v).strip("\"'")
     return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
 
-
 def _secret(key: str, default: str = "") -> str:
     try:
-        val = st.secrets.get(key) if hasattr(st, "secrets") else None
+        sec = st.secrets
+        val = sec.get(key)
+        if not val:
+            for _, bloco in sec.items():
+                if hasattr(bloco, "get"):
+                    val = bloco.get(key)
+                    if val:
+                        break
         if val:
             return _limpar_chave(str(val))
     except Exception:
         pass
     return _limpar_chave(os.environ.get(key) or default or CHAVES_PADRAO.get(key, ""))
 
+DB_FILE = "zeus_chat.db"
+COFRE_DB_KEY = "banco/zeus_chat.db"
+COFRE_INTERVALO_SEG = 2
+COFRE_BACKOFF_SEG = 5
+PASTA_APRENDIZADO_GITHUB = "zeus_aprendizado"
+PASTA_APRENDIZADO_B2 = "aprendizado/"
+GITHUB_BRANCH = "main"
+
+@st.cache_resource
+def _cofre_ctx():
+    return {"lock": threading.RLock(), "cliente": None, "cliente_assinatura": "", "nuvem_ok": False, "inicializado": False, "pendente": False, "ultimo_envio": 0.0, "bloqueado_ate": 0.0, "erro": "", "ultimo_tamanho": 0, "resultado_download": "", "cache_busca": {}, "ultima_migracao": ""}
+
+def _criar_cliente_s3(endpoint: str, key_id: str, app_key: str):
+    import boto3
+    from botocore.config import Config
+    m = re.search(r"s3\.([a-z0-9-]+)\.backblazeb2\.com", endpoint)
+    return boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=key_id, aws_secret_access_key=app_key, region_name=m.group(1) if m else None, config=Config(signature_version="s3v4", connect_timeout=5, read_timeout=10, retries={"max_attempts": 1, "mode": "standard"}))
+
+def _obter_cliente_cofre():
+    endpoint = _secret("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
+    if endpoint and not endpoint.startswith("http"):
+        endpoint = "https://" + endpoint
+    bucket = _secret("B2_BUCKET", "zeus-cofre-danilo")
+    key_id, app_key = _secret("B2_KEY_ID"), _secret("B2_APP_KEY")
+    if key_id and app_key:
+        ctx = _cofre_ctx()
+        assinatura = f"{endpoint}|{bucket}|{key_id}|{len(app_key)}"
+        if ctx["cliente"] is None or ctx["cliente_assinatura"] != assinatura:
+            ctx["cliente"] = _criar_cliente_s3(endpoint, key_id, app_key)
+            ctx["cliente_assinatura"] = assinatura
+            ctx["nuvem_ok"] = False
+        return ctx["cliente"], bucket
+    if "conectar_cofre" in globals() and callable(globals()["conectar_cofre"]):
+        return globals()["conectar_cofre"]()
+    return None, bucket
+
+def _eh_nao_encontrado(e: Exception) -> bool:
+    resp = getattr(e, "response", None) or {}
+    codigo = (resp.get("Error") or {}).get("Code", "")
+    status = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+    if codigo == "NoSuchBucket":
+        return False
+    return codigo in ("NoSuchKey", "404", "NotFound") or status == 404
+
+def _dica(erro: str) -> str:
+    dicas = {"InvalidAccessKeyId": "B2_KEY_ID errado (use o keyID, não o nome).", "SignatureDoesNotMatch": "B2_APP_KEY errada ou endpoint/região errado.", "AccessDenied": "chave sem permissão de ler/escrever no bucket.", "NoSuchBucket": "nome do bucket errado ou endpoint de outra região.", "ImportError": "falta boto3 no requirements.txt.", "ModuleNotFoundError": "falta boto3 no requirements.txt.", "EndpointConnectionError": "endpoint inválido ou sem internet.", "InvalidAccessKey": "chave inválida/expirada."}
+    for k, v in dicas.items():
+        if k in erro:
+            return v
+    return ""
+
+def _conectar():
+    conn = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
+    conn.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_sessao ON messages(session_id, id)")
+    conn.execute("CREATE TABLE IF NOT EXISTS aprendizado (id INTEGER PRIMARY KEY AUTOINCREMENT, chave TEXT UNIQUE, conteudo TEXT, origem TEXT DEFAULT 'chat', local_atual TEXT DEFAULT '【entity-github¦canonical_name=GITHUB】', timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_apr_chave ON aprendizado(chave)")
+    conn.commit()
+    return conn
+
+def contar_mensagens() -> int:
+    with contextlib.closing(_conectar()) as conn:
+        return conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+
+def _snapshot_local() -> bytes:
+    fd, tmp = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    src = _conectar()
+    dest = sqlite3.connect(tmp)
+    try:
+        src.backup(dest)
+        dest.close()
+        with open(tmp, "rb") as f:
+            return f.read()
+    finally:
+        src.close()
+        with contextlib.suppress(Exception):
+            dest.close()
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+
+def _mesclar_banco(corpo: bytes):
+    fd, tmp = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(corpo)
+        conn = _conectar()
+        try:
+            conn.execute("ATTACH DATABASE ? AS nuvem", (tmp,))
+            tem = conn.execute("SELECT 1 FROM nuvem.sqlite_master WHERE type='table' AND name='messages'").fetchone()
+            if tem:
+                conn.execute("INSERT INTO main.messages (session_id, role, content, timestamp) SELECT n.session_id, n.role, n.content, n.timestamp FROM nuvem.messages n WHERE NOT EXISTS (SELECT 1 FROM main.messages m WHERE m.session_id=n.session_id AND m.role=n.role AND m.content=n.content AND m.timestamp IS n.timestamp) ORDER BY n.id")
+            tem_apr = conn.execute("SELECT 1 FROM nuvem.sqlite_master WHERE type='table' AND name='aprendizado'").fetchone()
+            if tem_apr:
+                conn.execute("INSERT OR IGNORE INTO main.aprendizado (chave, conteudo, origem, local_atual, timestamp) SELECT chave, conteudo, origem, local_atual, timestamp FROM nuvem.aprendizado")
+            conn.commit()
+            with contextlib.suppress(Exception):
+                conn.execute("DETACH DATABASE nuvem")
+        finally:
+            conn.close()
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+
+def _baixar_e_mesclar(cliente, bucket) -> str:
+    ctx = _cofre_ctx()
+    try:
+        corpo = cliente.get_object(Bucket=bucket, Key=COFRE_DB_KEY)["Body"].read()
+    except Exception as e:
+        if _eh_nao_encontrado(e):
+            ctx["nuvem_ok"], ctx["resultado_download"] = True, "ausente"
+            return "ausente"
+        raise
+    if not corpo:
+        ctx["nuvem_ok"], ctx["resultado_download"] = True, "vazio"
+        return "vazio"
+    if not corpo.startswith(b"SQLite format 3\x00"):
+        raise ValueError("objeto na nuvem não é SQLite")
+    _mesclar_banco(corpo)
+    ctx["nuvem_ok"], ctx["resultado_download"] = True, "mesclado"
+    return "mesclado"
+
+def baixar_db_cofre() -> bool:
+    ctx = _cofre_ctx()
+    with ctx["lock"]:
+        if ctx["nuvem_ok"]:
+            return True
+        try:
+            cliente, bucket = _obter_cliente_cofre()
+            if not cliente or not bucket:
+                ctx["erro"] = "Credenciais do B2 não encontradas (B2_KEY_ID / B2_APP_KEY)."
+                return False
+            _baixar_e_mesclar(cliente, bucket)
+            return True
+        except Exception as e:
+            ctx["erro"] = f"{type(e)._name_}: {repr(e)}"
+            return False
+
+def sincronizar_db_cofre(forcar: bool = True) -> bool:
+    ctx = _cofre_ctx()
+    with ctx["lock"]:
+        agora = time.time()
+        try:
+            if not forcar:
+                if agora < ctx["bloqueado_ate"]:
+                    ctx["pendente"] = True
+                    return False
+                if agora - ctx["ultimo_envio"] < COFRE_INTERVALO_SEG:
+                    ctx["pendente"] = True
+                    return False
+            _conectar().close()
+            cliente, bucket = _obter_cliente_cofre()
+            if not cliente or not bucket:
+                ctx["erro"] = "Credenciais do B2 não encontradas (B2_KEY_ID / B2_APP_KEY)."
+                ctx["bloqueado_ate"] = agora + COFRE_BACKOFF_SEG
+                return False
+            _baixar_e_mesclar(cliente, bucket)
+            corpo = _snapshot_local()
+            cliente.put_object(Bucket=bucket, Key=COFRE_DB_KEY, Body=corpo, ContentType="application/octet-stream")
+            ctx.update(ultimo_envio=time.time(), pendente=False, erro="", ultimo_tamanho=len(corpo), bloqueado_ate=0.0)
+            return True
+        except Exception as e:
+            ctx["erro"] = f"{type(e)._name_}: {repr(e)}"
+            ctx["bloqueado_ate"] = time.time() + COFRE_BACKOFF_SEG
+            ctx["pendente"] = True
+            return False
+
+def salvar_arquivo_cofre(chave_remota: str, dados_ou_caminho) -> bool:
+    try:
+        cliente, bucket = _obter_cliente_cofre()
+        if not cliente or not bucket:
+            return False
+        if isinstance(dados_ou_caminho, bytes):
+            corpo = dados_ou_caminho
+        elif isinstance(dados_ou_caminho, str) and os.path.exists(dados_ou_caminho):
+            with open(dados_ou_caminho, "rb") as f:
+                corpo = f.read()
+        else:
+            corpo = str(dados_ou_caminho).encode("utf-8")
+        cliente.put_object(Bucket=bucket, Key=chave_remota, Body=corpo)
+        return True
+    except Exception as e:
+        _log.warning("salvar_arquivo_cofre: %s", repr(e))
+        return False
+
+# --- ZEUS: BUSCA E APRENDE SEM OUTRA IA ---
+def zeus_buscar_conhecimento(pergunta: str):
+    ctx = _cofre_ctx()
+    q = pergunta.lower().strip()
+    if q in ctx["cache_busca"]:
+        return ctx["cache_busca"][q]
+    try:
+        with contextlib.closing(_conectar()) as conn:
+            rows = conn.execute("SELECT conteudo FROM aprendizado WHERE chave LIKE ? OR conteudo LIKE ? ORDER BY id DESC LIMIT 1", (f"%{q[:40]}%", f"%{q[:40]}%")).fetchall()
+            if rows:
+                ctx["cache_busca"][q] = rows[0][0]
+                return rows[0][0]
+    except Exception:
+        pass
+    try:
+        if not ctx["nuvem_ok"]:
+            baixar_db_cofre()
+            with contextlib.closing(_conectar()) as conn:
+                rows = conn.execute("SELECT conteudo FROM aprendizado WHERE conteudo LIKE ? LIMIT 1", (f"%{q[:40]}%",)).fetchall()
+                if rows:
+                    ctx["cache_busca"][q] = rows[0][0]
+                    return rows[0][0]
+        cliente, bucket = _obter_cliente_cofre()
+        if cliente:
+            pag = cliente.list_objects_v2(Bucket=bucket, Prefix=PASTA_APRENDIZADO_B2)
+            for obj in pag.get("Contents", []):
+                if q[:20] and q[:20] in obj["Key"].lower():
+                    corpo = cliente.get_object(Bucket=bucket, Key=obj["Key"])["Body"].read().decode("utf-8", errors="ignore")
+                    ctx["cache_busca"][q] = corpo
+                    return corpo
+    except Exception as e:
+        _log.warning("zeus_buscar: %s", repr(e))
+    return None
+
+def zeus_salvar_aprendizado(chave: str, conteudo: str, origem: str = "chat"):
+    try:
+        with contextlib.closing(_conectar()) as conn:
+            conn.execute("INSERT OR REPLACE INTO aprendizado (chave, conteudo, origem, local_atual) VALUES (?, ?, ?, 'github')", (chave, conteudo, origem))
+            conn.commit()
+        sincronizar_db_cofre(forcar=True)
+        return True
+    except Exception as e:
+        _log.warning("zeus_salvar: %s", repr(e))
+        return False
+
+def zeus_responder_com_memoria(pergunta: str):
+    achado = zeus_buscar_conhecimento(pergunta)
+    if achado:
+        return f"[Zeus - Lembrei do Cofre B2] {achado}"
+    return None
+
+# --- MIGRAÇÃO 03:00 GITHUB -> B2 ---
+def _github_headers():
+    token = _secret("GITHUB_TOKEN", "")
+    return {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"} if token else {}
+
+def _github_apagar_arquivo(caminho_no_repo: str, mensagem: str):
+    if "app.py" in caminho_no_repo.lower():
+        _log.warning("BLOQUEADO: tentativa de apagar app.py")
+        return False
+    if not caminho_no_repo.startswith(PASTA_APRENDIZADO_GITHUB + "/"):
+        _log.warning(f"BLOQUEADO: só apago em {PASTA_APRENDIZADO_GITHUB}/, recusado: {caminho_no_repo}")
+        return False
+    try:
+        repo = _secret("GITHUB_REPO", "")
+        if not repo:
+            return False
+        import requests
+        url = f"https://api.github.com/repos/{repo}/contents/{caminho_no_repo}?ref={GITHUB_BRANCH}"
+        r = requests.get(url, headers=_github_headers(), timeout=10)
+        if r.status_code != 200:
+            return False
+        sha = r.json().get("sha")
+        r2 = requests.delete(url, headers=_github_headers(), json={"message": mensagem, "sha": sha, "branch": GITHUB_BRANCH}, timeout=10)
+        return r2.status_code in (200, 204)
+    except Exception as e:
+        _log.warning("_github_apagar: %s", repr(e))
+        return False
+
+def zeus_migracao_madrugada_github_para_b2():
+    ctx = _cofre_ctx()
+    try:
+        with contextlib.closing(_conectar()) as conn:
+            rows = conn.execute("SELECT chave, conteudo FROM aprendizado WHERE local_atual='github'").fetchall()
+        if not rows:
+            return 0
+        cliente, bucket = _obter_cliente_cofre()
+        if not cliente:
+            return 0
+        migrados = 0
+        for chave, conteudo in rows:
+            if salvar_arquivo_cofre(f"{PASTA_APRENDIZADO_B2}{chave}.txt", conteudo):
+                with contextlib.closing(_conectar()) as conn:
+                    conn.execute("UPDATE aprendizado SET local_atual='b2' WHERE chave=?", (chave,))
+                    conn.commit()
+                _github_apagar_arquivo(f"{PASTA_APRENDIZADO_GITHUB}/{chave}.txt", f"Zeus: migrado para B2 {chave}")
+                _github_apagar_arquivo(f"{PASTA_APRENDIZADO_GITHUB}/{chave}.json", f"Zeus: migrado para B2 {chave}")
+                migrados += 1
+        sincronizar_db_cofre(forcar=True)
+        ctx["ultima_migracao"] = f"{migrados} arquivos GitHub->B2"
+        return migrados
+    except Exception as e:
+        _log.warning("migracao: %s", repr(e))
+        return 0
+
+def zeus_loop_migracao_03h():
+    ja_rodou = None
+    while True:
+        try:
+            import datetime as _dt
+            agora = _dt.datetime.now()
+            if agora.hour == 3 and agora.date() != ja_rodou:
+                ja_rodou = agora.date()
+                threading.Thread(target=zeus_migracao_madrugada_github_para_b2, daemon=True).start()
+            time.sleep(600)
+        except Exception:
+            time.sleep(60)
+
+threading.Thread(target=zeus_loop_migracao_03h, daemon=True).start()
+
+def zeus_forcar_migracao_agora():
+    threading.Thread(target=zeus_migracao_madrugada_github_para_b2, daemon=True).start()
+    return "Migração forçada - veja log"
+
+def init_db():
+    try:
+        _conectar().close()
+        ctx = _cofre_ctx()
+        if not ctx["inicializado"]:
+            if sincronizar_db_cofre(forcar=True):
+                ctx["inicializado"] = True
+        elif ctx["pendente"]:
+            sincronizar_db_cofre(forcar=True)
+    except Exception as e:
+        _log.warning("init_db: %s", repr(e))
+
+def add_message(session_id, role, content):
+    try:
+        with contextlib.closing(_conectar()) as conn:
+            conn.execute("INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)", (session_id, role, content))
+            conn.commit()
+    except Exception as e:
+        _log.warning("add_message: %s", repr(e))
+        return
+    with contextlib.suppress(Exception):
+        sincronizar_db_cofre(forcar=True)
+
+def get_recent_context(session_id, limit=6):
+    try:
+        if not _cofre_ctx()["nuvem_ok"]:
+            baixar_db_cofre()
+        with contextlib.closing(_conectar()) as conn:
+            rows = conn.execute("SELECT role, content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?", (session_id, limit)).fetchall()
+        return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+    except Exception:
+        return []
+
+def diagnostico_cofre():
+    itens = []
+    def add(nome, ok, det=""):
+        itens.append((nome, bool(ok), det))
+    try:
+        import boto3
+        add("Pacote boto3", True, boto3._version_)
+    except ImportError:
+        add("Pacote boto3", False, "não instalado")
+    endpoint = _secret("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
+    bucket = _secret("B2_BUCKET", "zeus-cofre-danilo")
+    key_id, app_key = _secret("B2_KEY_ID"), _secret("B2_APP_KEY")
+    add("B2_KEY_ID", key_id, f"{key_id[:6]}… ({len(key_id)} caracteres)" if key_id else "não encontrado")
+    add("B2_APP_KEY", app_key, f"{len(app_key)} caracteres" if app_key else "não encontrado")
+    add("B2_ENDPOINT", endpoint, endpoint)
+    add("B2_BUCKET", bucket, bucket)
+    try:
+        cliente, _ = _obter_cliente_cofre()
+        if cliente:
+            cliente.head_bucket(Bucket=bucket)
+            add("Acesso ao bucket", True, "ok")
+            try:
+                tam = cliente.head_object(Bucket=bucket, Key=COFRE_DB_KEY).get("ContentLength", 0)
+                add(f"Arquivo {COFRE_DB_KEY}", tam > 0, f"{tam} bytes" if tam else "0 bytes")
+            except Exception as e:
+                add(f"Arquivo {COFRE_DB_KEY}", False, "ainda não existe" if eh_nao_encontrado(e) else f"{type(e).name_}")
+    except Exception as e:
+        add("Acesso ao bucket", False, f"{type(e)._name}: {_dica(type(e).name_ + str(e))}")
+    add("Banco local", os.path.exists(DB_FILE), f"{os.path.getsize(DB_FILE)} bytes · {contar_mensagens()} mensagens" if os.path.exists(DB_FILE) else "ainda não criado")
+    ctx = _cofre_ctx()
+    if ctx["erro"]:
+        add("Último erro", False, f"{ctx['erro']} — {_dica(ctx['erro'])}")
+    with contextlib.suppress(Exception):
+        with contextlib.closing(_conectar()) as conn:
+            pend = conn.execute("SELECT COUNT(*) FROM aprendizado WHERE local_atual='github'").fetchone()[0]
+            no_b2 = conn.execute("SELECT COUNT(*) FROM aprendizado WHERE local_atual='b2'").fetchone()[0]
+            add("Pendente GitHub (vai às 03:00)", True, f"{pend} arquivos")
+            add("Já no B2", True, f"{no_b2} arquivos")
+            add("Última migração", True, ctx.get("ultima_migracao") or "ainda não rodou")
+    return itens
+
+def mostrar_diagnostico_cofre():
+    with st.expander("🔧 Diagnóstico do Cofre B2", expanded=False):
+        if st.button("Testar envio agora", key="cofre_diag_btn", use_container_width=True):
+            ok = sincronizar_db_cofre(forcar=True)
+            (st.success if ok else st.error)(f"Envio concluído ({_cofre_ctx()['ultimo_tamanho']} bytes)." if ok else "Envio falhou, veja abaixo.")
+            for nome, ok_, det in diagnostico_cofre():
+                st.write(f"{'✅' if ok_ else '❌'} *{nome}* — {det}")
+        else:
+            st.caption("Toque no botão para testar a conexão e ver o motivo exato de qualquer falha.")
 
 # ============================================================
 # CLIENTE LLM (GROQ, GEMINI, CLAUDE) COM RETENTATIVA E FALLBACK
