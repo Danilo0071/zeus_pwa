@@ -974,29 +974,28 @@ def _resumo(text):
 
 
 def get_llm_response(session_id, prompt, model_choice, system=None, use_history=True):
-
     resposta_cofre = tratar_comando_cofre_chat(prompt)
-if resposta_cofre is not None:
-    return resposta_cofre, "cofre_b2", None
+    if resposta_cofre is not None:
+        return resposta_cofre, "cofre_b2", None
+
     msgs = _normalize((get_recent_context(session_id) if use_history else []) + [{"role": "user", "content": prompt}])
     order = [model_choice] + [p for p in PROVIDERS if p != model_choice]
     erros = []
-for prov in order:
+    for prov in order:
         api_key = _secret(KEYS[prov])
-if not api_key:
+        if not api_key:
             erros.append(f"{prov}: chave ausente")
             continue
-override = _secret(MODEL_SECRET[prov])
-candidates = [override] if override else MODELS[prov]
-try:
+        override = _secret(MODEL_SECRET[prov])
+        candidates = [override] if override else MODELS[prov]
+        try:
             ok, text = _try_models(candidates, lambda m: CALLERS[prov](api_key, m, msgs, system))
-except Exception as e:
+        except Exception as e:
             ok, text = False, f"erro de conexão: {e}"
-if ok:
+        if ok:
             return True, text or "(resposta vazia)", prov, erros
-erros.append(f"{prov}: {_resumo(text)}")
-return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
-
+        erros.append(f"{prov}: {_resumo(text)}")
+    return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
 
 
 # ============================================================
