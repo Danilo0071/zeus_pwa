@@ -3700,6 +3700,242 @@ def zeus_refletir(resposta, pergunta=""):
     return texto, rel
 
 
+# ============================================================================
+# ZEUS :: MÓDULO DE AUTONOMIA, MEMÓRIA E REFLEXÃO COGNITIVA
+# Cole este bloco no FINAL do app.py. Não renderiza nada sozinho (sem UI),
+# só define funções. Nenhuma dependência além da biblioteca padrão.
+# ============================================================================
+import os as _zos
+import re as _zre
+import json as _zjson
+import sqlite3 as _zsql
+import threading as _zthr
+import unicodedata as _zuni
+from datetime import datetime as _zdt
+from difflib import SequenceMatcher as _zSM
+
+try:
+    _ZEUS_DIR = _zos.path.dirname(_zos.path.abspath(__file__))
+except NameError:
+    _ZEUS_DIR = _zos.getcwd()
+ZEUS_DB_PATH = _zos.path.join(_ZEUS_DIR, "zeus_memoria.db")
+_ZEUS_LOCK = _zthr.Lock()
+
+# ----------------------------------------------------------------------------
+# Diretrizes soberanas (editáveis em runtime via zeus_definir_diretriz)
+# ----------------------------------------------------------------------------
+_ZEUS_DIRETRIZES_PADRAO = {
+    "identidade": "Zeus: assistente soberano, técnico, direto e objetivo.",
+    "limiar_memoria_local": 0.82,   # similaridade mínima p/ responder só com memória
+    "limiar_correcao": 0.70,        # similaridade mínima p/ aplicar correção passada
+    "confianca_minima": 0.55,       # confiança mínima de um conhecimento p/ uso local
+    "max_chars_resposta": 4000,
+    "max_exemplos_contexto": 3,
+    "frases_removidas": [
+        r"como (um|uma) (modelo de linguagem|ia|intelig[eê]ncia artificial)[^.\n]*[.\n]\s*",
+        r"as an ai( language model)?[^.\n]*[.\n]\s*",
+        r"sou apenas (uma|um) (ia|assistente virtual)[^.\n]*[.\n]\s*",
+        r"espero (ter )?ajudado[^.\n]*[.!]?\s*",
+        r"(great|good) question[!.]?\s*",
+        r"(com certeza|claro|certamente|perfeito)[!,.]\s+",
+        r"n[aã]o hesite em (me )?(perguntar|contatar)[^.\n]*[.!]?\s*",
+        r"de acordo com (as )?minhas diretrizes[^.\n]*[.,]?\s*",
+    ],
+}
+
+_ZEUS_STOP = {"a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "um", "uma",
+              "para", "por", "com", "que", "e", "eh", "me", "se", "no", "na", "nos", "nas",
+              "the", "is", "of", "to", "and"}
+
+
+def _zeus_conn():
+    c = _zsql.connect(ZEUS_DB_PATH, timeout=10, check_same_thread=False)
+    c.row_factory = _zsql.Row
+    return c
+
+
+def zeus_init_memoria():
+    """Cria as tabelas (idempotente) e grava diretrizes padrão ausentes."""
+    with _ZEUS_LOCK, _zeus_conn() as c:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS interacoes(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, pergunta TEXT,
+            pergunta_norm TEXT, resposta TEXT, origem TEXT,
+            feedback INTEGER, correcao TEXT);
+        CREATE TABLE IF NOT EXISTS conhecimento(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, pergunta_norm TEXT UNIQUE,
+            pergunta TEXT, resposta TEXT, confianca REAL DEFAULT 0.5,
+            usos INTEGER DEFAULT 0, acertos INTEGER DEFAULT 0, erros INTEGER DEFAULT 0,
+            origem TEXT, atualizado TEXT);
+        CREATE TABLE IF NOT EXISTS diretrizes(chave TEXT PRIMARY KEY, valor TEXT);
+        """)
+        for k, v in _ZEUS_DIRETRIZES_PADRAO.items():
+            c.execute("INSERT OR IGNORE INTO diretrizes VALUES(?,?)", (k, _zjson.dumps(v)))
+
+
+def zeus_diretriz(chave, padrao=None):
+    try:
+        with _zeus_conn() as c:
+            r = c.execute("SELECT valor FROM diretrizes WHERE chave=?", (chave,)).fetchone()
+        return _zjson.loads(r["valor"]) if r else _ZEUS_DIRETRIZES_PADRAO.get(chave, padrao)
+    except Exception:
+        return _ZEUS_DIRETRIZES_PADRAO.get(chave, padrao)
+
+
+def zeus_definir_diretriz(chave, valor):
+    """Altera/cria uma diretriz soberana persistente."""
+    with _ZEUS_LOCK, _zeus_conn() as c:
+        c.execute("INSERT OR REPLACE INTO diretrizes VALUES(?,?)", (chave, _zjson.dumps(valor)))
+
+
+# ----------------------------------------------------------------------------
+# Similaridade (sem dependências externas)
+# ----------------------------------------------------------------------------
+def _zeus_norm(txt):
+    t = _zuni.normalize("NFKD", str(txt or "").lower())
+    t = "".join(ch for ch in t if not _zuni.combining(ch))
+    t = _zre.sub(r"[^a-z0-9\s]", " ", t)
+    return " ".join(w for w in t.split() if w not in _ZEUS_STOP)
+
+
+def _zeus_sim(a, b):
+    if not a or not b:
+        return 0.0
+    ta, tb = set(a.split()), set(b.split())
+    jac = len(ta & tb) / max(1, len(ta | tb))
+    return 0.5 * jac + 0.5 * _zSM(None, a, b).ratio()
+
+
+# ----------------------------------------------------------------------------
+# 1) Memória de experiência
+# ----------------------------------------------------------------------------
+def zeus_registrar_interacao(pergunta, resposta, origem="api"):
+    """Registra uma interação e devolve seu id (use p/ enviar feedback depois)."""
+    with _ZEUS_LOCK, _zeus_conn() as c:
+        cur = c.execute(
+            "INSERT INTO interacoes(ts,pergunta,pergunta_norm,resposta,origem) VALUES(?,?,?,?,?)",
+            (_zdt.now().isoformat(timespec="seconds"), pergunta, _zeus_norm(pergunta), resposta, origem))
+        return cur.lastrowid
+
+
+def zeus_registrar_feedback(interacao_id, acertou, correcao=None):
+    """
+    Aprende com o feedback.
+    acertou=True  -> promove a resposta a conhecimento e sobe a confiança.
+    acertou=False -> penaliza; se vier `correcao`, ela vira o conhecimento prioritário.
+    """
+    with _ZEUS_LOCK, _zeus_conn() as c:
+        it = c.execute("SELECT * FROM interacoes WHERE id=?", (interacao_id,)).fetchone()
+        if not it:
+            return False
+        c.execute("UPDATE interacoes SET feedback=?, correcao=? WHERE id=?",
+                  (1 if acertou else 0, correcao, interacao_id))
+        agora = _zdt.now().isoformat(timespec="seconds")
+        chave = it["pergunta_norm"]
+        if not chave:
+            return True
+        if acertou:
+            c.execute("""INSERT INTO conhecimento(pergunta_norm,pergunta,resposta,confianca,acertos,origem,atualizado)
+                         VALUES(?,?,?,0.65,1,'validado',?)
+                         ON CONFLICT(pergunta_norm) DO UPDATE SET
+                           acertos=acertos+1,
+                           confianca=MIN(1.0, confianca+0.1),
+                           atualizado=excluded.atualizado""",
+                      (chave, it["pergunta"], it["resposta"], agora))
+        elif correcao and correcao.strip():
+            c.execute("""INSERT INTO conhecimento(pergunta_norm,pergunta,resposta,confianca,erros,origem,atualizado)
+                         VALUES(?,?,?,0.95,0,'correcao',?)
+                         ON CONFLICT(pergunta_norm) DO UPDATE SET
+                           resposta=excluded.resposta, confianca=0.95,
+                           origem='correcao', atualizado=excluded.atualizado""",
+                      (chave, it["pergunta"], correcao.strip(), agora))
+        else:
+            c.execute("""UPDATE conhecimento SET erros=erros+1,
+                         confianca=MAX(0.0, confianca-0.25), atualizado=? WHERE pergunta_norm=?""",
+                      (agora, chave))
+        return True
+
+
+def zeus_buscar_conhecimento(pergunta, limiar=None):
+    """Melhor conhecimento local para a pergunta: (registro|None, similaridade)."""
+    limiar = zeus_diretriz("limiar_correcao", 0.70) if limiar is None else limiar
+    q = _zeus_norm(pergunta)
+    melhor, melhor_s = None, 0.0
+    with _zeus_conn() as c:
+        for r in c.execute("SELECT * FROM conhecimento WHERE confianca>0"):
+            s = _zeus_sim(q, r["pergunta_norm"]) * (0.7 + 0.3 * r["confianca"])
+            if r["origem"] == "correcao":
+                s *= 1.05  # correções têm prioridade
+            if s > melhor_s:
+                melhor, melhor_s = r, s
+    return (dict(melhor), melhor_s) if melhor is not None and melhor_s >= limiar else (None, melhor_s)
+
+
+def zeus_contexto_para_prompt(pergunta):
+    """Texto com diretrizes + experiências passadas para injetar no prompt enviado à API."""
+    n = int(zeus_diretriz("max_exemplos_contexto", 3))
+    q = _zeus_norm(pergunta)
+    with _zeus_conn() as c:
+        regs = [dict(r) for r in c.execute("SELECT * FROM conhecimento WHERE confianca>=0.5")]
+    regs.sort(key=lambda r: _zeus_sim(q, r["pergunta_norm"]) + (0.2 if r["origem"] == "correcao" else 0),
+              reverse=True)
+    ex = [r for r in regs[:n] if _zeus_sim(q, r["pergunta_norm"]) > 0.3]
+    txt = f"[IDENTIDADE] {zeus_diretriz('identidade')}\n"
+    if ex:
+        txt += "[EXPERIÊNCIA VALIDADA - priorize isto sobre conhecimento genérico]\n"
+        for r in ex:
+            txt += f"- P: {r['pergunta']}\n  R: {r['resposta']}\n"
+    return txt
+
+
+# ----------------------------------------------------------------------------
+# 2) Ciclo de reflexão crítica
+# ----------------------------------------------------------------------------
+def zeus_avaliar_parametros(pergunta, resposta):
+    """Pontua a resposta segundo as diretrizes. Retorna dict com nota (0-1) e alertas."""
+    alertas, nota = [], 1.0
+    texto = resposta or ""
+    if not texto.strip():
+        return {"nota": 0.0, "alertas": ["resposta vazia"]}
+    for pad in zeus_diretriz("frases_removidas", []):
+        if _zre.search(pad, texto, _zre.I):
+            alertas.append("tom genérico/corporativo detectado")
+            nota -= 0.15
+            break
+    if len(texto) > zeus_diretriz("max_chars_resposta", 4000):
+        alertas.append("resposta acima do limite")
+        nota -= 0.1
+    conhecido, sim = zeus_buscar_conhecimento(pergunta, 0.80)
+    if conhecido and conhecido["origem"] == "correcao" and _zeus_sim(
+            _zeus_norm(texto), _zeus_norm(conhecido["resposta"])) < 0.35:
+        alertas.append("diverge de correção aprendida")
+        nota -= 0.3
+    return {"nota": max(0.0, round(nota, 2)), "alertas": alertas}
+
+
+def zeus_refletir(resposta, pergunta=""):
+    """
+    Filtro final antes de entregar: remove boilerplate corporativo, normaliza
+    o tom técnico/direto e aplica o limite de tamanho. Retorna (texto, relatório).
+    """
+    original = resposta or ""
+    texto = original
+    for pad in zeus_diretriz("frases_removidas", []):
+        texto = _zre.sub(pad, "", texto, flags=_zre.I)
+    texto = _zre.sub(r"[ \t]+\n", "\n", texto)
+    texto = _zre.sub(r"\n{3,}", "\n\n", texto).strip()
+    if texto and texto[0].islower():
+        texto = texto[0].upper() + texto[1:]
+    limite = int(zeus_diretriz("max_chars_resposta", 4000))
+    if len(texto) > limite:
+        texto = texto[:limite].rsplit(" ", 1)[0] + "…"
+    if not texto:  # nunca entregar vazio: reflexão não pode apagar a resposta
+        texto = original.strip()
+    rel = zeus_avaliar_parametros(pergunta, texto)
+    rel["alterada"] = texto != original.strip()
+    return texto, rel
+
+
 # ----------------------------------------------------------------------------
 # 3) Autonomia: memória primeiro, API só quando necessário
 # ----------------------------------------------------------------------------
@@ -3709,21 +3945,10 @@ def zeus_responder_autonomo(pergunta, gerador_externo=None):
     a sua API atual. Retorna (resposta, interacao_id, origem).
     """
     zeus_init_memoria()
-    limiar_local = float(zeus_diretriz("limiar_memoria_local", 0.82))
-    conf_minima = float(zeus_diretriz("confianca_minima", 0.55))
-    conhecido, _ = zeus_buscar_conhecimento(pergunta, limiar_local)
-    if conhecido and float(conhecido["confianca"]) >= conf_minima:
-        agora = _zdt.now().isoformat(timespec="seconds")
+    conhecido, sim = zeus_buscar_conhecimento(pergunta, zeus_diretriz("limiar_memoria_local", 0.82))
+    if conhecido and conhecido["confianca"] >= zeus_diretriz("confianca_minima", 0.55):
         with _ZEUS_LOCK, _zeus_conn() as c:
-            c.execute(
-                """UPDATE conhecimento
-                   SET usos = usos + 1,
-                       acertos = CASE WHEN origem = 'correcao' THEN acertos + 1 ELSE acertos END,
-                       confianca = MIN(1.0, confianca + 0.01),
-                       atualizado = ?
-                   WHERE id = ?""",
-                (agora, conhecido["id"]),
-            )
+            c.execute("UPDATE conhecimento SET usos=usos+1 WHERE id=?", (conhecido["id"],))
         resp, _ = zeus_refletir(conhecido["resposta"], pergunta)
         return resp, zeus_registrar_interacao(pergunta, resp, "memoria_local"), "memoria_local"
 
@@ -3740,15 +3965,11 @@ def zeus_responder_autonomo(pergunta, gerador_externo=None):
 def zeus_evoluir():
     """
     Consolidação periódica da base: rebaixa conhecimento com muitos erros,
-    remove o inútil e reforça o que é validado e usado com consistência.
+    remove o inútil e reforça o que é muito usado e validado. Retorna estatísticas.
     """
     with _ZEUS_LOCK, _zeus_conn() as c:
         c.execute("UPDATE conhecimento SET confianca=MAX(0, confianca-0.05) WHERE erros>acertos")
-        c.execute(
-            """UPDATE conhecimento
-               SET confianca=MIN(1, confianca+0.03)
-               WHERE (acertos>=3 OR (origem='correcao' AND usos>=2)) AND erros=0"""
-        )
+        c.execute("UPDATE conhecimento SET confianca=MIN(1, confianca+0.03) WHERE acertos>=3 AND erros=0")
         apagados = c.execute("DELETE FROM conhecimento WHERE confianca<=0 AND origem!='correcao'").rowcount
         total = c.execute("SELECT COUNT(*) FROM conhecimento").fetchone()[0]
         corr = c.execute("SELECT COUNT(*) FROM conhecimento WHERE origem='correcao'").fetchone()[0]
@@ -3759,15 +3980,16 @@ def zeus_ensinar(pergunta, resposta):
     """Injeta conhecimento soberano manualmente (alta confiança)."""
     zeus_init_memoria()
     with _ZEUS_LOCK, _zeus_conn() as c:
-        c.execute(
-            """INSERT INTO conhecimento(pergunta_norm,pergunta,resposta,confianca,origem,atualizado)
-               VALUES(?,?,?,0.95,'correcao',?)
-               ON CONFLICT(pergunta_norm) DO UPDATE SET resposta=excluded.resposta,
-                 confianca=0.95, origem='correcao', atualizado=excluded.atualizado""",
-            (_zeus_norm(pergunta), pergunta, resposta, _zdt.now().isoformat(timespec="seconds")),
-        )
+        c.execute("""INSERT INTO conhecimento(pergunta_norm,pergunta,resposta,confianca,origem,atualizado)
+                     VALUES(?,?,?,0.95,'correcao',?)
+                     ON CONFLICT(pergunta_norm) DO UPDATE SET resposta=excluded.resposta,
+                       confianca=0.95, origem='correcao', atualizado=excluded.atualizado""",
+                  (_zeus_norm(pergunta), pergunta, resposta, _zdt.now().isoformat(timespec="seconds")))
 
 
+# ----------------------------------------------------------------------------
+# Opcional: botões de feedback (só roda se VOCÊ chamar; não altera o visual atual)
+# ----------------------------------------------------------------------------
 def zeus_widget_feedback(interacao_id):
     import streamlit as st
     c1, c2 = st.columns(2)
@@ -3782,3 +4004,5 @@ def zeus_widget_feedback(interacao_id):
             zeus_registrar_feedback(interacao_id, False, corr)
             st.session_state[f"zeus_corrigir_{interacao_id}"] = False
             st.toast("Correção gravada como prioridade.")
+
+# ============================= FIM DO MÓDULO ZEUS ============================
