@@ -976,7 +976,7 @@ def _resumo(text):
 def get_llm_response(session_id, prompt, model_choice, system=None, use_history=True):
     resposta_cofre = tratar_comando_cofre_chat(prompt)
     if resposta_cofre is not None:
-        return resposta_cofre, "cofre_b2", None
+        return True, resposta_cofre, "cofre_b2", []
 
     msgs = _normalize((get_recent_context(session_id) if use_history else []) + [{"role": "user", "content": prompt}])
     order = [model_choice] + [p for p in PROVIDERS if p != model_choice]
@@ -996,7 +996,6 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
             return True, text or "(resposta vazia)", prov, erros
         erros.append(f"{prov}: {_resumo(text)}")
     return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
-
 
 # ============================================================
 # ZEUS TELEGRAM REAL (Sem Teatro, 100% Autônomo para Danilo)
