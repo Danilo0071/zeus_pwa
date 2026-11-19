@@ -977,7 +977,7 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
 
     resposta_cofre = tratar_comando_cofre_chat(prompt)
 if resposta_cofre is not None:
-return resposta_cofre, "cofre_b2", None
+    return resposta_cofre, "cofre_b2", None
     msgs = _normalize((get_recent_context(session_id) if use_history else []) + [{"role": "user", "content": prompt}])
     order = [model_choice] + [p for p in PROVIDERS if p != model_choice]
     erros = []
