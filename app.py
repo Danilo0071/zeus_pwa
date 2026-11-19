@@ -55,73 +55,11 @@ except Exception:
     salvar_json = None
     ler_json = None
 # ============================================================
-# CONFIGURAÇÃO DA PÁGINA
-# ============================================================
-st.set_page_config(
-    page_title="Zeus 3.0",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-THEMES = {
-    "Cyberpunk": {
-        "bg": "#0b0f19",
-        "panel": "#121826",
-        "primary": "#00ffcc",
-        "secondary": "#0077ff",
-        "text": "#00ffcc",
-        "border": "#00ffcc33",
-    },
-}
-
-
-THEME_CSS = """
-<style>
-    .stApp { background-color: __BG__; color: __TEXT__; font-family: 'Courier New', monospace; }
-    [data-testid="stSidebar"] { background-color: __PANEL__; }
-    h1, h2, h3 { color: __PRIMARY__ !important; text-shadow: 0 0 10px __BORDER__; }
-</style>
-"""
-
-
-def inject_theme(theme_name: str):
-    t = THEMES.get(theme_name, THEMES["Cyberpunk"])
-    css = THEME_CSS
-    for token, chave in (
-        ("__BG__", "bg"),
-        ("__TEXT__", "text"),
-        ("__PANEL__", "panel"),
-        ("__PRIMARY__", "primary"),
-        ("__BORDER__", "border"),
-    ):
-        css = css.replace(token, t[chave])
-    st.markdown(css, unsafe_allow_html=True)
-
-
-def inject_theme_classico(theme_name: str):
-    t = THEMES.get(theme_name, THEMES["Cyberpunk"])
-    st.markdown(
-        f"""
-        <style>
-            .stApp {{ background-color: {t['bg']}; color: {t['text']}; font-family: 'Courier New', monospace; }}
-            [data-testid="stSidebar"] {{ background-color: {t['panel']}; }}
-            h1, h2, h3 {{ color: {t['primary']} !important; text-shadow: 0 0 10px {t['border']}; }}
-        </style>
-    """,
-        unsafe_allow_html=True,
-    )
-
-
-# ============================================================
 # CHAVES + BANCO DE DADOS + COFRE BACKBLAZE B2  (bloco único)
 # Requer no requirements.txt:  boto3
 # ============================================================
 _log = logging.getLogger("zeus.cofre")
 
-# ------------------------------------------------------------
-# CHAVES (definidas ANTES do banco, para nunca dar NameError silencioso)
-# ------------------------------------------------------------
 CHAVES_PADRAO = {  # Nunca coloque chaves reais aqui. Use .streamlit/secrets.toml
 }
 
@@ -149,13 +87,10 @@ def _secret(key: str, default: str = "") -> str:
     return _limpar_chave(os.environ.get(key) or default or CHAVES_PADRAO.get(key, ""))
 
 
-# ------------------------------------------------------------
-# CONFIGURAÇÃO DO COFRE
-# ------------------------------------------------------------
 DB_FILE = "zeus_chat.db"
 COFRE_DB_KEY = "banco/zeus_chat.db"
-COFRE_INTERVALO_SEG = 5     # no máximo 1 envio a cada 5 s (o resto fica pendente)
-COFRE_BACKOFF_SEG = 30      # após uma falha, espera antes de tentar de novo
+COFRE_INTERVALO_SEG = 2
+COFRE_BACKOFF_SEG = 5
 
 
 @st.cache_resource
@@ -189,9 +124,9 @@ def _criar_cliente_s3(endpoint: str, key_id: str, app_key: str):
         region_name=m.group(1) if m else None,
         config=Config(
             signature_version="s3v4",
-            connect_timeout=10,
-            read_timeout=30,
-            retries={"max_attempts": 3, "mode": "standard"},
+            connect_timeout=5,
+            read_timeout=10,
+            retries={"max_attempts": 1, "mode": "standard"},
         ),
     )
 
@@ -245,9 +180,6 @@ def _dica(erro: str) -> str:
     return ""
 
 
-# ------------------------------------------------------------
-# BANCO LOCAL
-# ------------------------------------------------------------
 def _conectar():
     conn = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
     conn.execute(
@@ -338,9 +270,6 @@ def _baixar_e_mesclar(cliente, bucket) -> str:
     return "mesclado"
 
 
-# ------------------------------------------------------------
-# COFRE B2
-# ------------------------------------------------------------
 def baixar_db_cofre() -> bool:
     """Traz a nuvem para o banco local (mescla). Retorna True se a nuvem foi lida com sucesso."""
     ctx = _cofre_ctx()
@@ -355,13 +284,14 @@ def baixar_db_cofre() -> bool:
             _baixar_e_mesclar(cliente, bucket)
             return True
         except Exception as e:
+            detalhe = f"{type(e)._name_}: {repr(e)}"
             with contextlib.suppress(Exception):
-                ctx["erro"] = f"{type(e)._name_}: {e}"
-                _log.warning("Cofre B2 (download): %s", ctx["erro"])
+                ctx["erro"] = detalhe
+                _log.warning("Cofre B2 (download) -> %s", detalhe)
             return False
 
 
-def sincronizar_db_cofre(forcar: bool = False) -> bool:
+def sincronizar_db_cofre(forcar: bool = True) -> bool:
     """
     Mescla o que há na nuvem e envia o banco local. Nunca derruba a tela se o B2 falhar.
     """
@@ -401,12 +331,13 @@ def sincronizar_db_cofre(forcar: bool = False) -> bool:
             )
             return True
         except Exception as e:
+            detalhe = f"{type(e)._name_}: {repr(e)}"
             with contextlib.suppress(Exception):
-                ctx["erro"] = f"{type(e)._name_}: {e}"
+                ctx["erro"] = detalhe
                 ctx["bloqueado_ate"] = time.time() + COFRE_BACKOFF_SEG
                 ctx["pendente"] = True
             with contextlib.suppress(Exception):
-                _log.warning("Cofre B2 (envio): %s", ctx["erro"])
+                _log.warning("Cofre B2 (envio) -> %s", detalhe)
             return False
 
 
@@ -427,13 +358,10 @@ def salvar_arquivo_cofre(chave_remota: str, dados_ou_caminho) -> bool:
         return True
     except Exception as e:
         with contextlib.suppress(Exception):
-            _log.warning("Cofre B2 (salvar_arquivo_cofre): %s", e)
+            _log.warning("Cofre B2 (salvar_arquivo_cofre): %s", repr(e))
         return False
 
 
-# ------------------------------------------------------------
-# API USADA PELO RESTO DO APP (mesmos nomes de antes)
-# ------------------------------------------------------------
 def init_db():
     try:
         _conectar().close()
@@ -442,10 +370,10 @@ def init_db():
             if sincronizar_db_cofre(forcar=True):
                 ctx["inicializado"] = True
         elif ctx["pendente"]:
-            sincronizar_db_cofre()
+            sincronizar_db_cofre(forcar=True)
     except Exception as e:
         with contextlib.suppress(Exception):
-            _log.warning("init_db: %s", e)
+            _log.warning("init_db: %s", repr(e))
 
 
 def add_message(session_id, role, content):
@@ -458,10 +386,10 @@ def add_message(session_id, role, content):
             conn.commit()
     except Exception as e:
         with contextlib.suppress(Exception):
-            _log.warning("add_message: %s", e)
+            _log.warning("add_message: %s", repr(e))
         return
     with contextlib.suppress(Exception):
-        sincronizar_db_cofre()
+        sincronizar_db_cofre(forcar=True)
 
 
 def get_recent_context(session_id, limit=6):
@@ -478,9 +406,6 @@ def get_recent_context(session_id, limit=6):
         return []
 
 
-# ------------------------------------------------------------
-# DIAGNÓSTICO (chame mostrar_diagnostico_cofre() UMA vez, em qualquer ponto do app)
-# ------------------------------------------------------------
 def diagnostico_cofre():
     """Lista de (verificação, ok, detalhe). Nunca expõe a chave secreta."""
     itens = []
