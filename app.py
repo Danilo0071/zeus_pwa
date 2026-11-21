@@ -4813,8 +4813,9 @@ def zeus_widget_feedback(interacao_id):
             st.toast("Correção gravada como prioridade.")
 
 
+
 # ==============================================================================
-# ZEUS v2.5 - MODO TRADER RAPIDO + B2 (BLOCO COMPLETO PARA O FINAL DO APP)
+# ZEUS v2.6 - MODO TRADER DIRETO + B2 (SEM TRAVAR EM FALLBACK DE BUSCA)
 # ==============================================================================
 def zf_b2_salvar_seguro(chave: str, conteudo, content_type: str = "text/plain; charset=utf-8"):
     """Salva no Backblaze B2 usando as funcoes ja existentes do app (sem depender de b2sdk)."""
@@ -4915,8 +4916,60 @@ def _zf_macro_bcb_resumo() -> dict:
     return res
 
 
+def _zf_gerar_leitura_tecnica_direta(simbolo: str, intervalo: str, ultimo: dict, macro_info: dict) -> str:
+    """Gera parecer tecnico instantaneo a partir dos indicadores reais do B2 (sem depender de IA/DuckDuckGo)."""
+    if not ultimo or not ultimo.get("ultimo"):
+        return (
+            f"Sem candles recentes para {simbolo} ({intervalo}) no B2 no momento. "
+            "Verifique a coleta da Binance ou tente novamente em instantes."
+        )
+    px = float(ultimo["ultimo"])
+    sma20 = float(ultimo.get("sma20") or px)
+    ema9 = float(ultimo.get("ema9") or px)
+    vmin = float(ultimo.get("min") or px)
+    vmax = float(ultimo.get("max") or px)
+    var_pct = float(ultimo.get("var_pct") or 0.0)
+    rsi = ultimo.get("rsi14")
+
+    if px >= sma20 and ema9 >= sma20:
+        vies = "Alta (preco e EMA9 acima da SMA20)"
+    elif px < sma20 and ema9 < sma20:
+        vies = "Baixa (preco e EMA9 abaixo da SMA20)"
+    else:
+        vies = "Transicao / Consolidacao (cruzamento entre EMA9 e SMA20)"
+
+    if rsi is None:
+        rsi_txt = "RSI14 indisponivel"
+    elif rsi >= 70:
+        rsi_txt = f"RSI14 em `{rsi}` (sobrecompra — risco de realizacao/pullback)"
+    elif rsi <= 30:
+        rsi_txt = f"RSI14 em `{rsi}` (sobrevenda — possivel repique tecnico)"
+    else:
+        rsi_txt = f"RSI14 em `{rsi}` (zona neutra, espaco para movimento)"
+
+    stop_compra = round(min(vmin, px * 0.985), 4)
+    alvo_alta = round(max(vmax, px * 1.02), 4)
+    stop_venda = round(max(vmax, px * 1.015), 4)
+    alvo_baixa = round(min(vmin, px * 0.98), 4)
+
+    bloco = [
+        f"### Leitura Tecnica ({simbolo} - {intervalo})",
+        f"- **Vies atual:** {vies} | Variacao no recorte: `{var_pct}%`",
+        f"- **Momento:** {rsi_txt}",
+        f"- **Faixa observada (B2):** Minima `{vmin}` | Maxima `{vmax}`",
+        "",
+        "### Cenarios e Gestao de Risco",
+        f"- **Cenario de Alta:** sustentacao acima de `{round(sma20, 4)}` mira `{alvo_alta}`, com invalidacao/stop abaixo de `{stop_compra}` (risco max. sugerido: 1% a 2% da banca).",
+        f"- **Cenario de Baixa:** perda de `{round(sma20, 4)}` abre espaco ate `{alvo_baixa}`, com invalidacao/stop acima de `{stop_venda}`."
+    ]
+    if macro_info:
+        bloco.append("")
+        bloco.append(f"### Contexto Macro (BCB): `{json.dumps(macro_info, ensure_ascii=False)}`")
+    return "\n".join(bloco)
+
+
 def zf_modo_trader_b2(prompt_usuario: str) -> str:
-    """Versao direta e rapida: busca candles (limite 100), le B2, salva relatorio + JSON e responde."""
+    """Modo Trader direto e instantaneo: coleta Binance, le B2, gera leitura tecnica e salva no B2."""
     low = (prompt_usuario or "").lower()
     mapa_pares = {
         "bitcoin": "BTCUSDT", "btc": "BTCUSDT",
@@ -4940,7 +4993,7 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
     fn_bin = globals().get("zf_dados_binance")
     if callable(fn_bin):
         try:
-            r_bin = fn_bin(simbolo=simbolo, intervalo=intervalo, limite=100, forcar=False)
+            r_bin = fn_bin(simbolo=simbolo, intervalo=intervalo, limite=100, forcar=True)
             if isinstance(r_bin, list) and r_bin:
                 log_b2.append(str(r_bin[-1]))
             elif r_bin:
@@ -4955,29 +5008,17 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
     hist_b2 = _zf_ler_historico_b2_trader(simbolo, max_arquivos=2)
     ultimo = hist_b2[0] if hist_b2 else {}
 
-    niveis_txt = ""
-    if ultimo and ultimo.get("ultimo"):
-        px = float(ultimo["ultimo"])
-        sma = float(ultimo.get("sma20") or px)
-        tendencia = "Alta (acima da SMA20)" if px >= sma else "Baixa / Pressao (abaixo da SMA20)"
-        stop_sug = round(min(float(ultimo.get("min") or px * 0.97), px * 0.975), 4)
-        alvo1_sug = round(max(float(ultimo.get("max") or px * 1.03), px * 1.025), 4)
-        niveis_txt = f"{tendencia} | Stop ref: `{stop_sug}` | Alvo 1: `{alvo1_sug}`"
+    parecer_tecnico = _zf_gerar_leitura_tecnica_direta(simbolo, intervalo, ultimo, macro_info)
 
-    parecer_ia = ""
-    fn_base = globals().get("_zf_processar_prompt_base")
-    if callable(fn_base):
-        try:
-            ctx = (
-                f"Responda de forma curta e objetiva para {simbolo} ({intervalo}). "
-                f"Dados B2: {json.dumps(ultimo, ensure_ascii=False)}. "
-                f"Macro: {json.dumps(macro_info, ensure_ascii=False)}. "
-                f"Pedido: {prompt_usuario.strip()}. "
-                "Traga leitura tecnica, cenarios e gestao de risco (stop e invalidacao) sem enrolacao."
-            )
-            parecer_ia = str(fn_base(ctx) or "").strip()
-        except Exception as e:
-            parecer_ia = f"(Aviso motor base: {type(e).__name__})"
+    if re.search(r"\b(usar ia|com ia|noticia|not[ií]cia|web|internet)\b", low):
+        fn_base = globals().get("_zf_processar_prompt_base")
+        if callable(fn_base):
+            try:
+                resp_ia = str(fn_base(f"Resumo curto de mercado cripto {simbolo}: {prompt_usuario.strip()}") or "").strip()
+                if resp_ia and "As IAs nao responderam" not in resp_ia and "As IAs não responderam" not in resp_ia:
+                    parecer_tecnico += "\n\n### Complemento IA\n" + resp_ia
+            except Exception:
+                pass
 
     ts = _zf_agora() if callable(globals().get("_zf_agora")) else "atual"
     utc_str = (
@@ -4988,9 +5029,8 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
     relatorio = (
         f"# Trader Zeus - {simbolo} ({intervalo})\n"
         f"- **UTC:** {utc_str}\n"
-        f"- **Dados B2:** {json.dumps(ultimo, ensure_ascii=False)}\n"
-        f"- **Niveis:** {niveis_txt or 'N/D'}\n\n"
-        f"{parecer_ia}\n"
+        f"- **Dados B2:** {json.dumps(ultimo, ensure_ascii=False)}\n\n"
+        f"{parecer_tecnico}\n"
     )
     ok_md, msg_md = zf_b2_salvar_seguro(
         f"autonomia/trader/analise_{simbolo.lower()}_{intervalo}_{ts}.md",
@@ -5005,7 +5045,6 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
         "utc": utc_str,
         "resumo_b2": ultimo,
         "macro_bcb": macro_info,
-        "niveis": niveis_txt,
     }
     zf_b2_salvar_seguro(
         f"autonomia/trader/ultimo_{simbolo.lower()}.json",
@@ -5018,12 +5057,9 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
         linhas_out.append(
             f"- **B2:** ultimo `{ultimo.get('ultimo')}` | SMA20 `{ultimo.get('sma20')}` | EMA9 `{ultimo.get('ema9')}` | RSI14 `{ultimo.get('rsi14')}` | var `{ultimo.get('var_pct')}%`"
         )
-    if niveis_txt:
-        linhas_out.append(f"- **Ref. tecnica:** {niveis_txt}")
     if log_b2:
         linhas_out.append("- **B2:** " + " | ".join(str(x) for x in log_b2[-2:]))
-    if parecer_ia:
-        linhas_out.append("\n" + parecer_ia)
+    linhas_out.append("\n" + parecer_tecnico)
     return "\n".join(linhas_out)
 
 
