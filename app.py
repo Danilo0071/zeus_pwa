@@ -28,7 +28,19 @@ import time
 import zipfile
 
 import requests
-
+import csv as _csv
+import html as _html
+import io
+import json
+import re
+import smtplib as _smtplib
+import ssl as _ssl
+import time
+import unicodedata as _u
+from datetime import datetime as _dtm, timezone as _tzn
+from difflib import SequenceMatcher as _SM
+from email.message import EmailMessage as _EmailMessage
+from email.utils import parseaddr as _parseaddr
 try:
     from openai import OpenAI  # cliente OpenAI (usado para DeepInfra)
 except ImportError:
