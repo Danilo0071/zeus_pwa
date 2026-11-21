@@ -5111,6 +5111,38 @@ def _zr_flexivel_trader_ou_pesquisa(t: str, low: str) -> str | None:
     return None
 
 
+def _zf_interceptar_roteamento_chat_trader(prompt_usuario: str) -> str | None:
+    """Roteamento direto no chat para pedidos de trader, mercado ou B2 sem cair na conversa genérica."""
+    t = (prompt_usuario or "").strip()
+    if not t:
+        return None
+    low = t.lower()
+    if re.search(r"\b(trad\w*|opera\w*\s+mercado|analis\w*\s+(?:o\s+)?(?:mercado|gr[aá]fico|btc|bitcoin|eth|ethusdt|btcusdt|sol|solusdt|cripto|ativo)|estrat[eé]gia|investimento|carteira|risco|stop|rsi|ema|sma|cofre|b2|selic|d[oó]lar)\b", low):
+        try:
+            return zf_modo_trader_b2(t)
+        except Exception as e:
+            return f"**Trader Zeus - Roteamento B2:** erro ao executar análise direta (`{type(e).__name__}: {e}`)."
+    return _zr_flexivel_trader_ou_pesquisa(t, low)
+
+
+def _zf_envolver_roteador_chat_existente():
+    """Garante que o roteador principal do chat chame o modo trader/B2 antes de cair em LLM genérica."""
+    for nome_fn in ("_zf_processar_prompt_base", "processar_prompt", "responder_chat", "zf_responder_chat"):
+        fn_orig = globals().get(nome_fn)
+        if callable(fn_orig) and not getattr(fn_orig, "_zf_trader_wrap", False):
+            def _wrapper(prompt, *args, _orig=fn_orig, **kwargs):
+                texto = prompt if isinstance(prompt, str) else str(prompt or "")
+                try:
+                    resp_direta = _zf_interceptar_roteamento_chat_trader(texto)
+                    if resp_direta:
+                        return resp_direta
+                except Exception:
+                    pass
+                return _orig(prompt, *args, **kwargs)
+            _wrapper._zf_trader_wrap = True
+            globals()[nome_fn] = _wrapper
+
+
 def zf_render_painel_trader_b2():
     """Painel rapido no Streamlit para rodar o Modo Trader + B2 direto na tela."""
     with st.expander("Trader Zeus + B2", expanded=False):
@@ -5134,6 +5166,13 @@ def zf_render_painel_trader_b2():
             with st.spinner("Coletando dados da Binance/B2 e gerando analise..."):
                 resp_tr = zf_modo_trader_b2(pergunta)
             st.markdown(resp_tr)
+
+
+try:
+    if callable(globals().get("_zf_envolver_roteador_chat_existente")):
+        _zf_envolver_roteador_chat_existente()
+except Exception:
+    pass
 
 
 try:
