@@ -3804,13 +3804,60 @@ def zf_render_painel():
 
     with st.sidebar:
         st.divider()
-        try:
-            if callable(globals().get("zf_spotify_mini_player")):
+        st.subheader("Spotify")
+        if callable(globals().get("zf_spotify_mini_player")):
+            try:
                 zf_spotify_mini_player()
-            else:
-                st.caption("Player Spotify indisponivel no momento.")
-        except Exception as _zf_err_sp_ui:
-            st.caption("Player Spotify: " + str(_zf_err_sp_ui)[:140])
+            except Exception:
+                pass
+        musica_input = st.text_input("Musica ou artista:", key="zf_input_musica")
+        c_sp1, c_sp2, c_sp3, c_sp4 = st.columns(4)
+        with c_sp1:
+            if st.button("Tocar", key="zf_btn_tocar", use_container_width=True):
+                if musica_input.strip():
+                    with st.spinner("Buscando..."):
+                        res_sp = zf_tocar_musica(musica_input.strip())
+                    st.success(res_sp) if str(res_sp).startswith("Tocando") else st.error(res_sp)
+                else:
+                    st.warning("Digite a musica.")
+        with c_sp2:
+            if st.button("Ant", key="zf_btn_sp_prev", use_container_width=True):
+                try:
+                    cid = st.secrets.get("SPOTIFY_CLIENT_ID")
+                    csec = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+                    rtok = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
+                    ruri = st.secrets.get("SPOTIFY_REDIRECT_URI", "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/")
+                    tok = SpotifyOAuth(client_id=cid, client_secret=csec, redirect_uri=ruri, scope="user-modify-playback-state user-read-playback-state", cache_path=None).refresh_access_token(rtok)
+                    spotipy.Spotify(auth=tok["access_token"]).previous_track()
+                except Exception as e:
+                    st.error(str(e)[:100])
+        with c_sp3:
+            if st.button("Pausa", key="zf_btn_sp_pause", use_container_width=True):
+                try:
+                    cid = st.secrets.get("SPOTIFY_CLIENT_ID")
+                    csec = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+                    rtok = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
+                    ruri = st.secrets.get("SPOTIFY_REDIRECT_URI", "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/")
+                    tok = SpotifyOAuth(client_id=cid, client_secret=csec, redirect_uri=ruri, scope="user-modify-playback-state user-read-playback-state", cache_path=None).refresh_access_token(rtok)
+                    sp_cli = spotipy.Spotify(auth=tok["access_token"])
+                    pb = sp_cli.current_playback()
+                    if pb and pb.get("is_playing"):
+                        sp_cli.pause_playback()
+                    else:
+                        sp_cli.start_playback()
+                except Exception as e:
+                    st.error(str(e)[:100])
+        with c_sp4:
+            if st.button("Prox", key="zf_btn_sp_next", use_container_width=True):
+                try:
+                    cid = st.secrets.get("SPOTIFY_CLIENT_ID")
+                    csec = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+                    rtok = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
+                    ruri = st.secrets.get("SPOTIFY_REDIRECT_URI", "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/")
+                    tok = SpotifyOAuth(client_id=cid, client_secret=csec, redirect_uri=ruri, scope="user-modify-playback-state user-read-playback-state", cache_path=None).refresh_access_token(rtok)
+                    spotipy.Spotify(auth=tok["access_token"]).next_track()
+                except Exception as e:
+                    st.error(str(e)[:100])
 
     with st.expander("Zeus - Nucleo de Aprendizado, Database (zilsy/) e Midia", expanded=False):
         aba_criar, aba_memoria, aba_midia = st.tabs(["Aprender (Ensemble)", "Memoria GitHub", "Midia Aprimorada"])
@@ -3902,6 +3949,7 @@ try:
     zf_interceptar_musica()
 except Exception as _zf_err:
     st.caption("Zeus Final desativado por erro: " + str(_zf_err)[:200])
+
 
 
 # ============================================================
