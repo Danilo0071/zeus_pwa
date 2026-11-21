@@ -3888,23 +3888,57 @@ def zf_falar(texto: str, voz: str = None):
 
 
 def zf_tocar_musica(nome_musica: str) -> str:
-    if not spotipy:
-        return "Biblioteca spotipy nao instalada."
+    sp_mod = globals().get("spotipy")
+    auth_cls = globals().get("SpotifyOAuth")
+    if not sp_mod or not auth_cls:
+        try:
+            import spotipy as _sp_mod
+            from spotipy.oauth2 import SpotifyOAuth as _auth_cls
+            sp_mod, auth_cls = _sp_mod, _auth_cls
+        except Exception:
+            return "Biblioteca spotipy nao instalada."
+
     nome_musica = (nome_musica or "").strip()
     if not nome_musica:
         return "Nome da musica vazio."
+
     try:
-        client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
-        client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
-        refresh_token = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
-        redirect_uri = st.secrets.get("SPOTIFY_REDIRECT_URI", "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/")
+        fn_sec = globals().get("_secret")
+        def _ler_segredo(chave: str, padrao: str = "") -> str:
+            if callable(fn_sec):
+                try:
+                    v = fn_sec(chave)
+                    if v:
+                        return str(v)
+                except Exception:
+                    pass
+            try:
+                if "st" in globals() and hasattr(st, "secrets") and chave in st.secrets:
+                    return str(st.secrets[chave])
+            except Exception:
+                pass
+            import os as _os_zf
+            return _os_zf.environ.get(chave, padrao)
+
+        client_id = _ler_segredo("SPOTIFY_CLIENT_ID")
+        client_secret = _ler_segredo("SPOTIFY_CLIENT_SECRET")
+        refresh_token = _ler_segredo("SPOTIFY_REFRESH_TOKEN")
+        redirect_uri = _ler_segredo(
+            "SPOTIFY_REDIRECT_URI",
+            "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/",
+        )
         if not (client_id and client_secret and refresh_token):
             return "Faltam credenciais do Spotify nos Secrets."
 
-        auth_manager = SpotifyOAuth(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri,
-                                    scope="user-modify-playback-state user-read-playback-state", cache_path=None)
+        auth_manager = auth_cls(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope="user-modify-playback-state user-read-playback-state",
+            cache_path=None,
+        )
         token_info = auth_manager.refresh_access_token(refresh_token)
-        sp = spotipy.Spotify(auth=token_info["access_token"])
+        sp = sp_mod.Spotify(auth=token_info["access_token"])
 
         results = sp.search(q=nome_musica, limit=1, type="track")
         tracks = results.get("tracks", {}).get("items", [])
@@ -3912,18 +3946,32 @@ def zf_tocar_musica(nome_musica: str) -> str:
             return f"Nenhuma faixa encontrada para {nome_musica}."
 
         track = tracks[0]
+        dev_id = None
         try:
-            sp.start_playback(uris=[track["uri"]])
+            if callable(globals().get("_zf_sp_device")):
+                dev_id = globals()["_zf_sp_device"](sp)
+            else:
+                devs = sp.devices().get("devices", [])
+                escolhido = st.session_state.get("zf2_dev_id") if "st" in globals() else None
+                if escolhido and any(d.get("id") == escolhido for d in devs):
+                    dev_id = escolhido
+                else:
+                    ativo = next((d.get("id") for d in devs if d.get("is_active")), None)
+                    dev_id = ativo or (devs[0].get("id") if devs else None)
+        except Exception:
+            dev_id = None
+
+        try:
+            sp.start_playback(device_id=dev_id, uris=[track["uri"]])
             artista = track["artists"][0]["name"] if track.get("artists") else "desconhecido"
             return f"Tocando agora: {track['name']} - {artista}"
-        except spotipy.exceptions.SpotifyException as e:
-            if getattr(e, "http_status", None) == 404:
+        except Exception as e:
+            codigo = getattr(e, "http_status", None)
+            if codigo == 404 or "NO_ACTIVE_DEVICE" in str(e):
                 return "Nenhum aparelho ativo. Abra o Spotify e de play em algo primeiro."
             return f"Erro do Spotify: {str(e)[:150]}"
     except Exception as e:
         return f"Erro no Spotify: {str(e)[:150]}"
-
-
 # ------------------------------------------------------------
 # 5. INTERFACE (tela principal, nao escondida na sidebar)
 # ------------------------------------------------------------
