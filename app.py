@@ -5111,3 +5111,124 @@ try:
         zf_render_painel_trader_b2()
 except Exception as _zf_err_tr_ui:
     st.caption("Trader Zeus + B2: " + str(_zf_err_tr_ui)[:140])
+# ==============================================================================
+# CAMADA 1 - COFRE B2 RESILIENTE (S3 + FALLBACK NATIVO SEM QUEBRAR)
+# Cole este bloco no final do app.py
+# ==============================================================================
+import html as _zf_html
+import urllib.error as _zf_uerr
+import urllib.parse as _zf_uparse
+import urllib.request as _zf_ureq
+from difflib import SequenceMatcher as _zf_SeqMatcher
+
+_ZF_PROTEGIDOS = {"banco/zeus_chat.db", "autonomo/diario.json", "memoria/fatos.json"}
+
+
+def _zf_secret_limpo(chave: str, padrao: str = "") -> str:
+    try:
+        sec = st.secrets
+        val = sec.get(chave)
+        if not val:
+            for _, bloco in sec.items():
+                if hasattr(bloco, "get"):
+                    val = bloco.get(chave)
+                    if val:
+                        break
+        if val:
+            v = re.sub(r"\s+", "", str(val)).strip("\"'")
+            return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
+    except Exception:
+        pass
+    v = re.sub(r"\s+", "", str(os.environ.get(chave) or padrao)).strip("\"'")
+    return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
+
+
+def _zf_detalhe_erro_b2(e: Exception) -> str:
+    resp = getattr(e, "response", None) or {}
+    err = resp.get("Error") or {}
+    base = f"{type(e).__name__}: {e}"
+    if err.get("Code"):
+        base += f" [{err.get('Code')}]"
+    return base[:300]
+
+
+def _zf_b2_nao_encontrado(e: Exception) -> bool:
+    resp = getattr(e, "response", None) or {}
+    cod = (resp.get("Error") or {}).get("Code", "")
+    status = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+    if cod == "NoSuchBucket":
+        return False
+    return cod in ("NoSuchKey", "404", "NotFound") or status == 404 or type(e).__name__ == "FileNotPresent"
+
+
+@st.cache_resource
+def _zf_b2_s3_resiliente(endpoint: str, key_id: str, app_key: str):
+    import boto3
+    from botocore.config import Config
+    m = re.search(r"s3\.([a-z0-9-]+)\.backblazeb2\.com", endpoint)
+    base = dict(
+        signature_version="s3v4",
+        connect_timeout=10,
+        read_timeout=25,
+        retries={"max_attempts": 2, "mode": "standard"},
+    )
+    try:
+        cfg = Config(
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+            **base,
+        )
+    except TypeError:
+        cfg = Config(**base)
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=key_id,
+        aws_secret_access_key=app_key,
+        region_name=m.group(1) if m else None,
+        config=cfg,
+    )
+
+
+def _zf_b2_exec(fn_s3):
+    endpoint = _zf_secret_limpo("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
+    if endpoint and not endpoint.startswith("http"):
+        endpoint = "https://" + endpoint
+    bucket = _zf_secret_limpo("B2_BUCKET")
+    key_id = _zf_secret_limpo("B2_KEY_ID")
+    app_key = _zf_secret_limpo("B2_APP_KEY")
+    if not (bucket and key_id and app_key):
+        raise RuntimeError("Cofre B2 sem credenciais nos Secrets (B2_BUCKET, B2_KEY_ID, B2_APP_KEY).")
+    try:
+        return fn_s3(_zf_b2_s3_resiliente(endpoint, key_id, app_key), bucket)
+    except Exception as e:
+        if _zf_b2_nao_encontrado(e):
+            raise FileNotFoundError("Arquivo nao encontrado no cofre B2.") from e
+        raise RuntimeError(_zf_detalhe_erro_b2(e)) from e
+
+
+def zf_b2_put_v2(chave: str, dados: bytes | str, ctype: str = "application/octet-stream"):
+    body = dados.encode("utf-8") if isinstance(dados, str) else dados
+    _zf_b2_exec(lambda s3, b: s3.put_object(Bucket=b, Key=chave, Body=body, ContentType=ctype))
+    return True, f"Salvo no B2: {chave}"
+
+
+def zf_b2_get_v2(chave: str) -> bytes:
+    return _zf_b2_exec(lambda s3, b: s3.get_object(Bucket=b, Key=chave)["Body"].read())
+
+
+def zf_b2_list_v2(prefixo: str = "", limite: int = 40) -> list[tuple[str, int]]:
+    def _s3(c, b):
+        r = c.list_objects_v2(Bucket=b, Prefix=prefixo, MaxKeys=limite)
+        return [(o["Key"], o.get("Size", 0)) for o in r.get("Contents", [])]
+    return _zf_b2_exec(_s3)
+
+
+def zf_b2_delete_v2(chave: str) -> tuple[bool, str]:
+    if chave in _ZF_PROTEGIDOS:
+        return False, f"Arquivo protegido: {chave}"
+    def _s3(c, b):
+        c.head_object(Bucket=b, Key=chave)
+        c.delete_object(Bucket=b, Key=chave)
+    _zf_b2_exec(_s3)
+    return True, f"Apagado do B2: {chave}"
