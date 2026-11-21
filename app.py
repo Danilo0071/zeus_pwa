@@ -4819,6 +4819,34 @@ def zeus_widget_feedback(interacao_id):
 # ==============================================================================
 # ZEUS v2.6 - MODO TRADER DIRETO + B2 (SEM TRAVAR EM FALLBACK DE BUSCA)
 # ==============================================================================
+if "_zf_b2_cliente" not in globals() and "_zf_b2_s3_resiliente" in globals():
+    def _zf_b2_cliente():
+        endpoint = _zf_secret_limpo("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
+        if endpoint and not endpoint.startswith("http"):
+            endpoint = "https://" + endpoint
+        bucket = _zf_secret_limpo("B2_BUCKET")
+        key_id = _zf_secret_limpo("B2_KEY_ID")
+        app_key = _zf_secret_limpo("B2_APP_KEY")
+        if not (bucket and key_id and app_key):
+            raise RuntimeError("Credenciais B2 ausentes.")
+        return _zf_b2_s3_resiliente(endpoint, key_id, app_key), bucket
+
+
+if "_zf_b2_get" not in globals() and "zf_b2_get_v2" in globals():
+    def _zf_b2_get(chave: str):
+        try:
+            dados = zf_b2_get_v2(chave)
+            return dados, "ok"
+        except FileNotFoundError:
+            return None, "nao_encontrado"
+        except Exception as e:
+            return None, str(e)
+
+
+if "zf_b2_salvar" not in globals() and "zf_b2_put_v2" in globals():
+    zf_b2_salvar = zf_b2_put_v2
+
+
 def zf_b2_salvar_seguro(chave: str, conteudo, content_type: str = "text/plain; charset=utf-8"):
     """Salva no Backblaze B2 usando as funcoes ja existentes do app (sem depender de b2sdk)."""
     fn_save = globals().get("zf_b2_salvar")
@@ -4827,17 +4855,6 @@ def zf_b2_salvar_seguro(chave: str, conteudo, content_type: str = "text/plain; c
             return fn_save(chave, conteudo, content_type)
         except Exception as e:
             return False, f"Erro ao salvar no B2: {e}"
-    if "_zf_b2_cliente" not in globals() and "_zf_b2_s3_resiliente" in globals():
-        def _zf_b2_cliente():
-            endpoint = _zf_secret_limpo("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
-            if endpoint and not endpoint.startswith("http"):
-                endpoint = "https://" + endpoint
-            bucket = _zf_secret_limpo("B2_BUCKET")
-            key_id = _zf_secret_limpo("B2_KEY_ID")
-            app_key = _zf_secret_limpo("B2_APP_KEY")
-            if not (bucket and key_id and app_key):
-                raise RuntimeError("Credenciais B2 ausentes.")
-            return _zf_b2_s3_resiliente(endpoint, key_id, app_key), bucket
     fn_cli = globals().get("_zf_b2_cliente")
     if callable(fn_cli):
         try:
@@ -5124,6 +5141,7 @@ try:
         zf_render_painel_trader_b2()
 except Exception as _zf_err_tr_ui:
     st.caption("Trader Zeus + B2: " + str(_zf_err_tr_ui)[:140])
+
 
 # ==============================================================================
 # CAMADA 1 - COFRE B2 RESILIENTE (S3 + FALLBACK NATIVO SEM QUEBRAR)
