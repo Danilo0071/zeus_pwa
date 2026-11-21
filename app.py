@@ -5522,3 +5522,40 @@ try:
     zf_render_camadas_extras()
 except Exception as _zf_c4_err:
     st.caption(f"Camadas Zeus B2: {_zf_c4_err}")
+# Ponte de compatibilidade: faz o bloco "Trader Zeus + B2" enxergar a Camada 1
+if "zf_b2_salvar" not in globals() and "zf_b2_put_v2" in globals():
+  zf_b2_salvar = zf_b2_put_v2
+if "zf_b2_ler" not in globals() and "zf_b2_get_v2" in globals():
+  zf_b2_ler = zf_b2_get_v2
+if "zf_b2_listar" not in globals() and "zf_b2_list_v2" in globals():
+  zf_b2_listar = zf_b2_list_v2
+
+
+def zf_b2_ler_csv_candles(simbolo: str = "BTCUSDT", intervalo: str = "1h"):
+  """Busca o CSV mais recente no B2; se não achar, puxa direto da Binance."""
+  sim = re.sub(r"[^A-Z0-9]", "", (simbolo or "BTCUSDT").upper())
+  itv = (intervalo or "1h").strip()
+  if "zf_b2_get_v2" in globals():
+    for chave in (
+        f"dados/binance/{sim}_{itv}_ultimo.csv",
+        f"binance/{sim}_{itv}_ultimo.csv",
+        f"candles/{sim}_{itv}.csv",
+    ):
+      try:
+        raw = zf_b2_get_v2(chave)
+        txt = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+        if txt.strip():
+          return txt, f"B2 ({chave})"
+      except FileNotFoundError:
+        pass
+      except Exception:
+        pass
+  if "zf_coletar_analisar_binance" in globals():
+    msg, resumo = zf_coletar_analisar_binance(sim, itv, limite=120)
+    if resumo:
+      try:
+        raw = zf_b2_get_v2(f"dados/binance/{sim}_{itv}_ultimo.csv")
+        return raw.decode("utf-8", errors="replace"), f"Binance -> B2 ({msg})"
+      except Exception:
+        return "", msg
+  return "", "Sem fonte de candles disponível."
