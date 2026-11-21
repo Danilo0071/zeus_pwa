@@ -3802,15 +3802,16 @@ def zf_render_painel():
                     audio_prev = zf_falar("Ola, Danilo. Eu sou Zeus.", vozes_filtradas[nome_voz])
                 st.audio(audio_prev, format="audio/mp3") if audio_prev else st.error("Nao consegui gerar o audio.")
 
-   with st.sidebar:
-    st.divider()
-    try:
-        if callable(globals().get("zf_spotify_mini_player")):
-            zf_spotify_mini_player()
-        else:
-            st.caption("Player Spotify indisponivel no momento.")
-    except Exception as _zf_err_sp_ui:
-        st.caption("Player Spotify: " + str(_zf_err_sp_ui)[:140])
+      with st.sidebar:
+        st.divider()
+        try:
+            if callable(globals().get("zf_spotify_mini_player")):
+                zf_spotify_mini_player()
+            else:
+                st.caption("Player Spotify indisponivel no momento.")
+        except Exception as _zf_err_sp_ui:
+            st.caption("Player Spotify: " + str(_zf_err_sp_ui)[:140])
+
 
     with st.expander("Zeus - Nucleo de Aprendizado, Database (zilsy/) e Midia", expanded=False):
         aba_criar, aba_memoria, aba_midia = st.tabs(["Aprender (Ensemble)", "Memoria GitHub", "Midia Aprimorada"])
