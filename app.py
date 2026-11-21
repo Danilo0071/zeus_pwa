@@ -3247,9 +3247,17 @@ with st.expander("📜 Histórico da conversa"):
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            # ==============================================================================
-# ZEUS v2.1 — 2. BLOCO SPOTIFY (CONTROLES + BOTÃO/MENU)
+           # ==============================================================================
+# ZEUS v2.5 — SPOTIFY MINI PLAYER CORRIGIDO (CAPA + CONTROLES + VOZ)
 # ==============================================================================
+import html as _html
+import os as _os
+import re as _re
+import time as _time
+import requests as _requests
+import streamlit as st
+
+
 def _zf_sp_secret(nome: str, padrao: str = "") -> str:
     fn = globals().get("_secret")
     if callable(fn):
@@ -3260,11 +3268,10 @@ def _zf_sp_secret(nome: str, padrao: str = "") -> str:
         except Exception:
             pass
     try:
-        if "st" in globals() and hasattr(st, "secrets") and nome in st.secrets:
+        if hasattr(st, "secrets") and nome in st.secrets:
             return str(st.secrets[nome])
     except Exception:
         pass
-    import os as _os
     return _os.environ.get(nome, padrao)
 
 
@@ -3280,7 +3287,7 @@ def _zf_sp():
             raise RuntimeError("Biblioteca 'spotipy' não instalada no ambiente.") from exc
 
     ss = st.session_state
-    agora = time.time()
+    agora = _time.time()
     tok = ss.get("zf_sp_tok")
     if not tok or tok.get("expires_at", 0) - agora < 60:
         cid = _zf_sp_secret("SPOTIFY_CLIENT_ID")
@@ -3313,9 +3320,9 @@ def _zf_sp_erro(e) -> str:
         st.session_state.pop("zf_sp_tok", None)
         return "❌ Spotify: sessão expirou. Tente novamente."
     if codigo == 404 or "NO_ACTIVE_DEVICE" in txt:
-        return "❌ Nenhum aparelho ativo: abra o Spotify no celular/PC, dê play uma vez e clique em 🔄 Atualizar aparelhos."
+        return "❌ Nenhum aparelho ativo: abra o Spotify no celular/PC, dê play uma vez e clique em 🔄."
     if codigo == 403 or "PREMIUM" in txt.upper():
-        return "❌ Spotify recusou: controlar reprodução/volume exige conta Premium ou aparelho compatível."
+        return "❌ Spotify recusou: exige conta Premium ou aparelho compatível."
     return f"❌ Erro no Spotify ({type(e)._name_}): {txt[:140]}"
 
 
@@ -3384,81 +3391,209 @@ def zf_sp_dispositivos():
         return _zf_sp_erro(e)
 
 
-def zf_sp_estado() -> str:
-    try:
-        sp = _zf_sp()
-        est = sp.current_playback()
-        if not est or not est.get("item"):
-            return "Nada tocando agora."
-        it = est["item"]
-        dev = est.get("device") or {}
-        artista = it["artists"][0]["name"] if it.get("artists") else "?"
-        status = "▶️" if est.get("is_playing") else "⏸️"
-        return (
-            f"{status} {it['name']} — {artista} · "
-            f"volume {dev.get('volume_percent', '?')}% · aparelho {dev.get('name', '?')}"
-        )
-    except Exception as e:
-        return _zf_sp_erro(e)
-
-
 def _zf_cb_volume():
     st.session_state["zf2_msg"] = zf_sp_volume(st.session_state.get("zf2_vol", 50))
 
 
-def zf_botao_spotify_ui(container=None):
-    """Renderiza o botão/painel de controle do Spotify onde você quiser."""
-    alvo = container if container is not None else st
+def _zf_sp_transcrever_voz(audio_bytes: bytes) -> str:
+    if not audio_bytes:
+        return ""
+    for nome_fn in ("transcrever_audio", "stt_transcribe", "speech_to_text", "_transcrever"):
+        fn = globals().get(nome_fn)
+        if callable(fn):
+            try:
+                res = fn(audio_bytes)
+                if isinstance(res, str) and res.strip():
+                    return res.strip()
+            except Exception:
+                pass
+
+    groq_key = _zf_sp_secret("GROQ_API_KEY") or _zf_sp_secret("stt_key")
+    if groq_key:
+        try:
+            r = _requests.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {groq_key}"},
+                files={"file": ("voz_spotify.wav", audio_bytes, "audio/wav")},
+                data={"model": "whisper-large-v3-turbo", "language": "pt"},
+                timeout=25,
+            )
+            if r.status_code == 200:
+                return (r.json().get("text") or "").strip()
+        except Exception:
+            pass
+    return ""
+
+
+def _zf_sp_interpretar_voz(comando_voz: str) -> str:
+    txt = (comando_voz or "").strip()
+    low = txt.lower()
+    if not txt:
+        return "❌ Não entendi o áudio. Tente falar mais perto do microfone."
+
+    m_vol = _re.search(r"\b(?:volume|no|em)\s*(\d{1,3})\b", low)
+    if m_vol:
+        v = max(0, min(100, int(m_vol.group(1))))
+        st.session_state["zf2_vol"] = v
+        return zf_sp_volume(v)
+
+    if _re.search(r"\b(aumenta|aumentar|sobe|subir|mais alto)\b", low):
+        novo = min(100, int(st.session_state.get("zf2_vol", 50)) + 15)
+        st.session_state["zf2_vol"] = novo
+        return zf_sp_volume(novo)
+
+    if _re.search(r"\b(abaixa|abaixar|diminui|diminuir|mais baixo|reduz)\b", low):
+        novo = max(0, int(st.session_state.get("zf2_vol", 50)) - 15)
+        st.session_state["zf2_vol"] = novo
+        return zf_sp_volume(novo)
+
+    if _re.search(r"\b(pausa|pausar|para|parar|stop)\b", low):
+        return zf_sp_controle("pausar")
+    if _re.search(r"\b(continua|continuar|play|retoma|volta a tocar)\b", low):
+        return zf_sp_controle("continuar")
+    if _re.search(r"\b(pr[oó]xima|pula|pular|avan[cç]a|avan[cç]ar|next)\b", low):
+        return zf_sp_controle("proxima")
+    if _re.search(r"\b(anterior|volta|voltar)\b", low):
+        return zf_sp_controle("anterior")
+
+    termo = _re.sub(
+        r"(?i)^\s*(?:zeus[,:]?\s*)?(?:toca|toque|tocar|coloca|bota|p[oõ]e|quero ouvir)\s+",
+        "",
+        txt,
+    ).strip(" .,!?")
+    return zf_sp_tocar(termo or txt)
+
+
+def zf_sp_detalhes_player() -> dict:
+    try:
+        sp = _zf_sp()
+        est = sp.current_playback()
+        if not est or not est.get("item"):
+            return {"ativo": False}
+        it = est["item"]
+        album = it.get("album") or {}
+        imagens = album.get("images") or []
+        capa = imagens[0]["url"] if imagens else ""
+        artistas = ", ".join(a.get("name", "") for a in (it.get("artists") or []) if a.get("name"))
+        dev = est.get("device") or {}
+        duracao_ms = max(1, int(it.get("duration_ms") or 1))
+        progresso_ms = max(0, int(est.get("progress_ms") or 0))
+        return {
+            "ativo": True,
+            "tocando": bool(est.get("is_playing")),
+            "faixa": it.get("name", "Faixa desconhecida"),
+            "artista": artistas or "Artista desconhecido",
+            "album": album.get("name", ""),
+            "capa": capa,
+            "progresso_pct": min(100, int((progresso_ms / duracao_ms) * 100)),
+            "progresso_s": progresso_ms // 1000,
+            "duracao_s": duracao_ms // 1000,
+            "volume": dev.get("volume_percent"),
+            "aparelho": dev.get("name", ""),
+        }
+    except Exception as e:
+        return {"ativo": False, "erro": _zf_sp_erro(e)}
+
+
+def _zf_fmt_tempo(seg: int) -> str:
+    m, s = divmod(max(0, int(seg)), 60)
+    return f"{m}:{s:02d}"
+
+
+def zf_spotify_mini_player():
+    """Renderiza o card interativo do Spotify sem vazar objetos DeltaGenerator."""
     ss = st.session_state
     ss.setdefault("zf2_vol", 50)
-    box = (
-        alvo.popover("🎧 Spotify", use_container_width=True)
-        if hasattr(alvo, "popover")
-        else alvo.expander("🎧 Spotify", expanded=False)
-    )
-    with box:
-        alvo.text_input(
-            "Música ou artista",
-            key="zf2_musica",
-            placeholder="Ex.: Legião Urbana Tempo Perdido",
-        )
-        if alvo.button("▶️ Tocar no Spotify", key="zf2_btn_tocar", use_container_width=True):
-            termo = (ss.get("zf2_musica") or "").strip()
-            ss["zf2_msg"] = zf_sp_tocar(termo) if termo else "Digite o nome da música primeiro."
 
-        c1, c2, c3, c4 = alvo.columns(4)
-        if c1.button("⏮️", key="zf2_btn_ant", use_container_width=True):
-            ss["zf2_msg"] = zf_sp_controle("anterior")
-        if c2.button("⏸️", key="zf2_btn_pausa", use_container_width=True):
-            ss["zf2_msg"] = zf_sp_controle("pausar")
-        if c3.button("▶️", key="zf2_btn_play", use_container_width=True):
-            ss["zf2_msg"] = zf_sp_controle("continuar")
-        if c4.button("⏭️", key="zf2_btn_prox", use_container_width=True):
-            ss["zf2_msg"] = zf_sp_controle("proxima")
+    info = zf_sp_detalhes_player()
+    if info.get("ativo") and isinstance(info.get("volume"), int):
+        ss["zf2_vol"] = info["volume"]
 
-        alvo.slider("🔊 Volume", 0, 100, key="zf2_vol", on_change=_zf_cb_volume)
+    with st.container(border=True):
+        h1, h2 = st.columns([4, 1])
+        with h1:
+            st.markdown("#### 🎧 Spotify Player")
+        with h2:
+            if st.button("🔄", key="zf_sp_card_refresh", help="Atualizar capa e aparelho", use_container_width=True):
+                ss["zf2_devs"] = zf_sp_dispositivos()
+                st.rerun()
 
-        if alvo.button("🔄 Atualizar aparelhos", key="zf2_btn_devs", use_container_width=True):
-            ss["zf2_devs"] = zf_sp_dispositivos()
+        col_capa, col_info = st.columns([1.15, 2.35], vertical_alignment="center")
+        with col_capa:
+            if info.get("capa"):
+                st.image(info["capa"], use_container_width=True)
+            else:
+                st.markdown(
+                    """
+                    <div style="background:linear-gradient(135deg,#1DB954,#121212);
+                    border-radius:12px;height:110px;display:flex;align-items:center;
+                    justify-content:center;color:white;font-size:32px;">🎵</div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-        devs = ss.get("zf2_devs")
-        if isinstance(devs, list) and devs:
-            rotulos = {
-                f"{d.get('name', '?')} ({d.get('type', '?')})" + (" ●" if d.get("is_active") else ""): d.get("id")
-                for d in devs
-                if d.get("id")
-            }
-            if rotulos:
-                escolha = alvo.selectbox("Tocar em", list(rotulos.keys()), key="zf2_dev_sel")
-                ss["zf2_dev_id"] = rotulos[escolha]
-        elif isinstance(devs, str):
-            alvo.caption(devs)
+        with col_info:
+            if info.get("ativo"):
+                status_badge = "🟢 Tocando agora" if info.get("tocando") else "⏸️ Pausado"
+                st.caption(f"{status_badge} · {info.get('aparelho') or 'Spotify'}")
+                st.markdown(f"*{_html.escape(info['faixa'])}*")
+                st.caption(f"🎤 {_html.escape(info['artista'])}")
+                st.progress(info["progresso_pct"] / 100.0)
+                st.caption(f"{_zf_fmt_tempo(info['progresso_s'])} / {_zf_fmt_tempo(info['duracao_s'])}")
+            else:
+                st.markdown("*Nenhuma faixa ativa no momento*")
+                st.caption("Peça uma música pelo microfone abaixo ou clique em 🔄.")
+                if info.get("erro"):
+                    st.caption(info["erro"])
 
-        if alvo.button("ℹ️ O que está tocando?", key="zf2_btn_estado", use_container_width=True):
-            ss["zf2_msg"] = zf_sp_estado()
+        b1, b2, b3, b4, b5 = st.columns(5)
+        with b1:
+            if st.button("⏮️", key="zf_sp_card_prev", use_container_width=True):
+                ss["zf2_msg"] = zf_sp_controle("anterior")
+                st.rerun()
+        with b2:
+            icone_pp = "⏸️" if info.get("tocando") else "▶️"
+            acao_pp = "pausar" if info.get("tocando") else "continuar"
+            if st.button(icone_pp, key="zf_sp_card_pp", use_container_width=True):
+                ss["zf2_msg"] = zf_sp_controle(acao_pp)
+                st.rerun()
+        with b3:
+            if st.button("⏭️", key="zf_sp_card_next", use_container_width=True):
+                ss["zf2_msg"] = zf_sp_controle("proxima")
+                st.rerun()
+        with b4:
+            if st.button("🔉 -", key="zf_sp_card_vdown", use_container_width=True):
+                novo_v = max(0, int(ss.get("zf2_vol", 50)) - 10)
+                ss["zf2_vol"] = novo_v
+                ss["zf2_msg"] = zf_sp_volume(novo_v)
+                st.rerun()
+        with b5:
+            if st.button("🔊 +", key="zf_sp_card_vup", use_container_width=True):
+                novo_v = min(100, int(ss.get("zf2_vol", 50)) + 10)
+                ss["zf2_vol"] = novo_v
+                ss["zf2_msg"] = zf_sp_volume(novo_v)
+                st.rerun()
+
+        st.slider("Volume", 0, 100, key="zf2_vol", on_change=_zf_cb_volume, label_visibility="collapsed")
+
+        if hasattr(st, "audio_input"):
+            audio_voz = st.audio_input(
+                "🎙️ Comando de voz (ex: 'toca Eduardo Costa', 'aumenta o volume', 'pausa')",
+                key="zf_sp_card_mic",
+            )
+            if audio_voz is not None:
+                raw_bytes = audio_voz.getvalue()
+                hash_audio = hash(raw_bytes)
+                if ss.get("zf_sp_last_audio_hash") != hash_audio:
+                    ss["zf_sp_last_audio_hash"] = hash_audio
+                    with st.spinner("Processando voz..."):
+                        texto_falado = _zf_sp_transcrever_voz(raw_bytes)
+                        resp_voz = _zf_sp_interpretar_voz(texto_falado)
+                        ss["zf2_msg"] = f"🗣️ «{texto_falado}» → {resp_voz}" if texto_falado else resp_voz
+                    st.rerun()
 
         if ss.get("zf2_msg"):
-            alvo.caption(ss["zf2_msg"])
+            st.caption(ss["zf2_msg"])
 # ============================================================
 # ZEUS FINAL - NUCLEO CONSOLIDADO UNICO
 # (substitui TODOS os blocos "BLOCO SUPLEMENTAR ZEUS" anteriores:
