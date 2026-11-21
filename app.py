@@ -47,7 +47,8 @@ except ImportError:
     OpenAI = None
 import streamlit as st
 import streamlit.components.v1 as components
-
+import time
+import unicodedata
 # Importação dinâmica das habilidades geradas pelo Zeus e do gerenciador do GitHub
 try:
     import zeus_skills
