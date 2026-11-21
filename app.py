@@ -1225,7 +1225,7 @@ def listar_vozes_edge():
 
 
 # ============================================================
-# BUSCA NA INTERNET
+# BUSCA NA INTERNET — v3.1 (limpeza + re-busca + anti-invenção)
 # ============================================================
 WEB_TRIGGERS = (
     "hoje", "agora", "atual", "atualmente", "últimas", "ultimas", "notícia", "noticia", "recente",
@@ -1234,18 +1234,101 @@ WEB_TRIGGERS = (
     "quem ganhou", "quem é o atual", "lançamento", "lancamento", "versão mais nova", "ao vivo",
 )
 
+# ---- palavras de comando/saudação que NÃO devem ir para o buscador ----
+_STOP_PREFIXOS = (
+    "zeus", "ei zeus", "olá", "ola", "oi", "bom dia", "boa tarde", "boa noite",
+    "por favor", "pfv", "pf", "me diga", "me diz", "me fale", "me fala",
+    "você pode", "voce pode", "poderia", "pode", "gostaria", "queria", "quero",
+    "pesquise", "pesquisa", "pesquisar", "busque", "busca", "buscar", "procure",
+    "procura", "procurar", "verifique", "verifica", "confira", "consulte", "consulta",
+    "google", "internet", "na web", "na internet",
+)
+_STOP_PALAVRAS = {
+    "por favor", "pfv", "pf", "zeus", "ei", "olá", "ola", "oi", "bom dia", "boa tarde",
+    "boa noite", "me", "mim", "vc", "voce", "você", "para", "pra", "que", "qual", "quais",
+    "sobre", "aqui", "agora", "por gentileza", "obrigado", "obrigada", "grato",
+}
+_RE_URL = re.compile(r"https?://\S+|www\.\S+")
+_RE_EMOJI = re.compile(
+    "[" "\U0001F300-\U0001FAFF" "\U00002600-\U000027BF" "\U0001F1E6-\U0001F1FF" "]+",
+    flags=re.UNICODE,
+)
+
+
+def _limpar_query(texto, max_len=180):
+    """Limpa a query para a busca: remove saudações, comandos, URLs, emojis e pontuação solta."""
+    if not texto:
+        return ""
+    q = str(texto)
+    q = _RE_URL.sub(" ", q)
+    q = _RE_EMOJI.sub(" ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    # remove prefixos de comando (só no início)
+    low = q.lower()
+    mudou = True
+    while mudou:
+        mudou = False
+        for p in _STOP_PREFIXOS:
+            if low.startswith(p + " ") or low == p:
+                q = q[len(p):].lstrip(" ,.:;!?-")
+                low = q.lower()
+                mudou = True
+    # remove palavras isoladas de ruído
+    tokens = [t for t in q.split() if t.lower().strip(".,;:!?") not in _STOP_PALAVRAS]
+    q = " ".join(tokens).strip(" ,.;:!?-")
+    return q[:max_len]
+
+
+def _tokens_relevantes(texto, min_len=4):
+    """Extrai tokens 'significativos' para comparar tema do resultado com a query."""
+    if not texto:
+        return set()
+    t = re.sub(r"[^\wÀ-ÿ\s]", " ", str(texto).lower())
+    return {w for w in t.split() if len(w) >= min_len and w not in _STOP_PALAVRAS}
+
+
+def _resultado_no_tema(query_limpa, resultado, limiar=0.15):
+    """True se o resultado compartilhar tokens suficientes com a query (evita resultados aleatórios)."""
+    q_tokens = _tokens_relevantes(query_limpa)
+    r_tokens = _tokens_relevantes(resultado)
+    if not q_tokens or not r_tokens:
+        return False
+    inter = q_tokens & r_tokens
+    return (len(inter) / max(1, len(q_tokens))) >= limiar or len(inter) >= 2
+
+
+def _reformular_query(q):
+    """Segunda tentativa: reduz a query a palavras-chave essenciais (tira perguntas/datas coladas)."""
+    if not q:
+        return ""
+    # tira artigos/perguntas comuns
+    ruido = {"que", "qual", "quais", "quando", "onde", "como", "porque", "por", "para",
+             "pra", "de", "do", "da", "dos", "das", "o", "a", "os", "as", "um", "uma",
+             "é", "eh", "foi", "será", "sera", "está", "esta", "tem", "há", "ha"}
+    toks = [t for t in q.split() if t.lower() not in ruido]
+    return " ".join(toks).strip()[:120]
+
+
+# ------------------- buscadores -------------------
 
 def _search_google_cse(q, n=5):
     key, cx = _secret("GOOGLE_API_KEY"), _secret("GOOGLE_CSE_ID")
     if not (key and cx):
         return ""
-    r = requests.get("https://www.googleapis.com/customsearch/v1", params={"key": key, "cx": cx, "q": q, "num": n, "hl": "pt"}, timeout=20)
-    if r.status_code != 200:
+    try:
+        r = requests.get(
+            "https://www.googleapis.com/customsearch/v1",
+            params={"key": key, "cx": cx, "q": q, "num": n, "hl": "pt"},
+            timeout=20,
+        )
+        if r.status_code != 200:
+            return ""
+        linhas = []
+        for i in r.json().get("items", []):
+            linhas.append("- " + i.get("title", "") + ": " + i.get("snippet", "") + " (" + i.get("link", "") + ")")
+        return "\n".join(linhas)
+    except Exception:
         return ""
-    linhas = []
-    for i in r.json().get("items", []):
-        linhas.append("- " + i.get("title", "") + ": " + i.get("snippet", "") + " (" + i.get("link", "") + ")")
-    return "\n".join(linhas)
 
 
 def _search_gemini_google(q):
@@ -1259,7 +1342,11 @@ def _search_gemini_google(q):
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
                 json={
-                    "contents": [{"role": "user", "parts": [{"text": "Pesquise no Google e responda em português com fatos atuais, datas e números: " + q}]}],
+                    "contents": [{"role": "user", "parts": [{
+                        "text": ("Pesquise no Google e responda em português com fatos atuais, datas, "
+                                 "números e fontes. Se não encontrar dados confiáveis, diga que não "
+                                 "encontrou — NÃO invente. Tema: " + q)
+                    }]}],
                     "tools": [{"google_search": {}}],
                 },
                 timeout=45,
@@ -1309,18 +1396,21 @@ def _search_wiki(q, n=4):
         return ""
 
 
-def web_search(q, n=5):
-    """Busca na web priorizando Google. Insiste em várias fontes."""
-    fontes = (
-        ("Google CSE", _search_google_cse),
-        ("Google (Gemini)", _search_gemini_google),
-        ("DuckDuckGo", _search_ddg),
-        ("Wikipédia", _search_wiki),
-    )
-    # Primeira passagem
-    for nome, fn in fontes:
+# ------------------- orquestração -------------------
+
+_FONTES_WEB = (
+    ("Google CSE", _search_google_cse),
+    ("Google (Gemini)", _search_gemini_google),
+    ("DuckDuckGo", _search_ddg),
+    ("Wikipédia", _search_wiki),
+)
+
+
+def _executar_fontes(q, n, exigir_tema=True):
+    """Roda todas as fontes na ordem, retornando (texto, fonte) da 1ª que aderir ao tema."""
+    for nome, fn in _FONTES_WEB:
         try:
-            txt = fn(q) if nome != "DuckDuckGo" else fn(q, n)
+            txt = fn(q, n) if nome in ("Google CSE", "DuckDuckGo", "Wikipédia") else fn(q)
         except TypeError:
             try:
                 txt = fn(q)
@@ -1328,16 +1418,47 @@ def web_search(q, n=5):
                 txt = ""
         except Exception:
             txt = ""
-        if txt and str(txt).strip():
-            return str(txt).strip(), nome
-    # Segunda passagem (às vezes DDG ou wiki falham na 1ª)
-    for nome, fn in fontes:
+        txt = (txt or "").strip()
+        if not txt:
+            continue
+        if (not exigir_tema) or _resultado_no_tema(q, txt):
+            return txt, nome
+    return "", ""
+
+
+def web_search(q, n=5):
+    """
+    Busca web inteligente:
+      1) limpa a query;
+      2) tenta a 1ª rodada;
+      3) se nada relevante → reformula e tenta 2ª rodada (loop de 2ª tentativa);
+      4) se ainda assim falhar → retorna "" (para o prompt bloquear alucinação).
+    """
+    q_limpa = _limpar_query(q)
+    if not q_limpa:
+        return "", ""
+
+    # 1ª tentativa
+    txt, fonte = _executar_fontes(q_limpa, n, exigir_tema=True)
+    if txt:
+        return txt, fonte
+
+    # 2ª tentativa: reformula (palavras-chave essenciais) e afrouxa o filtro de tema
+    q2 = _reformular_query(q_limpa)
+    if q2 and q2 != q_limpa:
+        txt, fonte = _executar_fontes(q2, n, exigir_tema=False)
+        if txt:
+            return txt, fonte + " (re-busca)"
+
+    # 3ª tentativa: últimas fontes que costumam falhar isoladamente
+    for nome, fn in _FONTES_WEB:
         try:
-            txt = fn(q)
+            txt = fn(q_limpa)
         except Exception:
             txt = ""
         if txt and str(txt).strip():
-            return str(txt).strip(), nome
+            return str(txt).strip(), nome + " (fallback)"
+
     return "", ""
 
 
@@ -1347,23 +1468,57 @@ def precisa_web(prompt):
         return False
     if modo == "Sempre":
         return True
-    low = prompt.lower()
+    low = (prompt or "").lower()
     return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low))
 
 
+# --- Instrução anti-alucinação (sempre anexada quando a web é acionada) ---
+_REGRAS_ANTIALUCINACAO = (
+    "REGRAS OBRIGATÓRIAS QUANDO HÁ DADOS DA INTERNET:\n"
+    "1. Use SOMENTE as informações contidas no bloco [DADOS DA INTERNET].\n"
+    "2. É PROIBIDO inventar números, datas, nomes, cotações, links ou fontes.\n"
+    "3. Se os dados não responderem à pergunta, diga claramente: "
+    "\"Não encontrei informação confiável na busca para responder isso agora.\"\n"
+    "4. Não crie URLs. Só cite links que apareçam literalmente nos dados.\n"
+    "5. Se os dados forem de uma data anterior, avise ao usuário.\n"
+)
+
+
 def enriquecer_com_web(prompt):
+    """
+    Enriquece o prompt com dados da internet aplicando:
+      - limpeza da query;
+      - re-busca em caso de resultado fora do tema;
+      - bloqueio de alucinação quando a busca falha.
+    Retorna (prompt_final, fonte).
+    """
     if not precisa_web(prompt):
         return prompt, ""
-    ctx_web, fonte = web_search(prompt[:300])
-    if not ctx_web:
-        return prompt, ""
+
+    ctx_web, fonte = web_search(prompt)
     hoje = time.strftime("%d/%m/%Y")
+
+    # ---- CASO 1: busca falhou → injeta regra anti-alucinação explícita ----
+    if not ctx_web:
+        novo = (
+            "[BUSCA WEB]\n"
+            "Nenhum resultado confiável foi encontrado para esta pergunta.\n"
+            "[FIM DA BUSCA]\n\n"
+            + _REGRAS_ANTIALUCINACAO +
+            "\nPergunta do usuário: " + prompt
+        )
+        return novo, "sem resultado"
+
+    # ---- CASO 2: busca OK → injeta dados + regras anti-alucinação ----
     novo = (
-        "[DADOS DA INTERNET em " + hoje + ", via " + fonte + "]\n" + ctx_web[:3500] + "\n[FIM DOS DADOS]\n\n"
-        "Use os dados acima se forem úteis e diga que vieram da internet. Pergunta do usuário: " + prompt
+        "[DADOS DA INTERNET em " + hoje + ", via " + fonte + "]\n"
+        + ctx_web[:3500] +
+        "\n[FIM DOS DADOS]\n\n"
+        + _REGRAS_ANTIALUCINACAO +
+        "\nUse os dados acima quando forem úteis e diga que vieram da internet.\n"
+        "Pergunta do usuário: " + prompt
     )
     return novo, fonte
-
 
 # ============================================================
 # GERAÇÃO DE MÍDIA
