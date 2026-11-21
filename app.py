@@ -5464,3 +5464,59 @@ def zf_trader_rapido_b2(prompt_usuario: str) -> str:
     ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     zf_b2_put_v2(f"autonomia/trader/analise_{simbolo.lower()}_{intervalo}_{ts_tag}.md", texto_final, "text/markdown; charset=utf-8")
     return texto_final
+# ==============================================================================
+# CAMADA 4 - DIAGNOSTICO RAPIDO + MINI PAINEL TRADER/DIAGNOSTICO (SEM DUPLICAR SIDEBAR)
+# Cole abaixo da Camada 3 no final do app.py
+# ==============================================================================
+def zf_diagnostico_rapido() -> str:
+    linhas = ["**Diagnostico Rapido do Zeus:**"]
+    try:
+        zf_b2_put_v2("diagnostico/_ping.txt", b"ok", "text/plain")
+        ok = zf_b2_get_v2("diagnostico/_ping.txt") == b"ok"
+        zf_b2_delete_v2("diagnostico/_ping.txt")
+        linhas.append("- **Cofre B2:** OK (gravacao, leitura e exclusao funcionando)" if ok else "- **Cofre B2:** Falha na verificacao")
+    except Exception as e:
+        linhas.append(f"- **Cofre B2:** Erro -> {_zf_detalhe_erro_b2(e)}")
+
+    try:
+        _, info = zf_coletar_analisar_binance("BTCUSDT", "1h", limite=30)
+        linhas.append(f"- **Binance + B2:** OK (BTCUSDT ultimo `{info.get('ultimo')}`)" if info else "- **Binance + B2:** Sem retorno")
+    except Exception as e:
+        linhas.append(f"- **Binance + B2:** Erro -> {type(e).__name__}")
+
+    fatos = zf_mem_ler(forcar=True)
+    linhas.append(f"- **Memoria B2:** {len(fatos)} fato(s) carregado(s)")
+    return "\n".join(linhas)
+
+
+def zf_render_camadas_extras():
+    with st.expander("Zeus B2: Trader Rapido, Memoria & Diagnostico", expanded=False):
+        tab_tr, tab_mem, tab_diag = st.tabs(["Trader B2", "Ensinar Memoria", "Diagnostico"])
+        with tab_tr:
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                par = st.text_input("Par (ex: BTCUSDT, ETHUSDT, SOLUSDT):", value="BTCUSDT", key="zf_c4_par")
+            with c2:
+                itv = st.selectbox("Timeframe", ["5m", "15m", "1h", "4h", "1d"], index=2, key="zf_c4_itv")
+            incluir_macro = st.checkbox("Incluir SELIC e Dolar (BCB)", value=True, key="zf_c4_macro")
+            if st.button("Analisar & Salvar CSV/SVG/MD no B2", key="zf_c4_btn_tr", use_container_width=True):
+                q = f"Analisar {par} em {itv}" + (" com macro selic e dolar" if incluir_macro else "")
+                with st.spinner("Processando direto na Binance + B2..."):
+                    st.markdown(zf_trader_rapido_b2(q))
+        with tab_mem:
+            p_mem = st.text_input("Pergunta / Gatilho:", placeholder="Ex: Qual minha regra de stop?", key="zf_c4_mp")
+            r_mem = st.text_area("Regra / Resposta para salvar no B2:", placeholder="Ex: Nunca arriscar mais de 1.5% por operacao.", key="zf_c4_mr")
+            if st.button("Salvar na Memoria B2", key="zf_c4_btn_mem", use_container_width=True) and p_mem.strip() and r_mem.strip():
+                st.success(zf_mem_ensinar(p_mem, r_mem))
+            if st.button("Ver Ultimos Fatos", key="zf_c4_btn_list", use_container_width=True):
+                st.json(zf_mem_ler(forcar=True)[-5:])
+        with tab_diag:
+            if st.button("Rodar Diagnostico Agora", key="zf_c4_btn_diag", use_container_width=True):
+                with st.spinner("Testando B2, Binance e Memoria..."):
+                    st.markdown(zf_diagnostico_rapido())
+
+
+try:
+    zf_render_camadas_extras()
+except Exception as _zf_c4_err:
+    st.caption(f"Camadas Zeus B2: {_zf_c4_err}")
