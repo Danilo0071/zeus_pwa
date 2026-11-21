@@ -3805,59 +3805,152 @@ def zf_render_painel():
     with st.sidebar:
         st.divider()
         st.subheader("Spotify")
-        if callable(globals().get("zf_spotify_mini_player")):
-            try:
-                zf_spotify_mini_player()
-            except Exception:
-                pass
+
+        def _zf_sp_cli():
+            cid = st.secrets.get("SPOTIFY_CLIENT_ID")
+            csec = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+            rtok = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
+            ruri = st.secrets.get("SPOTIFY_REDIRECT_URI", "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/")
+            if not (cid and csec and rtok):
+                return None
+            tok = SpotifyOAuth(
+                client_id=cid,
+                client_secret=csec,
+                redirect_uri=ruri,
+                scope="user-modify-playback-state user-read-playback-state",
+                cache_path=None,
+            ).refresh_access_token(rtok)
+            return spotipy.Spotify(auth=tok["access_token"])
+
+        sp_now = None
+        pb_now = None
+        try:
+            sp_now = _zf_sp_cli()
+            if sp_now:
+                pb_now = sp_now.current_playback()
+        except Exception:
+            pb_now = None
+
+        if pb_now and pb_now.get("item"):
+            item = pb_now["item"]
+            imgs = item.get("album", {}).get("images", [])
+            if imgs:
+                st.image(imgs[0]["url"], use_container_width=True)
+            artistas = ", ".join(a.get("name", "") for a in item.get("artists", []))
+            st.markdown(f"**{item.get('name', '')}**")
+            if artistas:
+                st.caption(artistas)
+
         musica_input = st.text_input("Musica ou artista:", key="zf_input_musica")
+
+        if hasattr(st, "audio_input"):
+            audio_voz_sp = st.audio_input("Pedir por voz", key="zf_sp_voz_mic")
+            if audio_voz_sp is not None:
+                audio_bytes = audio_voz_sp.getvalue()
+                audio_hash = hash(audio_bytes)
+                if st.session_state.get("zf_sp_last_mic_hash") != audio_hash:
+                    st.session_state.zf_sp_last_mic_hash = audio_hash
+                    with st.spinner("Ouvindo pedido..."):
+                        try:
+                            from openai import OpenAI as _OpenAI_SP
+                            _oai_key = st.secrets.get("OPENAI_API_KEY")
+                            if _oai_key:
+                                _cli_oai = _OpenAI_SP(api_key=_oai_key)
+                                _tr = _cli_oai.audio.transcriptions.create(
+                                    model="whisper-1",
+                                    file=("pedido.wav", audio_bytes, "audio/wav"),
+                                    language="pt",
+                                )
+                                _cmd_txt = (_tr.text or "").strip()
+                                _termo_voz = _re_zf.sub(
+                                    r"\b(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)\b",
+                                    "",
+                                    _cmd_txt.lower(),
+                                ).strip(" .,!?:-")
+                                if _termo_voz:
+                                    res_voz = zf_tocar_musica(_termo_voz)
+                                    st.toast(res_voz, icon="🎵")
+                                    st.rerun()
+                                else:
+                                    st.toast("Nao entendi o nome da musica.", icon="⚠️")
+                            else:
+                                st.toast("Falta OPENAI_API_KEY nos Secrets.", icon="⚠️")
+                        except Exception as _e_mic:
+                            st.toast(f"Erro na voz: {str(_e_mic)[:90]}", icon="⚠️")
+
         c_sp1, c_sp2, c_sp3, c_sp4 = st.columns(4)
         with c_sp1:
-            if st.button("Tocar", key="zf_btn_tocar", use_container_width=True):
+            if st.button("▶", key="zf_btn_tocar", use_container_width=True, help="Tocar musica digitada"):
                 if musica_input.strip():
                     with st.spinner("Buscando..."):
                         res_sp = zf_tocar_musica(musica_input.strip())
-                    st.success(res_sp) if str(res_sp).startswith("Tocando") else st.error(res_sp)
+                    st.toast(res_sp, icon="🎵")
+                    st.rerun()
                 else:
-                    st.warning("Digite a musica.")
+                    st.toast("Digite a musica.", icon="⚠️")
         with c_sp2:
-            if st.button("Ant", key="zf_btn_sp_prev", use_container_width=True):
+            if st.button("⏮", key="zf_btn_sp_prev", use_container_width=True, help="Anterior"):
                 try:
-                    cid = st.secrets.get("SPOTIFY_CLIENT_ID")
-                    csec = st.secrets.get("SPOTIFY_CLIENT_SECRET")
-                    rtok = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
-                    ruri = st.secrets.get("SPOTIFY_REDIRECT_URI", "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/")
-                    tok = SpotifyOAuth(client_id=cid, client_secret=csec, redirect_uri=ruri, scope="user-modify-playback-state user-read-playback-state", cache_path=None).refresh_access_token(rtok)
-                    spotipy.Spotify(auth=tok["access_token"]).previous_track()
+                    cli = sp_now or _zf_sp_cli()
+                    if cli:
+                        cli.previous_track()
+                        st.rerun()
                 except Exception as e:
-                    st.error(str(e)[:100])
+                    st.toast(str(e)[:90], icon="⚠️")
         with c_sp3:
-            if st.button("Pausa", key="zf_btn_sp_pause", use_container_width=True):
+            if st.button("⏯", key="zf_btn_sp_pause", use_container_width=True, help="Play / Pausa"):
                 try:
-                    cid = st.secrets.get("SPOTIFY_CLIENT_ID")
-                    csec = st.secrets.get("SPOTIFY_CLIENT_SECRET")
-                    rtok = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
-                    ruri = st.secrets.get("SPOTIFY_REDIRECT_URI", "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/")
-                    tok = SpotifyOAuth(client_id=cid, client_secret=csec, redirect_uri=ruri, scope="user-modify-playback-state user-read-playback-state", cache_path=None).refresh_access_token(rtok)
-                    sp_cli = spotipy.Spotify(auth=tok["access_token"])
-                    pb = sp_cli.current_playback()
-                    if pb and pb.get("is_playing"):
-                        sp_cli.pause_playback()
-                    else:
-                        sp_cli.start_playback()
+                    cli = sp_now or _zf_sp_cli()
+                    if cli:
+                        pb = pb_now or cli.current_playback()
+                        if pb and pb.get("is_playing"):
+                            cli.pause_playback()
+                        else:
+                            cli.start_playback()
+                        st.rerun()
                 except Exception as e:
-                    st.error(str(e)[:100])
+                    st.toast(str(e)[:90], icon="⚠️")
         with c_sp4:
-            if st.button("Prox", key="zf_btn_sp_next", use_container_width=True):
+            if st.button("⏭", key="zf_btn_sp_next", use_container_width=True, help="Proxima"):
                 try:
-                    cid = st.secrets.get("SPOTIFY_CLIENT_ID")
-                    csec = st.secrets.get("SPOTIFY_CLIENT_SECRET")
-                    rtok = st.secrets.get("SPOTIFY_REFRESH_TOKEN")
-                    ruri = st.secrets.get("SPOTIFY_REDIRECT_URI", "https://zeuspwa-fmt3t7spxp56vcqcpomu9k.streamlit.app/")
-                    tok = SpotifyOAuth(client_id=cid, client_secret=csec, redirect_uri=ruri, scope="user-modify-playback-state user-read-playback-state", cache_path=None).refresh_access_token(rtok)
-                    spotipy.Spotify(auth=tok["access_token"]).next_track()
+                    cli = sp_now or _zf_sp_cli()
+                    if cli:
+                        cli.next_track()
+                        st.rerun()
                 except Exception as e:
-                    st.error(str(e)[:100])
+                    st.toast(str(e)[:90], icon="⚠️")
+
+        c_vol1, c_vol2, c_vol3 = st.columns([1, 1, 1])
+        vol_atual = 50
+        if pb_now and isinstance(pb_now.get("device"), dict) and pb_now["device"].get("volume_percent") is not None:
+            vol_atual = int(pb_now["device"]["volume_percent"])
+        st.session_state.setdefault("zf_sp_vol", vol_atual)
+        with c_vol1:
+            if st.button("🔉 -", key="zf_btn_vol_menos", use_container_width=True):
+                try:
+                    cli = sp_now or _zf_sp_cli()
+                    if cli:
+                        novo_vol = max(0, int(st.session_state.get("zf_sp_vol", vol_atual)) - 10)
+                        cli.volume(novo_vol)
+                        st.session_state.zf_sp_vol = novo_vol
+                        st.toast(f"Volume: {novo_vol}%", icon="🔉")
+                        st.rerun()
+                except Exception as e:
+                    st.toast(str(e)[:90], icon="⚠️")
+        with c_vol2:
+            st.markdown(f"<div style='text-align:center;padding-top:6px;font-size:13px;'>{st.session_state.get('zf_sp_vol', vol_atual)}%</div>", unsafe_allow_html=True)
+        with c_vol3:
+            if st.button("🔊 +", key="zf_btn_vol_mais", use_container_width=True):
+                try:
+                    cli = sp_now or _zf_sp_cli()
+                    if cli:
+                        novo_vol = min(100, int(st.session_state.get("zf_sp_vol", vol_atual)) + 10)
+                        cli.volume(novo_vol)
+                        st.session_state.zf_sp_vol = novo_vol
+                        st.toast(f"Volume: {novo_vol}%", icon="🔊")
+                        st.rerun()
+                except Exception as e:
+                    st.toast(str(e)[:90], icon="⚠️")
 
     with st.expander("Zeus - Nucleo de Aprendizado, Database (zilsy/) e Midia", expanded=False):
         aba_criar, aba_memoria, aba_midia = st.tabs(["Aprender (Ensemble)", "Memoria GitHub", "Midia Aprimorada"])
@@ -3931,7 +4024,7 @@ def zf_interceptar_musica():
         return
 
     termo = _re_zf.sub(
-        r"(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)", "", texto
+        r"\b(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)\b", "", texto
     ).strip(" .,!?:-")
     st.session_state.zf_ultima_musica = ultima["content"]
     if not termo:
