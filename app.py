@@ -5232,3 +5232,72 @@ def zf_b2_delete_v2(chave: str) -> tuple[bool, str]:
         c.delete_object(Bucket=b, Key=chave)
     _zf_b2_exec(_s3)
     return True, f"Apagado do B2: {chave}"
+# ==============================================================================
+# CAMADA 2 - MEMORIA EVOLUTIVA NO B2 (COM CACHE SEGURO E SEM SOBRESCRITA CEGA)
+# Cole abaixo da Camada 1 no final do app.py
+# ==============================================================================
+_ZF_MEM_KEY = "memoria/fatos.json"
+
+
+def _zf_norm_txt(txt: str) -> str:
+    t = unicodedata.normalize("NFKD", str(txt or "").lower())
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9\s]", " ", t)
+
+
+def zf_mem_ler(forcar: bool = False) -> list[dict]:
+    cache = st.session_state.get("_zf_mem_cache")
+    if cache and not forcar and (time.time() - cache["ts"] < 120):
+        return cache["fatos"]
+    try:
+        raw = zf_b2_get_v2(_ZF_MEM_KEY)
+        fatos = json.loads(raw.decode("utf-8"))
+    except FileNotFoundError:
+        fatos = []
+    except Exception:
+        return (cache or {}).get("fatos", [])
+    st.session_state["_zf_mem_cache"] = {"ts": time.time(), "fatos": fatos}
+    return fatos
+
+
+def zf_mem_ensinar(pergunta: str, resposta: str) -> str:
+    try:
+        fatos = json.loads(zf_b2_get_v2(_ZF_MEM_KEY).decode("utf-8"))
+    except FileNotFoundError:
+        fatos = []
+    except Exception as e:
+        return f"Nao consegui ler a memoria (nao sobrescrevi): {_zf_detalhe_erro_b2(e)}"
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    fatos.append({"p": pergunta.strip(), "r": resposta.strip(), "ts": ts})
+    fatos = fatos[-500:]
+    try:
+        zf_b2_put_v2(_ZF_MEM_KEY, json.dumps(fatos, ensure_ascii=False, indent=1), "application/json; charset=utf-8")
+    except Exception as e:
+        return f"Nao consegui gravar a memoria: {_zf_detalhe_erro_b2(e)}"
+    st.session_state["_zf_mem_cache"] = {"ts": time.time(), "fatos": fatos}
+    return f"Aprendido e guardado no cofre B2 ({len(fatos)} fatos na memoria)."
+
+
+def _zf_mem_sim(a: str, b: str) -> float:
+    stop = {"a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "um", "uma", "que", "eh", "me", "se", "no", "na"}
+    wa = " ".join(w for w in _zf_norm_txt(a).split() if w not in stop)
+    wb = " ".join(w for w in _zf_norm_txt(b).split() if w not in stop)
+    ta, tb = set(wa.split()), set(wb.split())
+    if not ta or not tb:
+        return 0.0
+    return 0.5 * len(ta & tb) / len(ta | tb) + 0.5 * _zf_SeqMatcher(None, wa, wb).ratio()
+
+
+def zf_mem_contexto(pergunta: str, n: int = 4) -> str:
+    fatos = zf_mem_ler()
+    if not fatos:
+        return ""
+    pontuados = sorted(((_zf_mem_sim(pergunta, f.get("p", "")), f) for f in fatos), key=lambda x: x[0], reverse=True)
+    uteis = [f for s, f in pontuados[:n] if s >= 0.2]
+    uteis += [f for f in fatos[-2:] if f not in uteis]
+    if not uteis:
+        return ""
+    linhas = ["[MEMORIA ENSINADA PELO CRIADOR - PRIORIZAR]"]
+    for f in uteis[: n + 2]:
+        linhas.append(f"- {f['p']}" + (f" => {f['r']}" if f.get("r") != f.get("p") else ""))
+    return "\n".join(linhas)
