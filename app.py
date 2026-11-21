@@ -3802,7 +3802,7 @@ def zf_render_painel():
                     audio_prev = zf_falar("Ola, Danilo. Eu sou Zeus.", vozes_filtradas[nome_voz])
                 st.audio(audio_prev, format="audio/mp3") if audio_prev else st.error("Nao consegui gerar o audio.")
 
-      with st.sidebar:
+    with st.sidebar:
         st.divider()
         try:
             if callable(globals().get("zf_spotify_mini_player")):
@@ -3811,7 +3811,6 @@ def zf_render_painel():
                 st.caption("Player Spotify indisponivel no momento.")
         except Exception as _zf_err_sp_ui:
             st.caption("Player Spotify: " + str(_zf_err_sp_ui)[:140])
-
 
     with st.expander("Zeus - Nucleo de Aprendizado, Database (zilsy/) e Midia", expanded=False):
         aba_criar, aba_memoria, aba_midia = st.tabs(["Aprender (Ensemble)", "Memoria GitHub", "Midia Aprimorada"])
@@ -3885,7 +3884,7 @@ def zf_interceptar_musica():
         return
 
     termo = _re_zf.sub(
-        r"\b(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)\b", "", texto
+        r"(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)", "", texto
     ).strip(" .,!?:-")
     st.session_state.zf_ultima_musica = ultima["content"]
     if not termo:
@@ -3903,6 +3902,7 @@ try:
     zf_interceptar_musica()
 except Exception as _zf_err:
     st.caption("Zeus Final desativado por erro: " + str(_zf_err)[:200])
+
 
 # ============================================================
 # ROTEADOR DE COMANDOS AUTÔNOMOS NO CHAT
