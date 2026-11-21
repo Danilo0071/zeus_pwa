@@ -5815,3 +5815,213 @@ def zf_b2_ler_csv_candles(simbolo: str = "BTCUSDT", intervalo: str = "1h"):
       except Exception:
         return "", msg
   return "", "Sem fonte de candles disponível."
+# ==============================================================================
+# ZEUS v3.0 - CORRECAO DE CHAVES/ROTAS DE IA + ROTEAMENTO TRADER/B2 NO CHAT
+# ==============================================================================
+def _zf_chaves_ia_resumo() -> dict:
+    """Diagnostica quais chaves de IA estao presentes e validas sem expor segredos."""
+    chaves = ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "COHERE_API_KEY")
+    ativas = []
+    for k in chaves:
+        val = ""
+        try:
+            if "_zf_secret_limpo" in globals() and callable(globals()["_zf_secret_limpo"]):
+                val = str(globals()["_zf_secret_limpo"](k, "") or "").strip()
+            elif "_secret" in globals() and callable(globals()["_secret"]):
+                val = str(globals()["_secret"](k) or "").strip()
+            else:
+                val = str(st.secrets.get(k, "") if hasattr(st, "secrets") else "").strip()
+        except Exception:
+            val = ""
+        if val and len(val) >= 8 and not val.lower().startswith(("coloque_", "sua_", "insira_", "replace_", "none", "null")):
+            ativas.append(k)
+    return {"chaves_ativas": ativas, "total": len(ativas)}
+
+
+def _zf_limpar_resposta_ia_invalida(texto: str) -> str:
+    """Descarta respostas de erro, bloqueio de chave/quota ou mensagem padrao de falha."""
+    t = (texto or "").strip()
+    if not t:
+        return ""
+    sinais_erro = (
+        "não consegui contatar as ias",
+        "nao consegui contatar as ias",
+        "as ias não responderam",
+        "as ias nao responderam",
+        "api key not valid",
+        "invalid api key",
+        "401 unauthorized",
+        "403 forbidden",
+        "429 too many requests",
+        "resource_exhausted",
+        "quota exceeded",
+        "insufficient_quota",
+        "connection error",
+        "connecttimeout",
+        "readtimeout",
+    )
+    low = t.lower()
+    if any(s in low for s in sinais_erro):
+        return ""
+    return t
+
+
+def _zf_chamada_gemini_direta(prompt_texto: str) -> str:
+    """Chamada direta e limpa ao Gemini usando as chaves/modelos configurados."""
+    api_key = ""
+    for nome_k in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        try:
+            if "_zf_secret_limpo" in globals() and callable(globals()["_zf_secret_limpo"]):
+                api_key = str(globals()["_zf_secret_limpo"](nome_k, "") or "").strip()
+            elif "_secret" in globals() and callable(globals()["_secret"]):
+                api_key = str(globals()["_secret"](nome_k) or "").strip()
+        except Exception:
+            api_key = ""
+        if api_key:
+            break
+    if not api_key:
+        return ""
+
+    modelos = []
+    for m_k in ("GEMINI_MODEL", "GEMINI_SEARCH_MODEL"):
+        try:
+            m_val = str(globals()["_zf_secret_limpo"](m_k, "") or "").strip() if callable(globals().get("_zf_secret_limpo")) else ""
+            if m_val and m_val not in modelos:
+                modelos.append(m_val)
+        except Exception:
+            pass
+    for padrao in ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"):
+        if padrao not in modelos:
+            modelos.append(padrao)
+
+    for modelo in modelos:
+        try:
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent",
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": prompt_texto}]}],
+                    "generationConfig": {"temperature": 0.4},
+                },
+                timeout=35,
+            )
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            cands = data.get("candidates") or []
+            if not cands:
+                continue
+            parts = ((cands[0].get("content") or {}).get("parts")) or []
+            out = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+            out = _zf_limpar_resposta_ia_invalida(out)
+            if out:
+                return out
+        except Exception:
+            continue
+    return ""
+
+
+def _zf_chamada_groq_direta(prompt_texto: str) -> str:
+    """Fallback rapido via Groq caso exista GROQ_API_KEY valida."""
+    api_key = ""
+    try:
+        if callable(globals().get("_zf_secret_limpo")):
+            api_key = str(globals()["_zf_secret_limpo"]("GROQ_API_KEY", "") or "").strip()
+        elif callable(globals().get("_secret")):
+            api_key = str(globals()["_secret"]("GROQ_API_KEY") or "").strip()
+    except Exception:
+        api_key = ""
+    if not api_key:
+        return ""
+    for modelo in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+        try:
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": modelo,
+                    "messages": [{"role": "user", "content": prompt_texto}],
+                    "temperature": 0.4,
+                },
+                timeout=30,
+            )
+            if r.status_code != 200:
+                continue
+            choices = r.json().get("choices") or []
+            if not choices:
+                continue
+            msg = ((choices[0].get("message") or {}).get("content") or "").strip()
+            msg = _zf_limpar_resposta_ia_invalida(msg)
+            if msg:
+                return msg
+        except Exception:
+            continue
+    return ""
+
+
+def _zf_rotas_ia_resilientes(prompt_texto: str, fn_legada=None, args=(), kwargs=None) -> str:
+    """Executa rotas de IA em ordem resiliente (funcao legada valida -> Gemini -> Groq) sem vazar erro tecnico."""
+    kwargs = kwargs or {}
+    if callable(fn_legada):
+        try:
+            resp_leg = fn_legada(prompt_texto, *args, **kwargs)
+            resp_limpa = _zf_limpar_resposta_ia_invalida(str(resp_leg or ""))
+            if resp_limpa:
+                return resp_limpa
+        except Exception:
+            pass
+
+    for fn_direta in (_zf_chamada_gemini_direta, _zf_chamada_groq_direta):
+        try:
+            resp_dir = fn_direta(prompt_texto)
+            if resp_dir:
+                return resp_dir
+        except Exception:
+            continue
+
+    diag = _zf_chaves_ia_resumo()
+    if diag["total"] == 0:
+        return (
+            "Nenhuma chave de IA válida foi encontrada nos Secrets (`GEMINI_API_KEY` ou `GROQ_API_KEY`). "
+            "Adicione uma chave ativa nos Secrets do Streamlit para o chat principal responder."
+        )
+    return (
+        f"As rotas de IA ({', '.join(diag['chaves_ativas'])}) não responderam agora "
+        "(verifique quota, validade da chave ou conexão de rede)."
+    )
+
+
+def _zf_envolver_roteador_chat_v3():
+    """Envolve as funcoes de processamento do chat para priorizar Trader/B2 e blindar a rota de IA."""
+    candidatas = (
+        "_zf_processar_prompt_base",
+        "processar_prompt",
+        "responder_chat",
+        "zf_responder_chat",
+        "gerar_resposta_ia",
+        "responder_ia",
+    )
+    for nome_fn in candidatas:
+        fn_orig = globals().get(nome_fn)
+        if callable(fn_orig) and not getattr(fn_orig, "_zf_v3_ia_wrap", False):
+            def _wrapper(prompt, *args, _orig=fn_orig, **kwargs):
+                texto = prompt if isinstance(prompt, str) else str(prompt or "")
+                try:
+                    if callable(globals().get("_zf_interceptar_roteamento_chat_trader")):
+                        resp_tr = globals()["_zf_interceptar_roteamento_chat_trader"](texto)
+                        if resp_tr:
+                            return resp_tr
+                except Exception:
+                    pass
+                return _zf_rotas_ia_resilientes(texto, fn_legada=_orig, args=args, kwargs=kwargs)
+            _wrapper._zf_v3_ia_wrap = True
+            globals()[nome_fn] = _wrapper
+
+
+try:
+    _zf_envolver_roteador_chat_v3()
+except Exception:
+    pass
