@@ -5301,3 +5301,166 @@ def zf_mem_contexto(pergunta: str, n: int = 4) -> str:
     for f in uteis[: n + 2]:
         linhas.append(f"- {f['p']}" + (f" => {f['r']}" if f.get("r") != f.get("p") else ""))
     return "\n".join(linhas)
+# ==============================================================================
+# CAMADA 3 - MERCADO (BINANCE + BCB + GRAFICO SVG + LEITURA TECNICA DIRETA)
+# Cole abaixo da Camada 2 no final do app.py
+# ==============================================================================
+_ZF_BINANCE_URL = "https://data-api.binance.vision/api/v3"
+_ZF_BIN_ALIAS = [
+    ("bitcoin", "BTCUSDT"), ("btc", "BTCUSDT"),
+    ("ethereum", "ETHUSDT"), ("eth", "ETHUSDT"),
+    ("bnb", "BNBUSDT"), ("solana", "SOLUSDT"), ("sol", "SOLUSDT"),
+    ("xrp", "XRPUSDT"), ("cardano", "ADAUSDT"), ("ada", "ADAUSDT"),
+    ("dogecoin", "DOGEUSDT"), ("doge", "DOGEUSDT"),
+]
+_ZF_BCB_ALIAS = [("selic diaria", 11), ("selic", 432), ("ipca", 433), ("inflacao", 433), ("dolar", 1), ("cdi", 12)]
+_ZF_BCB_NOMES = {432: "Meta Selic", 433: "IPCA mensal", 1: "Dolar (venda)", 12: "CDI diario", 11: "Selic diaria"}
+
+
+def _zf_http_rapido(url: str, timeout: int = 15) -> tuple[int, str]:
+    try:
+        req = _zf_ureq.Request(url, headers={"User-Agent": "Mozilla/5.0 (Zeus/3.0)"}, method="GET")
+        with _zf_ureq.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except _zf_uerr.HTTPError as e:
+        return e.code, ""
+    except Exception as e:
+        return 0, f"{type(e).__name__}: {e}"
+
+
+def _zf_svg_linha(titulo: str, valores: list[float], ini: str, fim: str) -> str:
+    w, h, p = 800, 320, 44
+    n = len(valores)
+    mn, mx = min(valores), max(valores)
+    span = (mx - mn) or 1.0
+    pts = " ".join(
+        f"{p + i * (w - 2 * p) / max(1, n - 1):.1f},{h - p - (v - mn) / span * (h - 2 * p):.1f}"
+        for i, v in enumerate(valores)
+    )
+    t = _zf_html.escape(titulo)
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
+        f'<rect width="{w}" height="{h}" fill="#0b0f19"/>'
+        f'<text x="{p}" y="24" fill="#00ffcc" font-family="monospace" font-size="15">{t}</text>'
+        f'<polyline fill="none" stroke="#00ffcc" stroke-width="2" points="{pts}"/>'
+        f'<text x="{p}" y="{h - 12}" fill="#8aa" font-family="monospace" font-size="11">{_zf_html.escape(ini)}</text>'
+        f'<text x="{w - p}" y="{h - 12}" fill="#8aa" font-family="monospace" font-size="11" text-anchor="end">{_zf_html.escape(fim)}</text>'
+        f'<text x="{p}" y="{h - p - 6}" fill="#8aa" font-family="monospace" font-size="11">min {mn:g}</text>'
+        f'<text x="{w - p}" y="{p + 4}" fill="#8aa" font-family="monospace" font-size="11" text-anchor="end">max {mx:g}</text>'
+        f"</svg>"
+    )
+
+
+def zf_coletar_analisar_binance(simbolo: str = "BTCUSDT", intervalo: str = "1h", limite: int = 120) -> tuple[str, dict]:
+    simbolo = re.sub(r"[^A-Z0-9]", "", (simbolo or "BTCUSDT").upper())
+    q = _zf_uparse.urlencode({"symbol": simbolo, "interval": intervalo, "limit": min(max(limite, 20), 500)})
+    st_code, txt = _zf_http_rapido(f"{_ZF_BINANCE_URL}/klines?{q}")
+    if st_code != 200:
+        return f"Binance {simbolo}: HTTP {st_code} {txt[:100]}", {}
+    velas = json.loads(txt)
+    if not isinstance(velas, list) or len(velas) < 2:
+        return f"Binance {simbolo}: resposta vazia.", {}
+
+    ms_iso = lambda ms: datetime.fromtimestamp(int(ms) / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M")
+    buf = io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["open_time", "open", "high", "low", "close", "volume", "close_time"])
+    for k in velas:
+        w.writerow([ms_iso(k[0]), k[1], k[2], k[3], k[4], k[5], ms_iso(k[6])])
+
+    closes = [float(k[4]) for k in velas]
+    highs = [float(k[2]) for k in velas]
+    lows = [float(k[3]) for k in velas]
+    ini, fim = ms_iso(velas[0][0]), ms_iso(velas[-1][0])
+
+    ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+    base = f"dados/binance/{simbolo}_{intervalo}"
+    zf_b2_put_v2(f"{base}_{ts_tag}.csv", buf.getvalue(), "text/csv; charset=utf-8")
+    zf_b2_put_v2(f"{base}_ultimo.csv", buf.getvalue(), "text/csv; charset=utf-8")
+    svg = _zf_svg_linha(f"{simbolo} {intervalo} fechamento", closes, ini, fim)
+    zf_b2_put_v2(f"dados/graficos/{simbolo}_{intervalo}.svg", svg, "image/svg+xml")
+
+    sma20 = sum(closes[-20:]) / min(len(closes), 20)
+    ema9 = closes[0]
+    k_ema = 2.0 / (min(len(closes), 9) + 1.0)
+    for v in closes:
+        ema9 = (v * k_ema) + (ema9 * (1.0 - k_ema))
+    rsi14 = None
+    if len(closes) >= 15:
+        deltas = [closes[i] - closes[i - 1] for i in range(-14, 0)]
+        ganhos = sum(d for d in deltas if d > 0) / 14.0
+        perdas = sum(-d for d in deltas if d < 0) / 14.0
+        rsi14 = 100.0 if perdas == 0 else round(100.0 - (100.0 / (1.0 + (ganhos / perdas))), 2)
+
+    resumo = {
+        "simbolo": simbolo,
+        "intervalo": intervalo,
+        "ultimo": closes[-1],
+        "min": min(lows),
+        "max": max(highs),
+        "sma20": round(sma20, 4),
+        "ema9": round(ema9, 4),
+        "rsi14": rsi14,
+        "var_pct": round(((closes[-1] / closes[0]) - 1.0) * 100.0, 2),
+        "periodo": f"{ini} -> {fim}",
+    }
+    return f"Salvo CSV + SVG de {simbolo} ({intervalo}) no B2.", resumo
+
+
+def zf_coletar_bcb_sgs(codigo: int, n: int = 10) -> str:
+    url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{codigo}/dados/ultimos/{min(n, 20)}?formato=json"
+    st_code, txt = _zf_http_rapido(url)
+    if st_code != 200:
+        return f"BCB serie {codigo}: HTTP {st_code}"
+    dados = json.loads(txt)
+    if not isinstance(dados, list) or not dados:
+        return f"BCB serie {codigo}: vazio."
+    ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+    zf_b2_put_v2(f"dados/bcb/sgs_{codigo}_{ts_tag}.json", json.dumps(dados, ensure_ascii=False), "application/json")
+    zf_b2_put_v2(f"dados/bcb/sgs_{codigo}_ultimo.json", json.dumps(dados, ensure_ascii=False), "application/json")
+    nome = _ZF_BCB_NOMES.get(codigo, f"SGS {codigo}")
+    return f"{nome}: {dados[-1].get('valor')} ({dados[-1].get('data')})"
+
+
+def zf_trader_rapido_b2(prompt_usuario: str) -> str:
+    low = _zf_norm_txt(prompt_usuario)
+    m_sim = re.search(r"\b([a-z0-9]{2,8}usdt)\b", low)
+    simbolo = m_sim.group(1).upper() if m_sim else next(
+        (s for k, s in _ZF_BIN_ALIAS if re.search(rf"\b{k}\b", low)), "BTCUSDT"
+    )
+    m_itv = re.search(r"\b(1m|3m|5m|15m|30m|1h|2h|4h|6h|12h|1d|1w)\b", low)
+    intervalo = m_itv.group(1) if m_itv else "1h"
+
+    msg_bin, r = zf_coletar_analisar_binance(simbolo, intervalo, limite=120)
+    macros = []
+    if re.search(r"\b(selic|ipca|dolar|cdi|juros|macro|bcb)\b", low):
+        for cod in (432, 1):
+            macros.append(zf_coletar_bcb_sgs(cod, 5))
+
+    if not r:
+        return f"Nao foi possivel obter candles de {simbolo} ({intervalo}): {msg_bin}"
+
+    px, sma, ema, rsi = r["ultimo"], r["sma20"], r["ema9"], r["rsi14"]
+    vies = "Alta (preco e EMA9 acima da SMA20)" if (px >= sma and ema >= sma) else (
+        "Baixa (preco e EMA9 abaixo da SMA20)" if (px < sma and ema < sma) else "Consolidacao / Cruzamento"
+    )
+    stop_c = round(min(r["min"], px * 0.985), 4)
+    alvo_a = round(max(r["max"], px * 1.02), 4)
+    mem_ctx = zf_mem_contexto(prompt_usuario, n=3)
+
+    relatorio = [
+        f"### Trader Zeus - {simbolo} ({intervalo})",
+        f"- **Preco:** `{px}` | **SMA20:** `{sma}` | **EMA9:** `{ema}` | **RSI14:** `{rsi}` | **Var:** `{r['var_pct']}%`",
+        f"- **Vies:** {vies} | **Faixa:** `{r['min']}` a `{r['max']}`",
+        f"- **Gestao de Risco:** sustentacao acima de `{sma}` mira `{alvo_a}`, com stop/invalidacao abaixo de `{stop_c}`.",
+        f"- **Cofre B2:** {msg_bin}",
+    ]
+    if macros:
+        relatorio.append("- **Macro BCB:** " + " | ".join(macros))
+    if mem_ctx:
+        relatorio.append("\n" + mem_ctx)
+
+    texto_final = "\n".join(relatorio)
+    ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    zf_b2_put_v2(f"autonomia/trader/analise_{simbolo.lower()}_{intervalo}_{ts_tag}.md", texto_final, "text/markdown; charset=utf-8")
+    return texto_final
