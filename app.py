@@ -4812,16 +4812,40 @@ def zeus_widget_feedback(interacao_id):
             st.session_state[f"zeus_corrigir_{interacao_id}"] = False
             st.toast("Correção gravada como prioridade.")
 
-# ============================= FIM DO MÓDULO ZEUS ============================
+
 # ==============================================================================
-# ZEUS v2.4 - MODO TRADER INTEGRADO AO MOTOR EXISTENTE + B2 (APRIMORADO)
+# ZEUS v2.5 - MODO TRADER RAPIDO + B2 (BLOCO COMPLETO PARA O FINAL DO APP)
 # ==============================================================================
-def _zf_ler_historico_b2_trader(simbolo: str, max_arquivos: int = 3) -> list[dict]:
-    """Le os ultimos CSVs salvos no B2 para dar contexto continuo ao trader."""
+def zf_b2_salvar_seguro(chave: str, conteudo, content_type: str = "text/plain; charset=utf-8"):
+    """Salva no Backblaze B2 usando as funcoes ja existentes do app (sem depender de b2sdk)."""
+    fn_save = globals().get("zf_b2_salvar")
+    if callable(fn_save):
+        try:
+            return fn_save(chave, conteudo, content_type)
+        except Exception as e:
+            return False, f"Erro ao salvar no B2: {e}"
+    fn_cli = globals().get("_zf_b2_cliente")
+    if callable(fn_cli):
+        try:
+            c, b = fn_cli()
+            body = conteudo.encode("utf-8") if isinstance(conteudo, str) else conteudo
+            c.put_object(Bucket=b, Key=chave, Body=body, ContentType=content_type)
+            return True, f"Salvo no B2: {chave}"
+        except Exception as e:
+            return False, f"Erro S3/B2: {e}"
+    return False, "Cliente B2 nao encontrado no app."
+
+
+def _zf_ler_historico_b2_trader(simbolo: str, max_arquivos: int = 2) -> list[dict]:
+    """Le os ultimos CSVs salvos no B2 com limite baixo para responder rapido."""
     simbolo = re.sub(r"[^A-Z0-9]", "", (simbolo or "BTCUSDT").upper())
+    fn_cli = globals().get("_zf_b2_cliente")
+    fn_get = globals().get("_zf_b2_get")
+    if not (callable(fn_cli) and callable(fn_get)):
+        return []
     try:
-        c, b = _zf_b2_cliente()
-        resp = c.list_objects_v2(Bucket=b, Prefix=f"dados/binance/{simbolo}_", MaxKeys=50)
+        c, b = fn_cli()
+        resp = c.list_objects_v2(Bucket=b, Prefix=f"dados/binance/{simbolo}_", MaxKeys=20)
         csvs = [
             o["Key"]
             for o in resp.get("Contents", [])
@@ -4833,21 +4857,20 @@ def _zf_ler_historico_b2_trader(simbolo: str, max_arquivos: int = 3) -> list[dic
 
     resumos = []
     for chave in csvs[:max_arquivos]:
-        dados, estado = _zf_b2_get(chave)
-        if estado != "ok" or not dados:
-            continue
         try:
+            dados, estado = fn_get(chave)
+            if estado != "ok" or not dados:
+                continue
             linhas = list(_csv.DictReader(io.StringIO(dados.decode("utf-8", errors="ignore"))))
-            closes = [float(x["close"]) for x in linhas if x.get("close")]
-            highs = [float(x["high"]) for x in linhas if x.get("high")]
-            lows = [float(x["low"]) for x in linhas if x.get("low")]
-            vols = [float(x["volume"]) for x in linhas if x.get("volume")]
+            closes = [float(x["close"]) for x in linhas if x.get("close")][-120:]
+            highs = [float(x["high"]) for x in linhas if x.get("high")][-120:]
+            lows = [float(x["low"]) for x in linhas if x.get("low")][-120:]
+            vols = [float(x["volume"]) for x in linhas if x.get("volume")][-120:]
             if len(closes) >= 2:
                 var_pct = ((closes[-1] / closes[0]) - 1.0) * 100.0
                 sma20 = sum(closes[-20:]) / min(len(closes), 20)
-                ema_period = min(len(closes), 9)
-                k_ema = 2.0 / (ema_period + 1.0)
                 ema9 = closes[0]
+                k_ema = 2.0 / (min(len(closes), 9) + 1.0)
                 for v in closes:
                     ema9 = (v * k_ema) + (ema9 * (1.0 - k_ema))
                 rsi14 = None
@@ -4855,26 +4878,20 @@ def _zf_ler_historico_b2_trader(simbolo: str, max_arquivos: int = 3) -> list[dic
                     deltas = [closes[i] - closes[i - 1] for i in range(-14, 0)]
                     ganhos = sum(d for d in deltas if d > 0) / 14.0
                     perdas = sum(-d for d in deltas if d < 0) / 14.0
-                    if perdas == 0:
-                        rsi14 = 100.0
-                    else:
-                        rs = ganhos / perdas
-                        rsi14 = round(100.0 - (100.0 / (1.0 + rs)), 2)
+                    rsi14 = 100.0 if perdas == 0 else round(100.0 - (100.0 / (1.0 + (ganhos / perdas))), 2)
                 vol_media = round(sum(vols[-20:]) / min(len(vols), 20), 2) if vols else 0.0
-                resumos.append(
-                    {
-                        "arquivo": chave,
-                        "candles": len(closes),
-                        "ultimo": closes[-1],
-                        "min": min(lows) if lows else min(closes),
-                        "max": max(highs) if highs else max(closes),
-                        "var_pct": round(var_pct, 2),
-                        "sma20": round(sma20, 4),
-                        "ema9": round(ema9, 4),
-                        "rsi14": rsi14,
-                        "vol_media20": vol_media,
-                    }
-                )
+                resumos.append({
+                    "arquivo": chave,
+                    "candles": len(closes),
+                    "ultimo": closes[-1],
+                    "min": min(lows) if lows else min(closes),
+                    "max": max(highs) if highs else max(closes),
+                    "var_pct": round(var_pct, 2),
+                    "sma20": round(sma20, 4),
+                    "ema9": round(ema9, 4),
+                    "rsi14": rsi14,
+                    "vol_media20": vol_media,
+                })
         except Exception:
             continue
     return resumos
@@ -4888,7 +4905,7 @@ def _zf_macro_bcb_resumo() -> dict:
         return res
     for serie in ("selic", "dolar"):
         try:
-            out = fn_bcb(serie, 10)
+            out = fn_bcb(serie, 5)
             if isinstance(out, (list, tuple)):
                 res[serie] = out[-1] if out else ""
             elif out:
@@ -4899,7 +4916,7 @@ def _zf_macro_bcb_resumo() -> dict:
 
 
 def zf_modo_trader_b2(prompt_usuario: str) -> str:
-    """Usa Binance + BCB + historico do B2 + motor base e salva relatorio + snapshot JSON no B2."""
+    """Versao direta e rapida: busca candles (limite 100), le B2, salva relatorio + JSON e responde."""
     low = (prompt_usuario or "").lower()
     mapa_pares = {
         "bitcoin": "BTCUSDT", "btc": "BTCUSDT",
@@ -4916,20 +4933,16 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
         if m_sim
         else next((v for k, v in mapa_pares.items() if re.search(rf"\b{k}\b", low)), "BTCUSDT")
     )
-
-    if re.search(r"\b10\s*(?:em\s*10\s*)?min(?:utos?)?\b", low):
-        intervalo = "10m"
-    else:
-        m_itv = re.search(r"\b(1m|3m|5m|15m|30m|1h|2h|4h|6h|12h|1d|1w)\b", low)
-        intervalo = m_itv.group(1) if m_itv else "1h"
+    m_itv = re.search(r"\b(1m|3m|5m|15m|30m|1h|2h|4h|6h|12h|1d|1w)\b", low)
+    intervalo = m_itv.group(1) if m_itv else "1h"
 
     log_b2 = []
     fn_bin = globals().get("zf_dados_binance")
     if callable(fn_bin):
         try:
-            r_bin = fn_bin(simbolo=simbolo, intervalo=intervalo, limite=240, forcar=True)
-            if isinstance(r_bin, list):
-                log_b2.extend(r_bin)
+            r_bin = fn_bin(simbolo=simbolo, intervalo=intervalo, limite=100, forcar=False)
+            if isinstance(r_bin, list) and r_bin:
+                log_b2.append(str(r_bin[-1]))
             elif r_bin:
                 log_b2.append(str(r_bin))
         except Exception as e:
@@ -4937,20 +4950,9 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
 
     macro_info = {}
     if re.search(r"\b(selic|ipca|d[oó]lar|cdi|juros|macro|brasil|investimento)\b", low):
-        fn_bcb = globals().get("zf_dados_bcb")
-        if callable(fn_bcb):
-            for serie in ("selic", "dolar"):
-                try:
-                    r_bcb = fn_bcb(serie, 10)
-                    if isinstance(r_bcb, list):
-                        log_b2.extend(r_bcb)
-                    elif r_bcb:
-                        log_b2.append(str(r_bcb))
-                except Exception as e:
-                    log_b2.append(f"BCB {serie}: {type(e).__name__}")
         macro_info = _zf_macro_bcb_resumo()
 
-    hist_b2 = _zf_ler_historico_b2_trader(simbolo, max_arquivos=3)
+    hist_b2 = _zf_ler_historico_b2_trader(simbolo, max_arquivos=2)
     ultimo = hist_b2[0] if hist_b2 else {}
 
     niveis_txt = ""
@@ -4960,32 +4962,22 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
         tendencia = "Alta (acima da SMA20)" if px >= sma else "Baixa / Pressao (abaixo da SMA20)"
         stop_sug = round(min(float(ultimo.get("min") or px * 0.97), px * 0.975), 4)
         alvo1_sug = round(max(float(ultimo.get("max") or px * 1.03), px * 1.025), 4)
-        niveis_txt = (
-            f"Tendencia tecnica: {tendencia} | Referencia stop: `{stop_sug}` | Alvo 1: `{alvo1_sug}`"
-        )
+        niveis_txt = f"{tendencia} | Stop ref: `{stop_sug}` | Alvo 1: `{alvo1_sug}`"
 
-    contexto_trader = (
-        f"Atue como trader analitico para {simbolo} ({intervalo}). "
-        f"Dados do B2: {json.dumps(hist_b2, ensure_ascii=False)}. "
-        f"Macro/BCB: {json.dumps(macro_info, ensure_ascii=False)}. "
-        f"Pedido do usuario: {prompt_usuario.strip()}. "
-        "Use suas buscas/fontes aprendidas se precisar de contexto atual e apresente leitura tecnica, "
-        "cenarios (alta/baixa/neutro), gestao de risco (stop, tamanho de posicao, invalidacao) e pontos de atencao de forma objetiva."
-    )
     parecer_ia = ""
     fn_base = globals().get("_zf_processar_prompt_base")
     if callable(fn_base):
         try:
-            parecer_ia = str(fn_base(contexto_trader) or "").strip()
+            ctx = (
+                f"Responda de forma curta e objetiva para {simbolo} ({intervalo}). "
+                f"Dados B2: {json.dumps(ultimo, ensure_ascii=False)}. "
+                f"Macro: {json.dumps(macro_info, ensure_ascii=False)}. "
+                f"Pedido: {prompt_usuario.strip()}. "
+                "Traga leitura tecnica, cenarios e gestao de risco (stop e invalidacao) sem enrolacao."
+            )
+            parecer_ia = str(fn_base(ctx) or "").strip()
         except Exception as e:
-            parecer_ia = f"(Motor base retornou aviso: {type(e).__name__})"
-
-    fn_script = globals().get("zf_gerar_script_estudo_mercado")
-    if callable(fn_script):
-        try:
-            log_b2.append(str(fn_script(simbolo, intervalo, "modo trader + B2")))
-        except Exception:
-            pass
+            parecer_ia = f"(Aviso motor base: {type(e).__name__})"
 
     ts = _zf_agora() if callable(globals().get("_zf_agora")) else "atual"
     utc_str = (
@@ -4993,15 +4985,14 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
         if callable(globals().get("_zf_agora_utc"))
         else "UTC indisponivel"
     )
-
     relatorio = (
         f"# Trader Zeus - {simbolo} ({intervalo})\n"
         f"- **UTC:** {utc_str}\n"
-        f"- **Resumo B2:** {json.dumps(ultimo, ensure_ascii=False)}\n"
-        f"- **Niveis de referencia:** {niveis_txt or 'N/D'}\n\n"
-        f"## Parecer e Pesquisa\n{parecer_ia}\n"
+        f"- **Dados B2:** {json.dumps(ultimo, ensure_ascii=False)}\n"
+        f"- **Niveis:** {niveis_txt or 'N/D'}\n\n"
+        f"{parecer_ia}\n"
     )
-    ok_md, msg_md = zf_b2_salvar(
+    ok_md, msg_md = zf_b2_salvar_seguro(
         f"autonomia/trader/analise_{simbolo.lower()}_{intervalo}_{ts}.md",
         relatorio,
         "text/markdown; charset=utf-8",
@@ -5013,27 +5004,27 @@ def zf_modo_trader_b2(prompt_usuario: str) -> str:
         "intervalo": intervalo,
         "utc": utc_str,
         "resumo_b2": ultimo,
-        "historico_b2": hist_b2,
         "macro_bcb": macro_info,
-        "niveis_referencia": niveis_txt,
+        "niveis": niveis_txt,
     }
-    zf_b2_salvar(
+    zf_b2_salvar_seguro(
         f"autonomia/trader/ultimo_{simbolo.lower()}.json",
         json.dumps(payload_json, ensure_ascii=False, indent=2),
         "application/json; charset=utf-8",
     )
 
-    cabecalho = [f"**Trader Zeus - {simbolo} ({intervalo})**"]
+    linhas_out = [f"**Trader Zeus - {simbolo} ({intervalo})**"]
     if ultimo:
-        cabecalho.append(
+        linhas_out.append(
             f"- **B2:** ultimo `{ultimo.get('ultimo')}` | SMA20 `{ultimo.get('sma20')}` | EMA9 `{ultimo.get('ema9')}` | RSI14 `{ultimo.get('rsi14')}` | var `{ultimo.get('var_pct')}%`"
         )
     if niveis_txt:
-        cabecalho.append(f"- **Ref. tecnica:** {niveis_txt}")
-    cabecalho.append("- **B2 atualizado:** " + " | ".join(str(x) for x in log_b2[-3:]))
+        linhas_out.append(f"- **Ref. tecnica:** {niveis_txt}")
+    if log_b2:
+        linhas_out.append("- **B2:** " + " | ".join(str(x) for x in log_b2[-2:]))
     if parecer_ia:
-        cabecalho.append("\n" + parecer_ia)
-    return "\n".join(cabecalho)
+        linhas_out.append("\n" + parecer_ia)
+    return "\n".join(linhas_out)
 
 
 def _zr_flexivel_trader_ou_pesquisa(t: str, low: str) -> str | None:
@@ -5055,7 +5046,7 @@ def _zr_flexivel_trader_ou_pesquisa(t: str, low: str) -> str | None:
 
 
 def zf_render_painel_trader_b2():
-    """Painel rapido no Streamlit para rodar o Modo Trader + B2 sem depender so de comando de texto."""
+    """Painel rapido no Streamlit para rodar o Modo Trader + B2 direto na tela."""
     with st.expander("Trader Zeus + B2", expanded=False):
         c1, c2 = st.columns([2, 1])
         with c1:
@@ -5077,3 +5068,10 @@ def zf_render_painel_trader_b2():
             with st.spinner("Coletando dados da Binance/B2 e gerando analise..."):
                 resp_tr = zf_modo_trader_b2(pergunta)
             st.markdown(resp_tr)
+
+
+try:
+    if callable(globals().get("zf_render_painel_trader_b2")):
+        zf_render_painel_trader_b2()
+except Exception as _zf_err_tr_ui:
+    st.caption("Trader Zeus + B2: " + str(_zf_err_tr_ui)[:140])
