@@ -1,11 +1,5 @@
 """
-ZEUS :: ROTEADOR  (web inteligente + memória persistente no B2 + anti-invenção)
-
-Fica na RAIZ do repositório, ao lado do app.py e do zeus_acoes.py.
-Liga no app.py, logo depois do zeus_acoes.instalar(...):
-
-    import zeus_roteador
-    zeus_roteador.instalar(globals())
+ZEUS :: ROTEADOR (web inteligente + memória persistente no B2 + anti-invenção)
 """
 from _future_ import annotations
 
@@ -25,7 +19,7 @@ from typing import Callable, Optional, Protocol
 
 try:
     from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover
+except ImportError:
     ZoneInfo = None
 
 log = logging.getLogger("zeus.roteador")
@@ -162,7 +156,7 @@ def _agora_br() -> datetime:
 
 
 # ============================================================
-# 3) BACKEND (B2) — interface mínima
+# 3) BACKEND (B2)
 # ============================================================
 @dataclass(frozen=True)
 class Obj:
@@ -189,7 +183,7 @@ class BackendZeusAcoes:
 
 
 # ============================================================
-# 4) CACHE DA WEB e RANKING DE FONTES
+# 4) CACHE DA WEB e RANKING
 # ============================================================
 class _LRU:
     def _init_(self, maximo: int): self.max, self.d, self.lock = maximo, OrderedDict(), threading.Lock()
@@ -374,7 +368,7 @@ def buscar_hedged(query: str, n: int, fontes: list, tema: str, ranking: Ranking,
 
 
 # ============================================================
-# 6) MEMÓRIA
+# 6) MEMÓRIA (BM25)
 # ============================================================
 @dataclass
 class Trecho:
@@ -564,4 +558,15 @@ class Preparado:
     avisos: list = field(default_factory=list)
 
     @property
-    def rotulo(self) -> str
+    def rotulo(self) -> str:
+        partes = []
+        if self.memoria: partes.append("memória B2")
+        if self.usou_web: partes.append(self.fonte_web)
+        return " + ".join(partes)
+
+
+class Roteador:
+    def _init_(self, cfg: Config = Config(), backend: Optional[Backend] = None, fontes: Optional[list] = None,
+                 modo_fn: Optional[Callable[[], str]] = None, secret_fn: Optional[Callable[[str], str]] = None,
+                 agora: Callable[[], float] = time.time):
+        self.cfg, self.backend
