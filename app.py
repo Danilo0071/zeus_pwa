@@ -66,11 +66,6 @@ except Exception:
     ler_texto = None
     salvar_json = None
     ler_json = None
-    import zeus_acoes
-import zeus_roteador
-import logging
-
-log = logging.getLogger("zeus.app")
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
