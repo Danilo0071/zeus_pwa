@@ -69,7 +69,21 @@ except Exception:
     import zeus_acoes
 import zeus_roteador
 import logging
+# ============================================================
+# ZEUS 3.0 — INSTALAÇÃO DOS MÓDULOS
+# ============================================================
+# 1) zeus_acoes: prepara os comandos (cofre, e-mail, telegram, etc)
+processar_prompt = zeus_acoes.instalar(globals())
 
+# 2) zeus_roteador: prepara a busca na web e a memória B2
+_roteador = zeus_roteador.instalar(globals())
+
+# 3) Menu lateral de Spotify e Voz
+zeus_acoes.render_spotify_voz()
+
+# ============================================================
+# CONFIGURAÇÃO DA PÁGINA
+# ============================================================
 log = logging.getLogger("zeus.app")
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
