@@ -65,7 +65,8 @@ except Exception:
 # ============================================================
 try:
     import zeus_acoes
-except Exception:
+except Exception as e:
+    log.exception("FALHA AO IMPORTAR zeus_acoes:")
     zeus_acoes = None
 
 try:
