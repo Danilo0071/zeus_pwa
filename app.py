@@ -6065,3 +6065,5 @@ try:
     _zf_envolver_roteador_chat_v3()
 except Exception:
     pass
+import os
+st.write("DEBUG ARQUIVOS:", os.listdir("."))
