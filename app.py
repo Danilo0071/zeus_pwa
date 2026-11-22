@@ -58,13 +58,20 @@ try:
     from github_manager import salvar_no_github
 except Exception:
     salvar_no_github = None
-import zeus_acoes
-import zeus_roteador
+
 
 # ============================================================
 # IMPORTAÇÃO DOS MÓDULOS PRINCIPAIS DO ZEUS 3.0
 # ============================================================
+try:
+    import zeus_acoes
+except Exception:
+    zeus_acoes = None
 
+try:
+    import zeus_roteador
+except Exception:
+    zeus_roteador = None
 # Configuração de logs
 log = logging.getLogger("zeus.app")
 
