@@ -79,11 +79,17 @@ log = logging.getLogger("zeus.app")
 # INSTALAÇÃO DOS MÓDULOS (Ligando o novo motor)
 # ============================================================
 # 1) zeus_acoes: prepara os comandos (cofre, e-mail, telegram, etc)
-processar_prompt = zeus_acoes.instalar(globals())
-
+if zeus_acoes and hasattr(zeus_acoes, "instalar"):
+    try:
+        processar_prompt = zeus_acoes.instalar(globals())
+    except Exception:
+        pass
 # 2) zeus_roteador: prepara a busca na web e a memória B2
-_roteador = zeus_roteador.instalar(globals())
-
+_if zeus_roteador and hasattr(zeus_roteador, "instalar"):
+    try:
+        _roteador = zeus_roteador.instalar(globals())
+    except Exception:
+        pass
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
