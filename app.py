@@ -85,7 +85,7 @@ if zeus_acoes and hasattr(zeus_acoes, "instalar"):
     except Exception:
         pass
 # 2) zeus_roteador: prepara a busca na web e a memória B2
-_if zeus_roteador and hasattr(zeus_roteador, "instalar"):
+if zeus_roteador and hasattr(zeus_roteador, "instalar"):
     try:
         _roteador = zeus_roteador.instalar(globals())
     except Exception:
