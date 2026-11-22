@@ -58,21 +58,13 @@ try:
     from github_manager import salvar_no_github
 except Exception:
     salvar_no_github = None
-
+import zeus_acoes
+import zeus_roteador
 
 # ============================================================
 # IMPORTAÇÃO DOS MÓDULOS PRINCIPAIS DO ZEUS 3.0
 # ============================================================
-try:
-    import zeus_acoes
-except Exception:
-    logging.getLogger("zeus.app").exception("FALHA AO IMPORTAR zeus_acoes:")
-    zeus_acoes = None
-try:
-    import zeus_roteador
-except Exception:
-    logging.getLogger("zeus.app").exception("FALHA AO IMPORTAR zeus_roteador:")
-    zeus_roteador = None
+
 # Configuração de logs
 log = logging.getLogger("zeus.app")
 
@@ -80,17 +72,11 @@ log = logging.getLogger("zeus.app")
 # INSTALAÇÃO DOS MÓDULOS (Ligando o novo motor)
 # ============================================================
 # 1) zeus_acoes: prepara os comandos (cofre, e-mail, telegram, etc)
-if zeus_acoes and hasattr(zeus_acoes, "instalar"):
-    try:
-        processar_prompt = zeus_acoes.instalar(globals())
-    except Exception:
-        pass
+processar_prompt = zeus_acoes.instalar(globals())
+
 # 2) zeus_roteador: prepara a busca na web e a memória B2
-if zeus_roteador and hasattr(zeus_roteador, "instalar"):
-    try:
-        _roteador = zeus_roteador.instalar(globals())
-    except Exception:
-        pass
+_roteador = zeus_roteador.instalar(globals())
+
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
@@ -108,24 +94,14 @@ st.set_page_config(
 # ZEUS 3.0 — INSTALAÇÃO DOS MÓDULOS
 # ============================================================
 # 1) zeus_acoes: prepara os comandos (cofre, e-mail, telegram, etc)
-if zeus_acoes and hasattr(zeus_acoes, "instalar"):
-    try:
-        processar_prompt = zeus_acoes.instalar(globals())
-    except Exception:
-        pass
+processar_prompt = zeus_acoes.instalar(globals())
+
 # 2) zeus_roteador: prepara a busca na web e a memória B2
-if zeus_acoes and hasattr(zeus_acoes, "render_spotify_voz"):
-    try:
-        zeus_acoes.render_spotify_voz()
-    except Exception:
-        pass
+_roteador = zeus_roteador.instalar(globals())
 
 # 3) Menu lateral de Spotify e Voz
-if zeus_acoes and hasattr(zeus_acoes, "render_spotify_voz"):
-    try:
-        zeus_acoes.render_spotify_voz()
-    except Exception:
-        pass
+zeus_acoes.render_spotify_voz()
+
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
