@@ -591,3 +591,86 @@ def instalar(g: dict):
         add_message_seguro._za_seguro = True
         g["add_message"] = add_message_seguro
     return processar_prompt
+def _secret(chave: str, padrao: str = "") -> str:
+    # 1. Prioriza variáveis de ambiente (funciona no GitHub Actions e em qualquer ambiente)
+    env_val = os.environ.get(chave)
+    if env_val:
+        return _limpar(env_val)
+    # 2. Tenta st.secrets de forma segura
+    try:
+        sec = st.secrets
+        val = sec.get(chave)
+        if not val:
+            for _, bloco in sec.items():
+                if hasattr(bloco, "get"):
+                    val = bloco.get(chave)
+                    if val:
+                        break
+        if val:
+            return _limpar(val)
+    except Exception:
+        pass
+    return _limpar(padrao)
+
+
+def _smtp_cfg() -> dict:
+    user = _secret("EMAIL_USER") or _secret("SMTP_USER")
+    password = _secret("EMAIL_PASS") or _secret("SMTP_PASS")
+    host = _secret("SMTP_HOST", "smtp.gmail.com")
+    port_raw = _secret("SMTP_PORT", "587")
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 587
+    return {"user": user, "pass": password, "host": host, "port": port}
+
+
+def enviar_email(destinatario: str, assunto: str, corpo: str) -> str:
+    cfg = _smtp_cfg()
+    if not cfg["user"] or not cfg["pass"]:
+        return "❌ Credenciais de e-mail ausentes (configure EMAIL_USER e EMAIL_PASS)."
+
+    msg = EmailMessage()
+    msg["From"] = cfg["user"]
+    msg["To"] = destinatario
+    msg["Subject"] = assunto
+    msg.set_content(corpo)
+
+    try:
+        if cfg["port"] == 465:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=15, context=ctx) as smtp:
+                smtp.login(cfg["user"], cfg["pass"])
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
+                smtp.login(cfg["user"], cfg["pass"])
+                smtp.send_message(msg)
+        return f"✅ E-mail enviado para {destinatario}."
+    except Exception as e:
+        return f"❌ Falha ao enviar e-mail: {type(e)._name_}: {e}"
+
+
+def _tg_cfg() -> tuple[str, str]:
+    token = _secret("TELEGRAM_TOKEN") or _secret("BOT_TOKEN") or _secret("token")
+    chat_id = _secret("TELEGRAM_CHAT_ID") or _secret("CHAT_ID") or _secret("chat_id")
+    return token, chat_id
+
+
+def telegram_enviar(texto: str, chat_id: str | None = None) -> str:
+    msg_txt = (texto or "").strip()
+    if not msg_txt:
+        return "❌ Digite a mensagem para enviar no Telegram."
+    token, default_chat = _tg_cfg()
+    destino = str(chat_id or default_chat or "").strip()
+    if not token or not destino:
+        return "❌ Telegram sem token ou chat_id configurados."
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    status, resp = _http("POST", url, corpo={"chat_id": destino, "text": msg_txt[:4000]}, timeout=15)
+    if 200 <= status < 300:
+        return "✅ Mensagem enviada no Telegram."
+    return f"❌ Falha no Telegram (HTTP {status}): {resp[:200]}"
