@@ -570,3 +570,133 @@ class Roteador:
                  modo_fn: Optional[Callable[[], str]] = None, secret_fn: Optional[Callable[[str], str]] = None,
                  agora: Callable[[], float] = time.time):
         self.cfg, self.backend
+self.modo_fn = modo_fn or (lambda: "Automática")
+        self.secret_fn = secret_fn or (lambda nome: "")
+        self._fontes = fontes
+        self.cache = CacheWeb(cfg, backend, agora)
+        self.ranking = Ranking(cfg, backend, agora)
+        self.indice = Indice(cfg, backend, agora)
+        self.ultimos_erros: dict = {}
+        self._neg = _LRU(100)
+
+    @property
+    def fontes(self) -> list:
+        if self._fontes is None:
+            self._fontes = fontes_padrao(lambda n: self.secret_fn(n))
+        return self._fontes
+
+    def precisa_web(self, prompt: str) -> bool:
+        try:
+            modo = self.modo_fn() or "Automática"
+        except Exception:
+            modo = "Automática"
+        return precisa_web_texto(prompt, modo)
+
+    def web_search(self, q: str, n: int = 5, usar_cache: bool = True) -> tuple:
+        query = limpar_query(q)
+        if not query:
+            return "", ""
+        tema = classificar_tema(query)
+        if usar_cache:
+            achado = self.cache.get(tema, query)
+            if achado:
+                return achado[0], f"{achado[1]} [cache]"
+            if self._neg.get(self.cache.chave(tema, query)) and self.agora() - self._neg.get(self.cache.chave(tema, query)) < 60:
+                return "", ""
+        texto, fonte, erros = buscar_hedged(query, n, self.fontes, tema, self.ranking, self.cfg)
+        self.ultimos_erros = erros
+        if texto:
+            self.cache.set(tema, query, texto, fonte)
+            return texto, fonte
+        self._neg.set(self.cache.chave(tema, query), self.agora())
+        log.info("web sem resultado para %r: %s", query, erros)
+        return "", ""
+
+    def preparar(self, prompt: str) -> Preparado:
+        t0 = time.perf_counter()
+        p = Preparado(prompt_final=prompt)
+        try:
+            self.indice.sincronizar()
+        except Exception as e:
+            p.avisos.append(f"sync: {e}")
+            log.warning("sync falhou: %s", e)
+        try:
+            p.memoria = self.indice.buscar(limpar_query(prompt))
+        except Exception as e:
+            p.avisos.append(f"memória: {e}")
+        p.tema = classificar_tema(prompt)
+        forte = bool(p.memoria) and p.memoria[0].score >= self.cfg.mem_forte
+        usar_web = self.precisa_web(prompt) and (p.tema in VOLATEIS or not forte)
+        ctx = fonte = ""
+        if usar_web:
+            ctx, fonte = self.web_search(prompt)
+            p.usou_web, p.fonte_web = bool(ctx), fonte
+            p.cache_hit = fonte.endswith("[cache]")
+        if p.memoria or usar_web:
+            p.prompt_final = montar_prompt(prompt, p.memoria, ctx, fonte, usar_web and not ctx, self.cfg)
+        p.ms = int((time.perf_counter() - t0) * 1000)
+        return p
+
+    def enriquecer(self, prompt: str) -> tuple:
+        p = self.preparar(prompt)
+        return p.prompt_final, (p.rotulo or ("sem resultado" if self.precisa_web(prompt) and not p.usou_web else ""))
+
+    def status(self) -> str:
+        ix = self.indice
+        pontos = {t: {n: round(self.ranking.score(t, n), 2) for n in d} for t, d in self.ranking.dados.items()}
+        return (f"🧭 Roteador: {len(ix.objs)} arquivo(s) / {len(ix.trechos)} trecho(s) na memória; "
+                f"último sync há {int(self.agora() - ix.ultimo_sync)}s; erro índice: {ix.erro or 'nenhum'}; "
+                f"ranking: {pontos or '—'}; últimos erros web: {self.ultimos_erros or 'nenhum'}")
+
+
+# ============================================================
+# 9) INTEGRAÇÃO COM O APP
+# ============================================================
+_R: Optional[Roteador] = None
+_LOCK = threading.Lock()
+
+
+def obter() -> Roteador:
+    global _R
+    with _LOCK:
+        if _R is None:
+            _R = Roteador()
+        return _R
+
+
+def web_search(q, n=5, usar_cache=True):
+    return obter().web_search(q, n, usar_cache)
+
+
+def precisa_web(prompt):
+    return obter().precisa_web(prompt)
+
+
+def enriquecer_com_web(prompt):
+    return obter().enriquecer(prompt)
+
+
+def preparar_prompt(prompt):
+    return obter().preparar(prompt)
+
+
+def instalar(g: dict) -> Roteador:
+    r = obter()
+    secret = g.get("_secret")
+    if callable(secret):
+        r.secret_fn = secret
+    st = g.get("st")
+    if st is not None:
+        r.modo_fn = lambda: st.session_state.get("web_mode", "Automática")
+    if r.backend is None:
+        try:
+            import zeus_acoes
+            r.backend = BackendZeusAcoes(zeus_acoes)
+            for parte in (r.cache, r.ranking, r.indice):
+                parte.backend = r.backend
+        except Exception as e:
+            log.warning("sem backend B2 (memória/cache persistente desligados): %s", e)
+    g["web_search"] = r.web_search
+    g["precisa_web"] = r.precisa_web
+    g["enriquecer_com_web"] = r.enriquecer
+    return r
