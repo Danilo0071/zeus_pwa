@@ -120,8 +120,11 @@ if zeus_acoes and hasattr(zeus_acoes, "render_spotify_voz"):
         pass
 
 # 3) Menu lateral de Spotify e Voz
-zeus_acoes.render_spotify_voz()
-
+if zeus_acoes and hasattr(zeus_acoes, "render_spotify_voz"):
+    try:
+        zeus_acoes.render_spotify_voz()
+    except Exception:
+        pass
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
