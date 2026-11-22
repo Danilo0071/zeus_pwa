@@ -1,0 +1,227 @@
+"""
+ZEUS :: AÇÕES
+"""
+import contextlib
+import csv
+import html as _html
+import io
+import json
+import os
+import re
+import smtplib
+import ssl
+import time
+import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from email.message import EmailMessage
+
+import streamlit as st
+
+_G = {}
+UA = {"User-Agent": "Mozilla/5.0 (Zeus/3.0)"}
+BINANCE_URL = "https://data-api.binance.vision/api/v3"
+PROTEGIDOS = {"banco/zeus_chat.db", "autonomo/diario.json", "memoria/fatos.json"}
+
+
+def _limpar(v: str) -> str:
+    v = re.sub(r"\s+", "", str(v or "")).strip("\"'")
+    return "" if v.lower().startswith(("cole", "sua_chave", "seu_", "your_")) else v
+
+
+def _secret(chave: str, padrao: str = "") -> str:
+    try:
+        sec = st.secrets
+        val = sec.get(chave)
+        if not val:
+            for _, bloco in sec.items():
+                if hasattr(bloco, "get"):
+                    val = bloco.get(chave)
+                    if val:
+                        break
+        if val:
+            return _limpar(val)
+    except Exception:
+        pass
+    return _limpar(os.environ.get(chave) or padrao)
+
+
+def _http(metodo, url, headers=None, corpo=None, timeout=25):
+    h = dict(UA)
+    h.update(headers or {})
+    dados = None
+    if corpo is not None:
+        dados = json.dumps(corpo).encode("utf-8")
+        h.setdefault("Content-Type", "application/json")
+    try:
+        req = urllib.request.Request(url, data=dados, headers=h, method=metodo)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        try:
+            txt = e.read().decode("utf-8", "replace")[:400]
+        except Exception:
+            txt = ""
+        return e.code, txt
+    except Exception as e:
+        return 0, f"{type(e)._name_}: {e}"
+
+
+def _bytes_fmt(n) -> str:
+    n = float(n or 0)
+    for un in ("B", "KB", "MB", "GB"):
+        if n < 1024 or un == "GB":
+            return f"{n:.0f} {un}" if un == "B" else f"{n:.1f} {un}"
+        n /= 1024
+
+
+def _agora():
+    return datetime.now(timezone.utc)
+
+
+def _norm(txt: str) -> str:
+    t = unicodedata.normalize("NFKD", str(txt or "").lower())
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9\s]", " ", t)
+
+
+def _det(e: Exception) -> str:
+    resp = getattr(e, "response", None) or {}
+    err = resp.get("Error") or {}
+    base = f"{type(e)._name_}: {e}"
+    if err.get("Code"):
+        base += f" [{err.get('Code')}]"
+    return base[:300]
+
+
+def _b2_cfg():
+    endpoint = _secret("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
+    if endpoint and not endpoint.startswith("http"):
+        endpoint = "https://" + endpoint
+    return endpoint, _secret("B2_BUCKET"), _secret("B2_KEY_ID"), _secret("B2_APP_KEY")
+
+
+@st.cache_resource
+def _s3_cached(endpoint, key_id, app_key):
+    import boto3
+    from botocore.config import Config
+    m = re.search(r"s3\.([a-z0-9-]+)\.backblazeb2\.com", endpoint)
+    base = dict(signature_version="s3v4", connect_timeout=10, read_timeout=30,
+                retries={"max_attempts": 3, "mode": "standard"})
+    try:
+        cfg = Config(request_checksum_calculation="when_required",
+                     response_checksum_validation="when_required", **base)
+    except TypeError:
+        cfg = Config(**base)
+    return boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=key_id,
+                        aws_secret_access_key=app_key, region_name=m.group(1) if m else None, config=cfg)
+
+
+@st.cache_resource
+def _nativo_cached(key_id, app_key, bucket):
+    from b2sdk.v2 import B2Api, InMemoryAccountInfo
+    api = B2Api(InMemoryAccountInfo())
+    api.authorize_account("production", key_id, app_key)
+    return api.get_bucket_by_name(bucket)
+
+
+def _nao_encontrado(e) -> bool:
+    resp = getattr(e, "response", None) or {}
+    cod = (resp.get("Error") or {}).get("Code", "")
+    status = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+    if cod == "NoSuchBucket":
+        return False
+    return cod in ("NoSuchKey", "404", "NotFound") or status == 404 or type(e)._name_ == "FileNotPresent"
+
+
+def _b2_rodar(fn_s3, fn_nativo):
+    endpoint, bucket, key_id, app_key = _b2_cfg()
+    if not (bucket and key_id and app_key):
+        raise RuntimeError("Cofre B2 sem credenciais (B2_BUCKET, B2_KEY_ID, B2_APP_KEY nos Secrets).")
+    try:
+        return fn_s3(_s3_cached(endpoint, key_id, app_key), bucket)
+    except Exception as e1:
+        if _nao_encontrado(e1):
+            raise FileNotFoundError("arquivo não encontrado no cofre") from e1
+        try:
+            return fn_nativo(_nativo_cached(key_id, app_key, bucket))
+        except ImportError:
+            raise RuntimeError(_det(e1)) from e1
+        except Exception as e2:
+            if _nao_encontrado(e2):
+                raise FileNotFoundError("arquivo não encontrado no cofre") from e2
+            raise RuntimeError(f"S3: {_det(e1)} | b2sdk: {_det(e2)}") from e2
+
+
+def b2_put(chave: str, dados: bytes, ctype: str = "application/octet-stream"):
+    _b2_rodar(
+        lambda s3, b: s3.put_object(Bucket=b, Key=chave, Body=dados, ContentType=ctype),
+        lambda bk: bk.upload_bytes(dados, chave, content_type=ctype),
+    )
+
+
+def b2_get(chave: str) -> bytes:
+    def nativo(bk):
+        buf = io.BytesIO()
+        bk.download_file_by_name(chave).save(buf)
+        return buf.getvalue()
+    return _b2_rodar(lambda s3, b: s3.get_object(Bucket=b, Key=chave)["Body"].read(), nativo)
+
+
+def b2_list(prefixo: str = "", limite: int = 40):
+    def s3(c, b):
+        r = c.list_objects_v2(Bucket=b, Prefix=prefixo, MaxKeys=limite)
+        return [(o["Key"], o.get("Size", 0)) for o in r.get("Contents", [])]
+
+    def nativo(bk):
+        itens = []
+        for fv, _ in bk.ls(folder_to_list=prefixo.rstrip("/"), latest_only=True, recursive=True):
+            itens.append((fv.file_name, getattr(fv, "size", 0)))
+            if len(itens) >= limite:
+                break
+        return itens
+    return _b2_rodar(s3, nativo)
+
+
+def b2_list_meta(prefixo: str = "", limite: int = 2000):
+    def s3(c, b):
+        itens, token = [], None
+        while len(itens) < limite:
+            kw = dict(Bucket=b, Prefix=prefixo, MaxKeys=min(1000, limite - len(itens)))
+            if token:
+                kw["ContinuationToken"] = token
+            r = c.list_objects_v2(**kw)
+            for o in r.get("Contents", []):
+                lm = o.get("LastModified")
+                itens.append({"key": o["Key"], "size": o.get("Size", 0),
+                              "mtime": lm.timestamp() if hasattr(lm, "timestamp") else 0.0,
+                              "etag": (o.get("ETag") or "").strip('"')})
+            if not r.get("IsTruncated"):
+                break
+            token = r.get("NextContinuationToken")
+        return itens
+
+    def nativo(bk):
+        itens = []
+        for fv, _ in bk.ls(folder_to_list=prefixo.rstrip("/"), latest_only=True, recursive=True):
+            itens.append({"key": fv.file_name, "size": getattr(fv, "size", 0),
+                          "mtime": (getattr(fv, "upload_timestamp", 0) or 0) / 1000.0,
+                          "etag": getattr(fv, "content_md5", "") or ""})
+            if len(itens) >= limite:
+                break
+        return itens
+    return _b2_rodar(s3, nativo)
+
+
+def b2_delete(chave: str):
+    def s3(c, b):
+        c.head_object(Bucket=b, Key=chave)
+        c.delete_object(Bucket=b, Key=chave)
+
+    def nativo(bk):
+        fv = bk.get_file_info_by_name(chave)
+        bk.delete_file_version(fv.id_, chave)
+    _b2_rodar(s3, nativo)
