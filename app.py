@@ -66,12 +66,12 @@ except Exception:
 try:
     import zeus_acoes
 except Exception as e:
-    log.exception("FALHA AO IMPORTAR zeus_acoes:")
-    zeus_acoes = None
+   logging.getLogger("zeus.app").exception("FALHA AO IMPORTAR zeus_acoes:")
 
 try:
     import zeus_roteador
 except Exception:
+    logging.getLogger("zeus.app").exception("FALHA AO IMPORTAR zeus_roteador:")
     zeus_roteador = None
 # Configuração de logs
 log = logging.getLogger("zeus.app")
