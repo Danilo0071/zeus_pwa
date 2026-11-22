@@ -33,11 +33,6 @@ def _limpar(v: str) -> str:
 
 
 def _secret(chave: str, padrao: str = "") -> str:
-    env_val = os.environ.get(chave)
-    if env_val:
-        limpo = _limpar(env_val)
-        if limpo:
-            return limpo
     try:
         sec = st.secrets
         val = sec.get(chave)
@@ -48,12 +43,10 @@ def _secret(chave: str, padrao: str = "") -> str:
                     if val:
                         break
         if val:
-            limpo = _limpar(val)
-            if limpo:
-                return limpo
+            return _limpar(val)
     except Exception:
         pass
-    return _limpar(padrao)
+    return _limpar(os.environ.get(chave) or padrao)
 
 
 def _http(metodo, url, headers=None, corpo=None, timeout=25):
@@ -116,28 +109,15 @@ def _s3_cached(endpoint, key_id, app_key):
     import boto3
     from botocore.config import Config
     m = re.search(r"s3\.([a-z0-9-]+)\.backblazeb2\.com", endpoint)
-    base = dict(
-        signature_version="s3v4",
-        connect_timeout=10,
-        read_timeout=30,
-        retries={"max_attempts": 3, "mode": "standard"},
-    )
+    base = dict(signature_version="s3v4", connect_timeout=10, read_timeout=30,
+                retries={"max_attempts": 3, "mode": "standard"})
     try:
-        cfg = Config(
-            request_checksum_calculation="when_required",
-            response_checksum_validation="when_required",
-            **base,
-        )
+        cfg = Config(request_checksum_calculation="when_required",
+                     response_checksum_validation="when_required", **base)
     except TypeError:
         cfg = Config(**base)
-    return boto3.client(
-        "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=key_id,
-        aws_secret_access_key=app_key,
-        region_name=m.group(1) if m else None,
-        config=cfg,
-    )
+    return boto3.client("s3", endpoint_url=endpoint, aws_access_key_id=key_id,
+                        aws_secret_access_key=app_key, region_name=m.group(1) if m else None, config=cfg)
 
 
 @st.cache_resource
@@ -216,12 +196,9 @@ def b2_list_meta(prefixo: str = "", limite: int = 2000):
             r = c.list_objects_v2(**kw)
             for o in r.get("Contents", []):
                 lm = o.get("LastModified")
-                itens.append({
-                    "key": o["Key"],
-                    "size": o.get("Size", 0),
-                    "mtime": lm.timestamp() if hasattr(lm, "timestamp") else 0.0,
-                    "etag": (o.get("ETag") or "").strip('"'),
-                })
+                itens.append({"key": o["Key"], "size": o.get("Size", 0),
+                              "mtime": lm.timestamp() if hasattr(lm, "timestamp") else 0.0,
+                              "etag": (o.get("ETag") or "").strip('"')})
             if not r.get("IsTruncated"):
                 break
             token = r.get("NextContinuationToken")
@@ -230,12 +207,9 @@ def b2_list_meta(prefixo: str = "", limite: int = 2000):
     def nativo(bk):
         itens = []
         for fv, _ in bk.ls(folder_to_list=prefixo.rstrip("/"), latest_only=True, recursive=True):
-            itens.append({
-                "key": fv.file_name,
-                "size": getattr(fv, "size", 0),
-                "mtime": (getattr(fv, "upload_timestamp", 0) or 0) / 1000.0,
-                "etag": getattr(fv, "content_md5", "") or "",
-            })
+            itens.append({"key": fv.file_name, "size": getattr(fv, "size", 0),
+                          "mtime": (getattr(fv, "upload_timestamp", 0) or 0) / 1000.0,
+                          "etag": getattr(fv, "content_md5", "") or ""})
             if len(itens) >= limite:
                 break
         return itens
@@ -251,74 +225,6 @@ def b2_delete(chave: str):
         fv = bk.get_file_info_by_name(chave)
         bk.delete_file_version(fv.id_, chave)
     _b2_rodar(s3, nativo)
-
-
-# ============================================================
-# E-MAIL E TELEGRAM
-# ============================================================
-def _smtp_cfg() -> dict:
-    user = _secret("EMAIL_USER") or _secret("SMTP_USER")
-    password = _secret("EMAIL_PASS") or _secret("SMTP_PASS")
-    host = _secret("SMTP_HOST", "smtp.gmail.com")
-    port_raw = _secret("SMTP_PORT", "587")
-    try:
-        port = int(port_raw)
-    except ValueError:
-        port = 587
-    return {"user": user, "pass": password, "host": host, "port": port}
-
-
-def enviar_email(destinatario: str, assunto: str, corpo: str) -> str:
-    cfg = _smtp_cfg()
-    if not cfg["user"] or not cfg["pass"]:
-        return "❌ Credenciais de e-mail não encontradas (verifique EMAIL_USER e EMAIL_PASS nos Secrets)."
-
-    msg = EmailMessage()
-    msg["From"] = cfg["user"]
-    msg["To"] = destinatario
-    msg["Subject"] = assunto
-    msg.set_content(corpo)
-
-    try:
-        if cfg["port"] == 465:
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=15, context=ctx) as smtp:
-                smtp.login(cfg["user"], cfg["pass"])
-                smtp.send_message(msg)
-        else:
-            with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as smtp:
-                smtp.ehlo()
-                smtp.starttls(context=ssl.create_default_context())
-                smtp.ehlo()
-                smtp.login(cfg["user"], cfg["pass"])
-                smtp.send_message(msg)
-        return f"✅ E-mail enviado para {destinatario}."
-    except Exception as e:
-        return f"❌ Falha ao enviar e-mail: {type(e)._name_}: {e}"
-
-
-def _tg_cfg() -> tuple[str, str]:
-    token = _secret("TELEGRAM_TOKEN") or _secret("BOT_TOKEN") or _secret("token")
-    chat_id = _secret("TELEGRAM_CHAT_ID") or _secret("CHAT_ID") or _secret("chat_id")
-    return token, chat_id
-
-
-def telegram_enviar(texto: str, chat_id: str | None = None) -> str:
-    msg_txt = (texto or "").strip()
-    if not msg_txt:
-        return "❌ Digite a mensagem para enviar no Telegram."
-    token, default_chat = _tg_cfg()
-    destino = str(chat_id or default_chat or "").strip()
-    if not token or not destino:
-        return "❌ Telegram sem token ou chat_id configurados."
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    status, resp = _http("POST", url, corpo={"chat_id": destino, "text": msg_txt[:4000]}, timeout=15)
-    if 200 <= status < 300:
-        return "✅ Mensagem enviada no Telegram."
-    return f"❌ Falha no Telegram (HTTP {status}): {resp[:200]}"
-
-
 _RE_EMAIL = r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"
 
 
@@ -328,15 +234,9 @@ def _cmd_email(texto: str) -> str:
     if not para and re.search(r"\b(pra|para|pro|ao)\s+(mim|eu|me|meu)\b", texto, re.I):
         para = _secret("EMAIL_TO") or _smtp_cfg()["user"]
     if not para:
-        return (
-            "Para quem envio? Ex.: 'envia email para alguem@dominio.com assunto Reunião corpo Confirmada às 15h' "
-            "ou 'manda um email pra mim assunto Teste corpo Funcionou'."
-        )
-    m_ass = re.search(
-        r"assunto\s*[:\-]?\s*(.+?)(?=\s+(?:corpo|mensagem|texto|dizendo|conte[uú]do)\b|\n|$)",
-        texto,
-        re.I | re.S,
-    )
+        return ("Para quem envio? Ex.: 'envia email para alguem@dominio.com assunto Reunião corpo Confirmada às 15h' "
+                "ou 'manda um email pra mim assunto Teste corpo Funcionou'.")
+    m_ass = re.search(r"assunto\s*[:\-]?\s*(.+?)(?=\s+(?:corpo|mensagem|texto|dizendo|conte[uú]do)\b|\n|$)", texto, re.I | re.S)
     m_cor = re.search(r"(?:corpo|mensagem|texto|dizendo|conte[uú]do)\s*[:\-]?\s*(.+)$", texto, re.I | re.S)
     assunto = m_ass.group(1).strip(" .,;:") if m_ass else ""
     corpo = m_cor.group(1).strip() if m_cor else ""
@@ -349,18 +249,9 @@ def _cmd_email(texto: str) -> str:
 
 
 def _cmd_telegram(texto: str) -> str:
-    t = re.sub(
-        r"(?is)^.?\b(telegram|tg)\b\s[:\-]?\s*(?:dizendo|escrevendo|mensagem)?\s*[:\-]?\s*",
-        "",
-        texto,
-        count=1,
-    ).strip()
+    t = re.sub(r"(?is)^.?\b(telegram|tg)\b\s[:\-]?\s*(?:dizendo|escrevendo|mensagem)?\s*[:\-]?\s*", "", texto, count=1).strip()
     if not t:
-        t = re.sub(
-            r"(?i)\b(zeus[,:]?\s*)?(manda|envie|envia|enviar|mande)\b|\b(no|pelo|via)\s+(telegram|tg)\b",
-            "",
-            texto,
-        ).strip(" .,:-")
+        t = re.sub(r"(?i)\b(zeus[,:]?\s*)?(manda|envie|envia|enviar|mande)\b|\b(no|pelo|via)\s+(telegram|tg)\b", "", texto).strip(" .,:-")
     return telegram_enviar(t)
 
 
@@ -400,10 +291,7 @@ def mem_ensinar(pergunta: str, resposta: str) -> str:
     return f"🧠 Aprendido e guardado no cofre ({len(fatos)} fatos na memória)."
 
 
-_STOP = {
-    "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em",
-    "um", "uma", "que", "eh", "me", "se", "no", "na",
-}
+_STOP = {"a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "um", "uma", "que", "eh", "me", "se", "no", "na"}
 
 
 def _sim(a: str, b: str) -> float:
@@ -435,18 +323,12 @@ def mem_contexto(pergunta: str, n: int = 3) -> str:
     uteis += [f for f in fatos[-2:] if f not in uteis]
     if not uteis:
         return ""
-    return (
-        "[MEMÓRIA ENSINADA PELO CRIADOR — priorize isto sobre conhecimento genérico]\n"
-        + "\n".join(f"- {f['p']}" + (f" => {f['r']}" if f["r"] != f["p"] else "") for f in uteis[: n + 2])
-    )
+    return ("[MEMÓRIA ENSINADA PELO CRIADOR — priorize isto sobre conhecimento genérico]\n"
+            + "\n".join(f"- {f['p']}" + (f" => {f['r']}" if f["r"] != f["p"] else "") for f in uteis[:n + 2]))
 
 
 def _cmd_aprender(texto: str) -> str:
-    corpo = re.sub(
-        r"(?i)^\s*(zeus[,:\s]+)?(aprenda|aprende|memorize|lembre-se|lembre)\s*(que|:)?\s*",
-        "",
-        texto,
-    ).strip()
+    corpo = re.sub(r"(?i)^\s*(zeus[,:\s]+)?(aprenda|aprende|memorize|lembre-se|lembre)\s*(que|:)?\s*", "", texto).strip()
     if not corpo:
         return "O que devo aprender? Ex.: 'aprenda: qual meu time => Palmeiras' ou 'lembre que respondo melhor com exemplos'."
     m = re.split(r"\s*(?:=>|->|=)\s*", corpo, maxsplit=1)
@@ -460,8 +342,7 @@ def _cmd_memoria_listar(_t: str) -> str:
     if not fatos:
         return "Minha memória está vazia. Ensine com: 'aprenda: pergunta => resposta'."
     return f"🧠 Tenho {len(fatos)} fatos. Os últimos:\n" + "\n".join(
-        f"- {f['p']}" + (f" => {f['r']}" if f["r"] != f["p"] else "") for f in fatos[-10:]
-    )
+        f"- {f['p']}" + (f" => {f['r']}" if f['r'] != f['p'] else "") for f in fatos[-10:])
 
 
 _RE_PATH = r"([\w.\-]+(?:/[\w.\-]+)+/?|[\w\-]+\.\w{2,5})"
@@ -485,8 +366,7 @@ def _cmd_cofre_listar(texto: str) -> str:
     if not itens:
         return f"Cofre vazio{' em ' + prefixo if prefixo else ''} (0 arquivos)."
     return f"📦 Cofre B2 {prefixo or '(raiz)'} — {len(itens)} arquivo(s):\n" + "\n".join(
-        f"- {k} ({_bytes_fmt(s)})" for k, s in itens
-    )
+        f"- {k} ({_bytes_fmt(s)})" for k, s in itens)
 
 
 def _cmd_cofre_ler(texto: str) -> str:
@@ -533,7 +413,7 @@ def _cmd_cofre_salvar(texto: str) -> str:
     conteudo = c.group(1).strip() if c else ""
     if not conteudo:
         return "O que devo salvar? Ex.: 'salva no cofre como notas/ideia.txt: texto da ideia'."
-    nome = nome.lstrip("/") or f"cofre/nota_{_agora():%Y%m%d%H%M%S}.txt"
+    nome = nome.lstrip("/") or f"cofre/nota_{agora():%Y%m%d%H%M%S}.txt"
     if "/" not in nome:
         nome = "cofre/" + nome
     if nome in PROTEGIDOS:
@@ -559,76 +439,38 @@ def _rotear(t: str):
     topo_cofre = r"\b(cofre|bucket|backblaze|blaze\w*|b2|nuvem)\b"
     path = _path_do_texto(t)
 
-    if (
-        re.match(
-            r"\s*(zeus[,:\s]+)?(faz\w*\s+(um\s+)?)?(diagnostic\w*|testa\w*|testar|teste\s+(de|do|da)|verifica\w*|checa\w*)\b",
-            low,
-        )
-        and re.search(r"\b(conex\w+|e mail|email|telegram|cofre|b2|github|spotify|tudo|sistema|integra\w+)\b", low)
-        and not re.search(r"\b(assunto|corpo|dizendo)\b", low)
-        and len(low.split()) <= 12
-    ):
-        for foco, pad in (
-            ("email", r"\be mail\b|\bemail\b"),
-            ("telegram", r"\btelegram\b"),
-            ("cofre", topo_cofre),
-            ("github", r"\bgithub\b|\brobo\b"),
-            ("spotify", r"\bspotify\b"),
-        ):
+    if re.match(r"\s*(zeus[,:\s]+)?(faz\w*\s+(um\s+)?)?(diagnostic\w*|testa\w*|testar|teste\s+(de|do|da)|verifica\w*|checa\w*)\b", low) \
+            and re.search(r"\b(conex\w+|e mail|email|telegram|cofre|b2|github|spotify|tudo|sistema|integra\w+)\b", low) \
+            and not re.search(r"\b(assunto|corpo|dizendo)\b", low) and len(low.split()) <= 12:
+        for foco, pad in (("email", r"\be mail\b|\bemail\b"), ("telegram", r"\btelegram\b"), ("cofre", topo_cofre),
+                          ("github", r"\bgithub\b|\brobo\b"), ("spotify", r"\bspotify\b")):
             if re.search(pad, low):
-                fn = globals().get("diagnostico") or _G.get("diagnostico")
-                if callable(fn):
-                    return fn(foco, enviar_teste=foco in ("email", "telegram"))
-        fn = globals().get("diagnostico") or _G.get("diagnostico")
-        if callable(fn):
-            return fn("tudo")
+                return diagnostico(foco, enviar_teste=foco in ("email", "telegram"))
+        return diagnostico("tudo")
 
     m = re.match(r"\s*(?:zeus[,:\s]+)?(?:toca|tocar|toque|poe|põe|coloca)\s+(?:a\s+)?(?:musica\s+)?(.+)$", t, re.I)
     if m and not pergunta:
-        fn = globals().get("sp_tocar") or _G.get("sp_tocar")
-        if callable(fn):
-            return fn(re.sub(r"(?i)\s*(no|pelo)\s+spotify\s*$", "", m.group(1)).strip(" .,!?"))
+        return sp_tocar(re.sub(r"(?i)\s*(no|pelo)\s+spotify\s*$", "", m.group(1)).strip(" .,!?"))
 
     if re.search(r"\b(reativ\w+|habilit\w+)\b", low) and re.search(r"\b(robo\w*|action|workflow|agendamento)\b", low):
-        fn = globals().get("gh_habilitar") or _G.get("gh_habilitar")
-        wf_fn = globals().get("_workflow") or _G.get("_workflow")
-        if callable(fn) and callable(wf_fn):
-            return fn(wf_fn(t))
-    if re.search(r"\b(status|situacao|como esta|ultim\w+ (?:execu\w+|rodada)|funcionou)\b", low) and re.search(
-        r"\b(robo\w*|action|workflow)\b", low
-    ):
-        fn = globals().get("gh_status") or _G.get("gh_status")
-        wf_fn = globals().get("_workflow") or _G.get("_workflow")
-        if callable(fn) and callable(wf_fn):
-            return fn(wf_fn(t))
-    if re.search(r"\b(aciona\w*|roda|rode|rodar|execut\w+|inicia\w*|liga\w*|chama\w*|ativa\w*|dispara\w*)\b", low) and re.search(
-        r"\b(robo\w*|action|workflow)\b", low
-    ):
-        fn = globals().get("gh_acionar") or _G.get("gh_acionar")
-        wf_fn = globals().get("_workflow") or _G.get("_workflow")
-        if callable(fn) and callable(wf_fn):
-            return fn(wf_fn(t))
+        return gh_habilitar(_workflow(t))
+    if re.search(r"\b(status|situacao|como esta|ultim\w+ (?:execu\w+|rodada)|funcionou)\b", low) and re.search(r"\b(robo\w*|action|workflow)\b", low):
+        return gh_status(_workflow(t))
+    if re.search(r"\b(aciona\w*|roda|rode|rodar|execut\w+|inicia\w*|liga\w*|chama\w*|ativa\w*|dispara\w*)\b", low) \
+            and re.search(r"\b(robo\w*|action|workflow)\b", low):
+        return gh_acionar(_workflow(t))
 
     if re.search(r"\b(apag\w+|delet\w+|remov\w+|exclu\w+)\b", low) and path and (re.search(topo_cofre, low) or "/" in path):
         return _cmd_cofre_apagar(t)
-    if (
-        re.search(r"\b(salv\w+|guard\w+|grav\w+)\b", low)
-        and re.search(topo_cofre, low)
-        and not re.search(r"\b(binance|banco central|bcb|selic|ipca|cripto\w*)\b", low)
-    ):
+    if re.search(r"\b(salv\w+|guard\w+|grav\w+)\b", low) and re.search(topo_cofre, low) \
+            and not re.search(r"\b(binance|banco central|bcb|selic|ipca|cripto\w*)\b", low):
         return _cmd_cofre_salvar(t)
 
-    topico = (
-        r"\b(binance|cripto\w*|bitcoin|btc|ethereum|eth|banco central|bcb|selic|ipca|dolar|cdi|mercado|trade|trading|grafic\w+)\b"
-    )
+    topico = r"\b(binance|cripto\w*|bitcoin|btc|ethereum|eth|banco central|bcb|selic|ipca|dolar|cdi|mercado|trade|trading|grafic\w+)\b"
     if not pergunta and re.search(topico, low) and re.search(r"\b(baix\w+|colet\w+|pega\w*|traz\w*|atualiz\w+)\b", low):
-        fn = globals().get("_cmd_dados") or _G.get("_cmd_dados")
-        if callable(fn):
-            return fn(t)
+        return _cmd_dados(t)
     if not pergunta and re.search(r"\b(coleta\w*|colet\w+)\b.*\b(tudo|dados|automatic\w+)\b", low):
-        fn = globals().get("_cmd_dados") or _G.get("_cmd_dados")
-        if callable(fn):
-            return fn(t + " tudo")
+        return _cmd_dados(t + " tudo")
 
     if re.search(r"\b(le|ler|abr\w+|mostr\w+)\b", low) and path and "/" in path and re.search(r"\.\w{2,5}$", path):
         return _cmd_cofre_ler(t)
@@ -678,9 +520,13 @@ def _chat_normal(prompt: str) -> str:
 
     prompt_llm, fonte_web = g["enriquecer_com_web"](prompt)
     ctx = mem_contexto(prompt)
-    prompt_final = f"{prompt_llm}\n\n{ctx}" if ctx else prompt_llm
-
-    ok, resp, prov, erros = g["get_llm_response"](sid, prompt_final, escolhido)
+    base_sys = g.get("SYS_PROMPT", "")
+    if ctx:
+        g["SYS_PROMPT"] = base_sys + "\n\n" + ctx
+    try:
+        ok, resp, prov, erros = g["get_llm_response"](sid, prompt_llm, escolhido)
+    finally:
+        g["SYS_PROMPT"] = base_sys
 
     if not ok:
         ctx_web, fonte = "", ""
@@ -690,28 +536,20 @@ def _chat_normal(prompt: str) -> str:
                 break
             time.sleep(0.8)
         if ctx_web and ctx_web.strip():
-            resp = (
-                "📡 As IAs não responderam. Busquei na internet por conta própria:\n\n"
-                + ctx_web[:3800]
-                + f"\n\n(Fonte: {fonte})"
-            )
+            resp = ("📡 As IAs não responderam. Busquei na internet por conta própria:\n\n"
+                    + ctx_web[:3800] + f"\n\n(Fonte: {fonte})")
             ok, prov, fonte_web = True, "Web Search", fonte
         else:
-            resp = (
-                "Não consegui contatar as IAs nem obter resultado útil na web agora. "
-                "Tente reformular ou veja o status das chaves no menu lateral."
-            )
+            resp = ("Não consegui contatar as IAs nem obter resultado útil na web agora. "
+                    "Tente reformular ou veja o status das chaves no menu lateral.")
             prov = "sem resposta"
             ss.last_info = "⚠️ IAs e web indisponíveis no momento"
     g["add_message"](sid, "user", prompt)
     ss.messages.append({"role": "assistant", "content": resp})
     g["add_message"](sid, "assistant", resp)
     if ok:
-        ss.last_info = (
-            f"✅ Respondeu: {prov}"
-            + (f" (falhou: {'; '.join(erros)})" if erros else "")
-            + (" · 🌐 web: " + fonte_web if fonte_web else "")
-        )
+        ss.last_info = (f"✅ Respondeu: {prov}" + (f" (falhou: {'; '.join(erros)})" if erros else "")
+                        + (" · 🌐 web: " + fonte_web if fonte_web else ""))
     return resp
 
 
@@ -753,3 +591,86 @@ def instalar(g: dict):
         add_message_seguro._za_seguro = True
         g["add_message"] = add_message_seguro
     return processar_prompt
+def _secret(chave: str, padrao: str = "") -> str:
+    # 1. Prioriza variáveis de ambiente (funciona no GitHub Actions e em qualquer ambiente)
+    env_val = os.environ.get(chave)
+    if env_val:
+        return _limpar(env_val)
+    # 2. Tenta st.secrets de forma segura
+    try:
+        sec = st.secrets
+        val = sec.get(chave)
+        if not val:
+            for _, bloco in sec.items():
+                if hasattr(bloco, "get"):
+                    val = bloco.get(chave)
+                    if val:
+                        break
+        if val:
+            return _limpar(val)
+    except Exception:
+        pass
+    return _limpar(padrao)
+
+
+def _smtp_cfg() -> dict:
+    user = _secret("EMAIL_USER") or _secret("SMTP_USER")
+    password = _secret("EMAIL_PASS") or _secret("SMTP_PASS")
+    host = _secret("SMTP_HOST", "smtp.gmail.com")
+    port_raw = _secret("SMTP_PORT", "587")
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 587
+    return {"user": user, "pass": password, "host": host, "port": port}
+
+
+def enviar_email(destinatario: str, assunto: str, corpo: str) -> str:
+    cfg = _smtp_cfg()
+    if not cfg["user"] or not cfg["pass"]:
+        return "❌ Credenciais de e-mail ausentes (configure EMAIL_USER e EMAIL_PASS)."
+
+    msg = EmailMessage()
+    msg["From"] = cfg["user"]
+    msg["To"] = destinatario
+    msg["Subject"] = assunto
+    msg.set_content(corpo)
+
+    try:
+        if cfg["port"] == 465:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=15, context=ctx) as smtp:
+                smtp.login(cfg["user"], cfg["pass"])
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
+                smtp.login(cfg["user"], cfg["pass"])
+                smtp.send_message(msg)
+        return f"✅ E-mail enviado para {destinatario}."
+    except Exception as e:
+        return f"❌ Falha ao enviar e-mail: {type(e)._name_}: {e}"
+
+
+def _tg_cfg() -> tuple[str, str]:
+    token = _secret("TELEGRAM_TOKEN") or _secret("BOT_TOKEN") or _secret("token")
+    chat_id = _secret("TELEGRAM_CHAT_ID") or _secret("CHAT_ID") or _secret("chat_id")
+    return token, chat_id
+
+
+def telegram_enviar(texto: str, chat_id: str | None = None) -> str:
+    msg_txt = (texto or "").strip()
+    if not msg_txt:
+        return "❌ Digite a mensagem para enviar no Telegram."
+    token, default_chat = _tg_cfg()
+    destino = str(chat_id or default_chat or "").strip()
+    if not token or not destino:
+        return "❌ Telegram sem token ou chat_id configurados."
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    status, resp = _http("POST", url, corpo={"chat_id": destino, "text": msg_txt[:4000]}, timeout=15)
+    if 200 <= status < 300:
+        return "✅ Mensagem enviada no Telegram."
+    return f"❌ Falha no Telegram (HTTP {status}): {resp[:200]}"
