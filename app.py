@@ -26,85 +26,50 @@ import sys
 import tempfile
 import time
 import zipfile
-import logging
 
 import requests
 import csv as _csv
 import html as _html
+import io
+import json
+import re
 import smtplib as _smtplib
 import ssl as _ssl
+import time
 import unicodedata as _u
 from datetime import datetime as _dtm, timezone as _tzn
 from datetime import datetime, timezone
 from difflib import SequenceMatcher as _SM
 from email.message import EmailMessage as _EmailMessage
 from email.utils import parseaddr as _parseaddr
-
 try:
     from openai import OpenAI  # cliente OpenAI (usado para DeepInfra)
 except ImportError:
     OpenAI = None
-
 import streamlit as st
 import streamlit.components.v1 as components
-
+import time
+import unicodedata
 # Importação dinâmica das habilidades geradas pelo Zeus e do gerenciador do GitHub
 try:
     import zeus_skills
 except Exception:
     pass
-
 try:
     from github_manager import salvar_no_github
 except Exception:
     salvar_no_github = None
-
-# ============================================================
-# IMPORTAÇÃO DOS MÓDULOS PRINCIPAIS DO ZEUS 3.0
-# ============================================================
-import zeus_acoes
+try:
+    from cofre_b2 import salvar_texto, ler_texto, salvar_json, ler_json
+except Exception:
+    salvar_texto = None
+    ler_texto = None
+    salvar_json = None
+    ler_json = None
+    import zeus_acoes
 import zeus_roteador
+import logging
 
-# Configuração de logs
-log = logging.getLogger("zeus.app")
-
-# ============================================================
-# INSTALAÇÃO DOS MÓDULOS (Ligando o novo motor)
-# ============================================================
-# 1) zeus_acoes: prepara os comandos (cofre, e-mail, telegram, etc)
-processar_prompt = zeus_acoes.instalar(globals())
-
-# 2) zeus_roteador: prepara a busca na web e a memória B2
-_roteador = zeus_roteador.instalar(globals())
-
-# ============================================================
-# CONFIGURAÇÃO DA PÁGINA
-# ============================================================
-st.set_page_config(
-    page_title="Zeus 3.0",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# ============================================================
-# A PARTIR DAQUI CONTINUA O SEU CÓDIGO NORMAL (THEMES, SIDEBAR, ETC)
-# ============================================================
-# ============================================================
-# ZEUS 3.0 — INSTALAÇÃO DOS MÓDULOS
-# ============================================================
-# 1) zeus_acoes: prepara os comandos (cofre, e-mail, telegram, etc)
-processar_prompt = zeus_acoes.instalar(globals())
-
-# 2) zeus_roteador: prepara a busca na web e a memória B2
-_roteador = zeus_roteador.instalar(globals())
-
-# 3) Menu lateral de Spotify e Voz
-zeus_acoes.render_spotify_voz()
-
-# ============================================================
-# CONFIGURAÇÃO DA PÁGINA
-# ============================================================
 log = logging.getLogger("zeus.app")
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
