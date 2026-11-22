@@ -107,10 +107,17 @@ st.set_page_config(
 # ZEUS 3.0 — INSTALAÇÃO DOS MÓDULOS
 # ============================================================
 # 1) zeus_acoes: prepara os comandos (cofre, e-mail, telegram, etc)
-processar_prompt = zeus_acoes.instalar(globals())
-
+if zeus_acoes and hasattr(zeus_acoes, "instalar"):
+    try:
+        processar_prompt = zeus_acoes.instalar(globals())
+    except Exception:
+        pass
 # 2) zeus_roteador: prepara a busca na web e a memória B2
-_roteador = zeus_roteador.instalar(globals())
+if zeus_acoes and hasattr(zeus_acoes, "render_spotify_voz"):
+    try:
+        zeus_acoes.render_spotify_voz()
+    except Exception:
+        pass
 
 # 3) Menu lateral de Spotify e Voz
 zeus_acoes.render_spotify_voz()
