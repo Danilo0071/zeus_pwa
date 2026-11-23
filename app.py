@@ -1092,45 +1092,45 @@ def processar_prompt(prompt):
     escolhido = st.session_state.get("model_sel", "groq")
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # Enriquece com web quando fizer sentido (ou modo Sempre)
+   # Enriquece com web quando fizer sentido (ou modo Sempre)
     prompt_llm, fonte_web = enriquecer_com_web(prompt)
 
     ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
 
-    # === FALLBACK OBRIGATÓRIO: se nenhuma IA respondeu, busca na web e insiste ===
+    # === FALLBACK OBRIGATÓRIO: se nenhuma IA respondeu, busca na web direto ===
     if not ok:
-        # Tenta até 2 vezes a busca (prioriza Google CSE / Gemini Google / DDG)
         ctx_web, fonte = "", ""
-        for _tentativa in range(2):
+        try:
             ctx_web, fonte = web_search(prompt[:500])
-            if ctx_web and ctx_web.strip():
-                break
-            time.sleep(0.8)
+        except Exception:
+            ctx_web, fonte = "", ""
+
+        if not (ctx_web and ctx_web.strip()):
+            ctx_web = _search_ddg(prompt[:300], n=5)
+            fonte = "Web aberta (Google / DuckDuckGo / Wikipédia)"
 
         if ctx_web and ctx_web.strip():
             response = (
-                "📡 As IAs não responderam. Busquei na internet por conta própria:\n\n"
+                "🌐 As IAs não responderam. Busquei na internet por conta própria:\n\n"
                 + ctx_web[:3800]
                 + f"\n\n(Fonte: {fonte})"
             )
             ok = True
-            prov = "Web Search (Google/fallback)"
+            prov = "Web Search (autônomo)"
             fonte_web = fonte
             erros = (erros or []) + ["fallback web forçado"]
         else:
-            # Último recurso: ainda assim não devolve erro seco — tenta uma busca mais genérica
-            ctx2, fonte2 = web_search("explicação " + prompt[:200])
+            ctx2 = _search_ddg("explicação " + prompt[:200], n=4)
             if ctx2 and ctx2.strip():
                 response = (
-                    "📡 Busca na web (alternativa):\n\n"
+                    "🌐 Busca na web (alternativa):\n\n"
                     + ctx2[:3500]
-                    + f"\n\n(Fonte: {fonte2})"
+                    + "\n\n(Fonte: Web aberta)"
                 )
                 ok = True
                 prov = "Web Search (alternativa)"
-                fonte_web = fonte2
+                fonte_web = "Web aberta"
             else:
-                # Só neste caso extremo informa, mas de forma útil
                 response = (
                     "Não consegui contatar as IAs nem obter resultado útil na web neste momento. "
                     "Tente reformular a pergunta ou verifique as chaves de API / conexão."
@@ -1138,7 +1138,8 @@ def processar_prompt(prompt):
                 prov = "sem resposta"
                 st.session_state.last_info = "⚠️ IAs e web indisponíveis no momento"
                 add_message(sid, "user", prompt)
-                resposta_cofre = tratar_comando_cofre_chat(prompt)
+
+    resposta_cofre = tratar_comando_cofre_chat(prompt)
         
             st.session_state.messages.append({"role": "assistant", "content": response})
             add_message(sid, "assistant", response)
