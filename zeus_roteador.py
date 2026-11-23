@@ -273,7 +273,7 @@ class BackendZeusAcoes:
 # 4) CACHE DA WEB, RANKING E ATALHO DE ROTAS/RESPOSTAS BOAS
 # ============================================================
 class _LRU:
-    def _init_(self, maximo: int):
+    def __init__(self, maximo: int):
         self.max, self.d, self.lock = max(1, int(maximo)), OrderedDict(), threading.Lock()
 
     def get(self, k):
