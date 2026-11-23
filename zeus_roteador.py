@@ -8,7 +8,7 @@ Liga no app.py, logo após zeus_acoes.instalar(globals()):
     import zeus_roteador
     zeus_roteador.instalar(globals())
 """
-from _future_ import annotations
+from __future__ import annotations
 
 import hashlib
 import json
