@@ -1092,7 +1092,7 @@ def processar_prompt(prompt):
     escolhido = st.session_state.get("model_sel", "groq")
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-       tem_chave_ia = any(_secret(k) for k in KEYS.values())
+   tem_chave_ia = any(_secret(k) for k in KEYS.values())
     if tem_chave_ia:
         prompt_llm, fonte_web = enriquecer_com_web(prompt)
         ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
