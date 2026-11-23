@@ -298,7 +298,7 @@ def _chave_consulta(prefixo: str, tema: str, query: str) -> str:
 
 
 class CacheWeb:
-    def _init_(self, cfg: Config, backend: Optional[Backend], agora: Callable[[], float]):
+    def __init__(self, cfg: Config, backend: Optional[Backend], agora: Callable[[], float]):
         self.cfg, self.backend, self.agora = cfg, backend, agora
         self.mem = _LRU(cfg.cache_mem_max)
 
@@ -346,7 +346,7 @@ class CacheWeb:
 class RotasBoas:
     """Salva caminhos/respostas boas no B2 para reaproveitar em consultas parecidas sem gastar busca/LLM."""
 
-    def _init_(self, cfg: Config, backend: Optional[Backend], agora: Callable[[], float]):
+    def __init__(self, cfg: Config, backend: Optional[Backend], agora: Callable[[], float]):
         self.cfg, self.backend, self.agora = cfg, backend, agora
         self.mem = _LRU(128)
 
@@ -402,7 +402,7 @@ class RotasBoas:
 class Ranking:
     """Taxa de acerto por fonte e por tema (suavização de Laplace). Gravação no B2 throttled."""
 
-    def _init_(self, cfg: Config, backend: Optional[Backend], agora: Callable[[], float]):
+    def __init__(self, cfg: Config, backend: Optional[Backend], agora: Callable[[], float]):
         self.cfg, self.backend, self.agora = cfg, backend, agora
         self.dados: dict = {}
         self.lock = threading.Lock()
