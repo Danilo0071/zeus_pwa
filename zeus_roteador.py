@@ -648,7 +648,7 @@ def dividir(texto: str, tam: int, sobre: int, maximo: int) -> list:
 class Indice:
     K1, B = 1.5, 0.75
 
-    def _init_(self, cfg: Config, backend: Optional[Backend], agora: Callable[[], float]):
+    def __init__(self, cfg: Config, backend: Optional[Backend], agora: Callable[[], float]):
         self.cfg, self.backend, self.agora = cfg, backend, agora
         self.lock = threading.RLock()
         self.objs: dict = {}
