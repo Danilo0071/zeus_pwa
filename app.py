@@ -1409,6 +1409,14 @@ def _search_gemini_google(q):
 
 
 def _search_ddg(q, n=5):
+    _ws = globals().get("web_search")
+    if callable(_ws):
+        try:
+            out = _ws(q, n=n)
+            if isinstance(out, str) and out.strip():
+                return out.strip()
+        except Exception:
+            pass
     try:
         try:
             from ddgs import DDGS
