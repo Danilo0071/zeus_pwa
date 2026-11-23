@@ -1139,7 +1139,7 @@ def processar_prompt(prompt):
                 st.session_state.last_info = "⚠️ IAs e web indisponíveis no momento"
                 add_message(sid, "user", prompt)
 
-    resposta_cofre = tratar_comando_cofre_chat(prompt)
+            resposta_cofre = tratar_comando_cofre_chat(prompt)
         
             st.session_state.messages.append({"role": "assistant", "content": response})
             add_message(sid, "assistant", response)
