@@ -887,7 +887,7 @@ class Preparado:
 
 
 class Roteador:
-    def _init_(
+    def __init__(
         self,
         cfg: Config = Config(),
         backend: Optional[Backend] = None,
