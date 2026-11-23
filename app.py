@@ -1417,7 +1417,7 @@ def _search_ddg(q, n=5):
                 return out.strip()
         except Exception:
             pass
-   def _search_ddg(q, n=5):
+def _search_ddg(q, n=5):
     _ws = globals().get("web_search")
     if callable(_ws):
         try:
