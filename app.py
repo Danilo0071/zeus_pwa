@@ -25,40 +25,39 @@ import sqlite3
 import sys
 import tempfile
 import time
+import unicodedata
 import zipfile
+from datetime import datetime, timezone
+from datetime import datetime as _dtm, timezone as _tzn
+from difflib import SequenceMatcher as _SM
+from email.message import EmailMessage as _EmailMessage
+from email.utils import parseaddr as _parseaddr
 
 import requests
 import csv as _csv
 import html as _html
-import io
-import json
-import re
 import smtplib as _smtplib
 import ssl as _ssl
-import time
 import unicodedata as _u
-from datetime import datetime as _dtm, timezone as _tzn
-from datetime import datetime, timezone
-from difflib import SequenceMatcher as _SM
-from email.message import EmailMessage as _EmailMessage
-from email.utils import parseaddr as _parseaddr
+import streamlit as st
+import streamlit.components.v1 as components
+
 try:
     from openai import OpenAI  # cliente OpenAI (usado para DeepInfra)
 except ImportError:
     OpenAI = None
-import streamlit as st
-import streamlit.components.v1 as components
-import time
-import unicodedata
+
 # Importação dinâmica das habilidades geradas pelo Zeus e do gerenciador do GitHub
 try:
     import zeus_skills
 except Exception:
     pass
+
 try:
     from github_manager import salvar_no_github
 except Exception:
     salvar_no_github = None
+
 try:
     from cofre_b2 import salvar_texto, ler_texto, salvar_json, ler_json
 except Exception:
@@ -66,6 +65,25 @@ except Exception:
     ler_texto = None
     salvar_json = None
     ler_json = None
+
+# Módulos principais do Zeus (ações, roteamento/memória/web, agente e laboratório)
+import zeus_acoes
+processar_prompt = zeus_acoes.instalar(globals())
+
+import zeus_roteador
+zeus_roteador.instalar(globals())
+
+try:
+    import zeus_agente
+    processar_prompt = zeus_agente.instalar(globals())
+except Exception:
+    pass
+
+try:
+    import zeus_lab
+    processar_prompt = zeus_lab.instalar(globals())
+except Exception:
+    pass
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
