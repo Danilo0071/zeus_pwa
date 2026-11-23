@@ -1408,47 +1408,58 @@ def _search_gemini_google(q):
     return ""
 
 
+_DDG_CACHE = {}
+
 def _search_ddg(q, n=5):
+    q_clean = (q or "").strip()
+    if not q_clean:
+        return ""
+    if q_clean in _DDG_CACHE:
+        return _DDG_CACHE[q_clean]
+
     _ws = globals().get("web_search")
     if callable(_ws):
         try:
-            out = _ws(q, n=n)
+            out = _ws(q_clean, n=n)
             if isinstance(out, str) and out.strip():
-                return out.strip()
+                _DDG_CACHE[q_clean] = out.strip()
+                return _DDG_CACHE[q_clean]
         except Exception:
             pass
 
     linhas = []
-
     try:
-        try:
-            from ddgs import DDGS
-        except ImportError:
-            from duckduckgo_search import DDGS
-        with DDGS(timeout=10) as d:
-            res = list(d.text(q, region="br-pt", safesearch="moderate", max_results=min(int(n or 5), 5)))
-        for x in res:
-            titulo = (x.get("title") or "").strip()
-            body = (x.get("body") or "").strip()
-            href = (x.get("href") or "").strip()
-            if titulo and (body or href):
-                linhas.append(f"- {titulo}: {body} ({href})")
+        import re, html
+        r = requests.post(
+            "https://html.duckduckgo.com/html/",
+            data={"q": q_clean},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=8,
+        )
+        if r.status_code == 200 and r.text:
+            links = re.findall(r'<a[^>]class="result__a"[^>]*href="([^"]+)"[^>]>(.*?)</a>', r.text, re.S)
+            snips = re.findall(r'<a[^>]class="result__snippet"[^>]>(.*?)</a>', r.text, re.S)
+            for i, (href, tit) in enumerate(links[:min(int(n or 5), 5)]):
+                t = re.sub(r"<.*?>", "", html.unescape(tit)).strip()
+                s = re.sub(r"<.*?>", "", html.unescape(snips[i])).strip() if i < len(snips) else ""
+                if t:
+                    linhas.append(f"- {t}: {s} ({href})")
     except Exception:
         pass
 
-    if linhas:
-        return "\n".join(linhas)
+    if not linhas:
+        _sw = globals().get("_search_wiki")
+        if callable(_sw):
+            try:
+                w = _sw(q_clean, n=min(int(n or 4), 4))
+                if isinstance(w, str) and w.strip():
+                    linhas.append(w.strip())
+            except Exception:
+                pass
 
-    _sw = globals().get("_search_wiki")
-    if callable(_sw):
-        try:
-            w = _sw(q, n=min(int(n or 4), 4))
-            if isinstance(w, str) and w.strip():
-                return w.strip()
-        except Exception:
-            pass
-
-    return ""
+    res_final = "\n".join(linhas).strip()
+    _DDG_CACHE[q_clean] = res_final
+    return res_final
 
 def _search_wiki(q, n=4):
     try:
