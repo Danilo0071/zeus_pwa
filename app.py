@@ -1417,17 +1417,38 @@ def _search_ddg(q, n=5):
                 return out.strip()
         except Exception:
             pass
-def _search_ddg(q, n=5):
-    _ws = globals().get("web_search")
-    if callable(_ws):
+
+    linhas = []
+
+    try:
         try:
-            out = _ws(q, n=n)
-            if isinstance(out, str) and out.strip():
-                return out.strip()
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
+        with DDGS(timeout=10) as d:
+            res = list(d.text(q, region="br-pt", safesearch="moderate", max_results=min(int(n or 5), 5)))
+        for x in res:
+            titulo = (x.get("title") or "").strip()
+            body = (x.get("body") or "").strip()
+            href = (x.get("href") or "").strip()
+            if titulo and (body or href):
+                linhas.append(f"- {titulo}: {body} ({href})")
+    except Exception:
+        pass
+
+    if linhas:
+        return "\n".join(linhas)
+
+    _sw = globals().get("_search_wiki")
+    if callable(_sw):
+        try:
+            w = _sw(q, n=min(int(n or 4), 4))
+            if isinstance(w, str) and w.strip():
+                return w.strip()
         except Exception:
             pass
-    return ""
 
+    return ""
 
 def _search_wiki(q, n=4):
     try:
