@@ -1559,48 +1559,24 @@ def _executar_fontes(q, n, limiar=0.30):
     return "", ""
 
 
-def web_search(q, n=5):
-    _ant = st.session_state.get("_ultima_pergunta_web", "")
-    _q_full = f"{_ant} {q}".strip() if (_ant and len(q.split()) <= 6) else q
-    if len(q.split()) > 3:
-        st.session_state["_ultima_pergunta_web"] = q
-    q_limpa = _limpar_query(_q_full) or _limpar_query(q) or _q_full
-    if not q_limpa:
-        return "", ""
-    _termo_tavily = q_limpa or _q_full or q
-    res_tavily = buscar_web_tavily(_termo_tavily, max_results=n)
-    if res_tavily:
-        return res_tavily, "Tavily"
-    txt, fonte = _executar_fontes(q_limpa, n, limiar=0.30)
-    if txt:
-        return txt, fonte
-
-    q2 = _reformular_query(q_limpa)
-    if q2 and q2 != q_limpa:
-        txt, fonte = _executar_fontes(q2, n, limiar=0.22)
-        if txt:
-            return txt, fonte + " (re-busca)"
-
-    return "", ""
-
-
 def precisa_web(prompt):
     modo = st.session_state.get("web_mode", "Automática")
     if modo == "Desligada":
         return False
-    if modo == "Sempre":
-        return True
-    low = (prompt or "").lower()
-    return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low)) or len(low.split()) <= 5
-    if st.session_state.get("_ultima_pergunta_web") and len((prompt or "").split()) <= 6:
-        return True
+    if not (prompt or "").strip():
+        return False
+    return True
+
+
 def buscar_web_tavily(query: str, max_results: int = 5) -> str:
-    api_key = (
+    raw_key = (
         st.secrets.get("TAVILY_API_KEY")
         or st.secrets.get("tavily", {}).get("TAVILY_API_KEY")
         or st.secrets.get("tavily", {}).get("api_key")
-        or os.getenv("TAVILY_API_KEY", "")
+        or os.getenv("TAVILY_API_KEY")
+        or ""
     )
+    api_key = str(raw_key).strip()
     if not api_key:
         return ""
     q_tavily = " ".join((query or "").split()[:10]).strip()
@@ -1632,6 +1608,8 @@ def buscar_web_tavily(query: str, max_results: int = 5) -> str:
         return "\n".join(partes)
     except Exception:
         return ""
+
+
 _REGRAS_ANTIALUCINACAO = (
     "REGRAS OBRIGATÓRIAS DE VERACIDADE (PROIBIDO INVENTAR):\n"
     "1. Responda EXCLUSIVAMENTE com base nos fatos presentes em [DADOS DA INTERNET].\n"
@@ -1642,6 +1620,42 @@ _REGRAS_ANTIALUCINACAO = (
     "\"Não encontrei informação confiável na busca web agora para responder isso.\" e encerre a resposta.\n"
 )
 
+
+def enriquecer_com_web(prompt):
+    if not precisa_web(prompt):
+        return prompt, ""
+
+    _prev_u = next((m["content"] for m in reversed(st.session_state.messages[:-1]) if m.get("role") == "user"), "")
+    _ultima_web = st.session_state.get("_ultima_pergunta_web", "")
+    _base_ctx = _prev_u or _ultima_web
+    _q_s = f"{_base_ctx} {prompt}".strip() if (_base_ctx and len(prompt.split()) <= 6) else prompt
+    if len((prompt or "").split()) > 3:
+        st.session_state["_ultima_pergunta_web"] = prompt
+    ctx_web, fonte = web_search(_q_s)
+    hoje = time.strftime("%d/%m/%Y")
+    if not ctx_web:
+        novo = (
+            f"[BUSCA WEB em {hoje}]\n"
+            "STATUS: FALHA_OU_SEM_RESULTADO_CONFIAVEL.\n"
+            "Nenhum resultado verificado e aderente ao tema foi encontrado na internet.\n"
+            "[FIM DA BUSCA]\n\n"
+            + _REGRAS_ANTIALUCINACAO +
+            "\nINSTRUÇÃO FINAL: Como a busca não retornou dados confiáveis, NÃO tente responder de memória, "
+            "NÃO chute valores/datas e NÃO crie links. Apenas informe ao usuário que não foi possível confirmar "
+            "essa informação na busca web no momento.\n"
+            "Pergunta do usuário: " + prompt
+        )
+        return novo, "sem resultado"
+
+    novo = (
+        f"[DADOS DA INTERNET em {hoje}, via {fonte}]\n"
+        + ctx_web[:3500] +
+        "\n[FIM DOS DADOS]\n\n"
+        + _REGRAS_ANTIALUCINACAO +
+        "\nUse apenas os fatos acima e informe a fonte quando citar dados.\n"
+        "Pergunta do usuário: " + prompt
+    )
+    return novo, fonte
 
 def enriquecer_com_web(prompt):
     if not precisa_web(prompt):
