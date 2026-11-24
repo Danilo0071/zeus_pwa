@@ -1561,7 +1561,10 @@ def web_search(q, n=5):
     q_limpa = _limpar_query(q)
     if not q_limpa:
         return "", ""
-
+    _termo_tavily = q_limpa or q
+    res_tavily = buscar_web_tavily(_termo_tavily, max_results=n)
+    if res_tavily:
+        return res_tavily, "Tavily"
     txt, fonte = _executar_fontes(q_limpa, n, limiar=0.30)
     if txt:
         return txt, fonte
