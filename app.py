@@ -1025,6 +1025,7 @@ def _call_gemini_auto(api_key, model, msgs, system=None):
 CALLERS = {
     "groq": _call_groq, "gemini": _call_gemini_auto, "claude": _call_claude,
     "huggingface": _call_huggingface, "github": _call_github, "deepinfra": _call_deepinfra, "openrouter": _call_openrouter,
+    "mistral": _call_mistral, "cloudflare": _call_cloudflare,
 }
 
 
