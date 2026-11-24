@@ -1037,9 +1037,23 @@ def _call_deepinfra(api_key, model, msgs, system=None):
 
 
 def _call_openrouter(api_key, model, msgs, system=None):
-    return _call_openai_compat(
-        "https://openrouter.ai/api/v1/chat/completions", api_key, model, msgs, system, {"X-Title": "Zeus 3.0"}
-    )
+    key = (api_key or _get_secret("OPENROUTER_API_KEY") or "").strip()
+    if not key:
+        return False, "chave OPENROUTER_API_KEY ausente"
+    try:
+        res = _call_openai_compat(
+            "https://openrouter.ai/api/v1/chat/completions",
+            key,
+            model or "openrouter/free",
+            msgs,
+            system,
+            {"X-Title": "Zeus 3.0"},
+        )
+        if isinstance(res, tuple) and len(res) == 2:
+            return res
+        return False, "resposta vazia ou inválida do OpenRouter"
+    except Exception as e:
+        return False, f"erro no OpenRouter: {e}"
 
 
 def _call_gemini_auto(api_key, model, msgs, system=None):
