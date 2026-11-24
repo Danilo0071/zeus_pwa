@@ -1273,7 +1273,6 @@ def zf_enviar_telegram(texto: str, target_chat_id: str = None, cabecalho: bool =
     )
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    # Divide mensagens longas (limite do Telegram é ~4096 caracteres)
     partes = [msg_final[i : i + 3900] for i in range(0, len(msg_final), 3900)] or [msg_final]
 
     try:
@@ -1283,7 +1282,6 @@ def zf_enviar_telegram(texto: str, target_chat_id: str = None, cabecalho: bool =
                 payload["parse_mode"] = "Markdown"
             r = requests.post(url, json=payload, timeout=30)
             if r.status_code != 200 or not r.json().get("ok"):
-                # Se falhar parse_mode Markdown por caracteres especiais, tenta texto puro
                 payload.pop("parse_mode", None)
                 r2 = requests.post(url, json=payload, timeout=30)
                 if r2.status_code != 200 or not r2.json().get("ok"):
@@ -1425,6 +1423,16 @@ def processar_prompt(prompt):
     if "add_message" in globals():
         add_message(sid, "assistant", resposta_final)
     return resposta_final
+
+
+# Disparo automático ao carregar/atualizar o app (a cada 15s)
+try:
+    if hasattr(st, "session_state"):
+        if "tg_last_poll" not in st.session_state or (time.time() - st.session_state["tg_last_poll"]) > 15:
+            st.session_state["tg_last_poll"] = time.time()
+            tg_processar_mensagens_pendentes()
+except Exception:
+    pass
   # === FALLBACK OBRIGATÓRIO: Google -> DuckDuckGo -> Wikipédia (sem IA ou B2) ===
     if not ok:
         ctx_web, fonte = "", ""
