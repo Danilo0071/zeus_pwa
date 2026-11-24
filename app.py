@@ -1193,7 +1193,9 @@ def processar_prompt(prompt):
 
     tem_chave_ia = any(_secret(k) for k in KEYS.values())
     if tem_chave_ia:
-        prompt_llm, fonte_web = enriquecer_com_web(prompt)
+        _prev_user = next((m["content"] for m in reversed(st.session_state.messages[:-1]) if m.get("role") == "user"), "")
+        _q_web = f"{_prev_user} {prompt}".strip() if (_prev_user and len(prompt.split()) <= 5) else prompt
+        prompt_llm, fonte_web = enriquecer_com_web(_q_web)
         ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
     else:
         fonte_web = ""
