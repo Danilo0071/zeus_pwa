@@ -1558,26 +1558,42 @@ def _search_google(q, n=5):
     linhas = []
     try:
         from googlesearch import search as google_search
-        for r in google_search(q, num_results=int(n or 5), lang="pt", region="br", advanced=True, sleep_interval=1, timeout=10):
-            if r.title and r.url:
-                linhas.append(f"- {r.title}: {getattr(r, 'description', '')} ({r.url})")
+        for r in google_search(
+            q,
+            num_results=int(n or 5),
+            lang="pt",
+            region="br",
+            advanced=True,
+            sleep_interval=0.5,
+            timeout=10,
+        ):
+            titulo = (getattr(r, "title", "") or "").strip()
+            url = (getattr(r, "url", "") or "").strip()
+            desc = (getattr(r, "description", "") or "").strip()
+            if titulo and url:
+                linhas.append(f"- {titulo}: {desc} ({url})")
     except Exception:
         pass
     return "\n".join(linhas)
 
 
 def _search_multi(q, n=5):
-    """Busca no Bing, DuckDuckGo e Yahoo simultaneamente usando a biblioteca ddgs."""
+    """Busca no Bing, DuckDuckGo e Yahoo usando ddgs."""
     linhas = []
     try:
         from ddgs import DDGS
         with DDGS() as ddgs:
-            resultados = ddgs.text(q, region='br-pt', safesearch='moderate', max_results=int(n or 5))
+            resultados = ddgs.text(
+                q,
+                region="br-pt",
+                safesearch="moderate",
+                max_results=int(n or 5),
+            )
             if resultados:
                 for r in resultados:
-                    titulo = r.get('title', '').strip()
-                    link = r.get('href', '').strip()
-                    corpo = r.get('body', '').strip()
+                    titulo = (r.get("title") or "").strip()
+                    link = (r.get("href") or "").strip()
+                    corpo = (r.get("body") or "").strip()
                     if titulo and link:
                         linhas.append(f"- {titulo}: {corpo} ({link})")
     except Exception:
@@ -1589,7 +1605,13 @@ def _search_wiki(q, n=4):
     try:
         r = requests.get(
             "https://pt.wikipedia.org/w/api.php",
-            params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": n},
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": q,
+                "format": "json",
+                "srlimit": int(n or 4),
+            },
             headers={"User-Agent": "ZeusBot/4.0 (https://streamlit.app)"},
             timeout=10,
         )
@@ -1617,7 +1639,9 @@ _FONTES_WEB = (
 )
 
 
-def _executar_fontes(q, n, limiar=0.30):
+def _executar_fontes(q, n, limiar=0.20):
+    coletados = []
+    fontes_usadas = []
     for nome, fn in _FONTES_WEB:
         try:
             txt = fn(q, n)
@@ -1626,34 +1650,41 @@ def _executar_fontes(q, n, limiar=0.30):
         txt = (txt or "").strip()
         if not txt:
             continue
-            
-        # Para os motores de busca grandes, a gente confia no resultado.
-        # Só usamos o filtro rígido para a Wikipédia.
-        if "Wikipédia" not in nome:
-            return txt, nome
-            
-        if _resultado_no_tema(q, txt, limiar=limiar):
-            return txt, nome
-    return "", ""
+
+        if "Wikipédia" in nome and "_resultado_no_tema" in globals():
+            try:
+                if not _resultado_no_tema(q, txt, limiar=limiar):
+                    continue
+            except Exception:
+                pass
+
+        coletados.append(f"[{nome}]\n{txt}")
+        fontes_usadas.append(nome)
+        if len("\n\n".join(coletados)) >= 1200:
+            break
+
+    return "\n\n".join(coletados), ", ".join(fontes_usadas)
 
 
 def web_search(q, n=5):
-    q_limpa = _limpar_query(q)
+    q_limpa = _limpar_query(q) if "_limpar_query" in globals() else (q or "").strip()
     if not q_limpa:
         return "", ""
-    _termo_tavily = q_limpa or q
-    res_tavily = buscar_web_tavily(_termo_tavily, max_results=n)
-    if res_tavily:
-        return res_tavily, "Tavily"
-    txt, fonte = _executar_fontes(q_limpa, n, limiar=0.30)
+
+    res_tavily = buscar_web_tavily(q_limpa, max_results=n)
+    if res_tavily and res_tavily.strip():
+        return res_tavily.strip(), "Tavily"
+
+    txt, fonte = _executar_fontes(q_limpa, n, limiar=0.20)
     if txt:
         return txt, fonte
 
-    q2 = _reformular_query(q_limpa)
-    if q2 and q2 != q_limpa:
-        txt, fonte = _executar_fontes(q2, n, limiar=0.22)
-        if txt:
-            return txt, fonte + " (re-busca)"
+    if "_reformular_query" in globals():
+        q2 = _reformular_query(q_limpa)
+        if q2 and q2 != q_limpa:
+            txt2, fonte2 = _executar_fontes(q2, n, limiar=0.15)
+            if txt2:
+                return txt2, f"{fonte2} (re-busca)"
 
     return "", ""
 
@@ -1665,10 +1696,20 @@ def precisa_web(prompt):
     if modo == "Sempre":
         return True
     low = (prompt or "").lower()
-    return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low)) or len(low.split()) <= 5
+    gatilhos = WEB_TRIGGERS if "WEB_TRIGGERS" in globals() else ()
+    return (
+        any(t in low for t in gatilhos)
+        or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low))
+        or len(low.split()) <= 5
+    )
+
 
 def buscar_web_tavily(query: str, max_results: int = 5) -> str:
-    api_key = st.secrets.get("TAVILY_API_KEY") or os.getenv("TAVILY_API_KEY")
+    api_key = (
+        (st.secrets.get("TAVILY_API_KEY") if hasattr(st, "secrets") else "")
+        or os.getenv("TAVILY_API_KEY")
+        or ""
+    ).strip()
     if not api_key:
         return ""
     try:
@@ -1679,7 +1720,7 @@ def buscar_web_tavily(query: str, max_results: int = 5) -> str:
                 "query": query,
                 "search_depth": "basic",
                 "include_answer": True,
-                "max_results": max_results,
+                "max_results": int(max_results or 5),
             },
             timeout=15,
         )
@@ -1689,53 +1730,46 @@ def buscar_web_tavily(query: str, max_results: int = 5) -> str:
         partes = []
         if data.get("answer"):
             partes.append(f"Resumo direto: {data['answer']}")
-        for item in data.get("results", []):
-            titulo = item.get("title", "")
-            url = item.get("url", "")
-            conteudo = item.get("content", "")
-            partes.append(f"- {titulo} ({url}): {conteudo}")
+        for item in data.get("results", []) or []:
+            titulo = (item.get("title") or "").strip()
+            url = (item.get("url") or "").strip()
+            conteudo = (item.get("content") or "").strip()
+            if titulo or conteudo:
+                partes.append(f"- {titulo} ({url}): {conteudo}")
         return "\n".join(partes)
     except Exception:
         return ""
-_REGRAS_ANTIALUCINACAO = (
-    "REGRAS OBRIGATÓRIAS DE VERACIDADE (PROIBIDO INVENTAR):\n"
-    "1. Responda EXCLUSIVAMENTE com base nos fatos presentes em [DADOS DA INTERNET].\n"
-    "2. É TERMINANTEMENTE PROIBIDO inventar números, preços, cotações, datas, placares, notícias, nomes ou links.\n"
-    "3. NÃO complete lacunas com suposições nem use conhecimento antigo como se fosse informação atual.\n"
-    "4. Só cite URLs que apareçam literalmente entre parênteses em [DADOS DA INTERNET].\n"
-    "5. Se [DADOS DA INTERNET] estiver vazio ou não responder diretamente à pergunta, diga EXATAMENTE: "
-    "\"Não encontrei informação confiável na busca web agora para responder isso.\" e encerre a resposta.\n"
+
+
+_REGRAS_WEB_LIVRE = (
+    "INSTRUÇÕES DE RESPOSTA:\n"
+    "1. Priorize os fatos presentes em [DADOS DA INTERNET] quando houver resultados relevantes.\n"
+    "2. Se [DADOS DA INTERNET] estiver vazio, incompleto ou não trouxer a resposta exata, responda livremente usando seu conhecimento geral (LLMs) de forma clara e útil, sem dizer que falhou ou travou.\n"
+    "3. Nunca invente URLs que não estejam no texto; se citar links, use apenas os que aparecerem.\n"
 )
 
 
 def enriquecer_com_web(prompt):
+    hoje = time.strftime("%d/%m/%Y")
     if not precisa_web(prompt):
-        return prompt, ""
+        return prompt, "llm_direto"
 
     ctx_web, fonte = web_search(prompt)
-    hoje = time.strftime("%d/%m/%Y")
-
     if not ctx_web:
         novo = (
-            f"[BUSCA WEB em {hoje}]\n"
-            "STATUS: FALHA_OU_SEM_RESULTADO_CONFIAVEL.\n"
-            "Nenhum resultado verificado e aderente ao tema foi encontrado na internet.\n"
-            "[FIM DA BUSCA]\n\n"
-            + _REGRAS_ANTIALUCINACAO +
-            "\nINSTRUÇÃO FINAL: Como a busca não retornou dados confiáveis, NÃO tente responder de memória, "
-            "NÃO chute valores/datas e NÃO crie links. Apenas informe ao usuário que não foi possível confirmar "
-            "essa informação na busca web no momento.\n"
-            "Pergunta do usuário: " + prompt
+            f"[CONTEXTO WEB em {hoje}: sem resultados diretos na busca]\n"
+            + _REGRAS_WEB_LIVRE
+            + "\nResponda à pergunta do usuário da melhor forma possível usando seu conhecimento.\n"
+            "Pergunta do usuário: " + (prompt or "")
         )
-        return novo, "sem resultado"
+        return novo, "fallback_llm"
 
     novo = (
         f"[DADOS DA INTERNET em {hoje}, via {fonte}]\n"
-        + ctx_web[:3500] +
-        "\n[FIM DOS DADOS]\n\n"
-        + _REGRAS_ANTIALUCINACAO +
-        "\nUse apenas os fatos acima e informe a fonte quando citar dados.\n"
-        "Pergunta do usuário: " + prompt
+        + ctx_web[:4500]
+        + "\n[FIM DOS DADOS]\n\n"
+        + _REGRAS_WEB_LIVRE
+        + "\nPergunta do usuário: " + (prompt or "")
     )
     return novo, fonte
 # ============================================================
