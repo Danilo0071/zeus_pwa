@@ -1207,36 +1207,174 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
             return True, text or "(resposta vazia)", prov, erros
         erros.append(f"{prov}: {_resumo(text)}")
     return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
-
 # ============================================================
 # ZEUS TELEGRAM REAL (Sem Teatro, 100% Autônomo para Danilo)
 # ============================================================
-def zf_enviar_telegram(texto: str) -> str:
-    token = st.secrets.get("TELEGRAM_BOT_TOKEN") or st.secrets.get("telegram", {}).get("token", "")
-    chat_id = st.secrets.get("TELEGRAM_CHAT_ID") or st.secrets.get("telegram", {}).get("chat_id", "")
-    
+
+def _tg_creds():
+    token = (
+        (st.secrets.get("TELEGRAM_BOT_TOKEN") if hasattr(st, "secrets") else "")
+        or (st.secrets.get("telegram", {}).get("token", "") if hasattr(st, "secrets") else "")
+        or os.getenv("TELEGRAM_BOT_TOKEN", "")
+    )
+    chat_id = (
+        (st.secrets.get("TELEGRAM_CHAT_ID") if hasattr(st, "secrets") else "")
+        or (st.secrets.get("telegram", {}).get("chat_id", "") if hasattr(st, "secrets") else "")
+        or os.getenv("TELEGRAM_CHAT_ID", "")
+    )
+    return str(token or "").strip(), str(chat_id or "").strip()
+
+
+def _tg_carregar_offset() -> int:
+    try:
+        if hasattr(st, "session_state") and "tg_last_update_id" in st.session_state:
+            return int(st.session_state["tg_last_update_id"] or 0)
+    except Exception:
+        pass
+    try:
+        if "b2_download_json" in globals():
+            dados = b2_download_json("zeus_tg_state.json")
+            if isinstance(dados, dict) and "last_update_id" in dados:
+                return int(dados["last_update_id"] or 0)
+    except Exception:
+        pass
+    return 0
+
+
+def _tg_salvar_offset(update_id: int) -> None:
+    val = int(update_id or 0)
+    try:
+        if hasattr(st, "session_state"):
+            st.session_state["tg_last_update_id"] = val
+    except Exception:
+        pass
+    try:
+        if "b2_upload_json" in globals():
+            b2_upload_json("zeus_tg_state.json", {"last_update_id": val, "atualizado_em": int(time.time())})
+    except Exception:
+        pass
+
+
+def zf_enviar_telegram(texto: str, target_chat_id: str = None, cabecalho: bool = True) -> str:
+    token, default_chat_id = _tg_creds()
+    chat_id = str(target_chat_id or default_chat_id or "").strip()
+
     if not token or not chat_id:
-        return "❌ ERRO CRÍTICO: Token do Telegram ou Chat ID não encontrados no secrets.toml."
-    
+        return "❌ ERRO CRÍTICO: Token do Telegram ou Chat ID não encontrados."
+
     texto = (texto or "").strip()
     if not texto:
         texto = "Teste de telemetria e protocolo de bunker acionado por Danilo."
-        
+
+    msg_final = (
+        f"🚨 [ZEUS - PROTOCOLO DE BUNKER] 🚨\n\nCriador: Danilo\n\n{texto}"
+        if cabecalho
+        else texto
+    )
+
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": f"🚨 *[ZEUS - PROTOCOLO DE BUNKER]* 🚨\n\nCriador: *Danilo*\n\n{texto}",
-        "parse_mode": "Markdown"
-    }
-    
+    # Divide mensagens longas (limite do Telegram é ~4096 caracteres)
+    partes = [msg_final[i : i + 3900] for i in range(0, len(msg_final), 3900)] or [msg_final]
+
     try:
-        r = requests.post(url, json=payload, timeout=30)
-        if r.status_code == 200 and r.json().get("ok"):
-            return "✅ SUCESSO REAL: Mensagem disparada diretamente nos servidores do Telegram para o Danilo!"
-        else:
-            return f"❌ FALHA NA API DO TELEGRAM (Status {r.status_code}): {r.text}"
+        for parte in partes:
+            payload = {"chat_id": chat_id, "text": parte}
+            if cabecalho:
+                payload["parse_mode"] = "Markdown"
+            r = requests.post(url, json=payload, timeout=30)
+            if r.status_code != 200 or not r.json().get("ok"):
+                # Se falhar parse_mode Markdown por caracteres especiais, tenta texto puro
+                payload.pop("parse_mode", None)
+                r2 = requests.post(url, json=payload, timeout=30)
+                if r2.status_code != 200 or not r2.json().get("ok"):
+                    return f"❌ FALHA NA API DO TELEGRAM (Status {r2.status_code}): {r2.text}"
+        return "✅ SUCESSO REAL: Mensagem disparada diretamente nos servidores do Telegram para o Danilo!"
     except Exception as e:
         return f"❌ EXCEÇÃO DE REDE NO TELEGRAM: {str(e)}"
+
+
+def _responder_mensagem_telegram(texto_usuario: str, remetente_chat_id: str) -> str:
+    sid = "telegram_autonomo"
+    escolhido = "groq"
+    try:
+        if hasattr(st, "session_state"):
+            escolhido = st.session_state.get("model_sel", "groq")
+    except Exception:
+        pass
+
+    try:
+        if "add_message" in globals():
+            add_message(sid, "user", texto_usuario)
+    except Exception:
+        pass
+
+    prompt_llm, _ = enriquecer_com_web(texto_usuario)
+    ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
+
+    if ok and (response or "").strip():
+        resposta_final = response.strip()
+    else:
+        resposta_final = "Recebi sua mensagem no Telegram, mas os modelos estão indisponíveis no momento. Tente novamente em instantes."
+
+    try:
+        if "add_message" in globals():
+            add_message(sid, "assistant", resposta_final)
+    except Exception:
+        pass
+
+    zf_enviar_telegram(resposta_final, target_chat_id=remetente_chat_id, cabecalho=False)
+    return resposta_final
+
+
+def tg_processar_mensagens_pendentes(limite: int = 10) -> dict:
+    """Lê mensagens novas do Telegram via getUpdates e responde cada uma automaticamente."""
+    token, allowed_chat_id = _tg_creds()
+    if not token:
+        return {"ok": False, "erro": "TELEGRAM_BOT_TOKEN ausente", "processadas": 0}
+
+    offset = _tg_carregar_offset()
+    params = {"timeout": 5, "limit": int(limite or 10)}
+    if offset > 0:
+        params["offset"] = offset + 1
+
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    try:
+        r = requests.get(url, params=params, timeout=20)
+        if r.status_code != 200:
+            return {"ok": False, "erro": f"HTTP {r.status_code}: {r.text}", "processadas": 0}
+        data = r.json()
+        if not data.get("ok"):
+            return {"ok": False, "erro": str(data), "processadas": 0}
+    except Exception as e:
+        return {"ok": False, "erro": str(e), "processadas": 0}
+
+    updates = data.get("result") or []
+    maior_id = offset
+    processadas = 0
+
+    for upd in updates:
+        uid = int(upd.get("update_id") or 0)
+        if uid > maior_id:
+            maior_id = uid
+
+        msg = upd.get("message") or upd.get("edited_message") or {}
+        texto = (msg.get("text") or "").strip()
+        chat = msg.get("chat") or {}
+        chat_id = str(chat.get("id") or "").strip()
+
+        if not texto or not chat_id:
+            continue
+        if allowed_chat_id and chat_id != allowed_chat_id:
+            continue
+
+        _responder_mensagem_telegram(texto, chat_id)
+        processadas += 1
+
+    if maior_id > offset:
+        _tg_salvar_offset(maior_id)
+
+    return {"ok": True, "processadas": processadas, "last_update_id": maior_id}
+
 
 def _rt_comando_telegram(texto):
     t = re.sub(
@@ -1248,9 +1386,10 @@ def _rt_comando_telegram(texto):
         t = "Alerta de telemetria e bunker disparado pelo criador Danilo."
     return zf_enviar_telegram(t)
 
+
 def interceptar_comando_autonomo_telegram(texto):
-    low = texto.lower()
-    if "telegram" in low or "tg" in low or "bunker" in low or "telemetria" in low:
+    low = (texto or "").lower()
+    if any(k in low for k in ("telegram", "tg", "bunker", "telemetria")):
         return True, _rt_comando_telegram(texto)
     return False, ""
 
@@ -1260,24 +1399,32 @@ def processar_prompt(prompt):
     if tratado:
         sid = st.session_state.session_id
         st.session_state.messages.append({"role": "user", "content": prompt})
-        add_message(sid, "user", prompt)
+        if "add_message" in globals():
+            add_message(sid, "user", prompt)
         st.session_state.messages.append({"role": "assistant", "content": resposta})
-        add_message(sid, "assistant", resposta)
+        if "add_message" in globals():
+            add_message(sid, "assistant", resposta)
         st.session_state.last_info = "⚡ Comando autônomo executado com sucesso"
         return resposta
-    """Sempre tenta responder. Se as IAs falharem, busca na web (Google primeiro).
-    Nunca devolve mensagem de 'nenhum modelo respondeu'."""
+
     sid = st.session_state.session_id
     escolhido = st.session_state.get("model_sel", "groq")
     st.session_state.messages.append({"role": "user", "content": prompt})
+    if "add_message" in globals():
+        add_message(sid, "user", prompt)
 
-    tem_chave_ia = any(_secret(k) for k in KEYS.values())
+    tem_chave_ia = any(_secret(k) for k in KEYS.values()) if "KEYS" in globals() and "_secret" in globals() else True
     if tem_chave_ia:
-        prompt_llm, fonte_web = enriquecer_com_web(prompt)
+        prompt_llm, _ = enriquecer_com_web(prompt)
         ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
+        resposta_final = (response or "").strip() if ok else "Não foi possível obter resposta das IAs no momento."
     else:
-        fonte_web = ""
-        ok, response, prov, erros = False, "", None, ["sem chaves configuradas"]
+        resposta_final = "Nenhuma chave de IA configurada."
+
+    st.session_state.messages.append({"role": "assistant", "content": resposta_final})
+    if "add_message" in globals():
+        add_message(sid, "assistant", resposta_final)
+    return resposta_final
   # === FALLBACK OBRIGATÓRIO: Google -> DuckDuckGo -> Wikipédia (sem IA ou B2) ===
     if not ok:
         ctx_web, fonte = "", ""
