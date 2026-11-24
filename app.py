@@ -817,8 +817,7 @@ SYS_PROMPT = (
     "Você pode enviar mensagens no Telegram e e-mails quando o usuário pedir. "
     "Responda em português. Seja objetivo (respostas serão faladas em voz alta quando possível)."
 )
-
-PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra", "openrouter"]
+PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra", "openrouter", "mistral", "cloudflare"]
 KEYS = {
     "groq": "GROQ_API_KEY",
     "gemini": "GEMINI_API_KEY",
@@ -827,6 +826,9 @@ KEYS = {
     "github": "GITHUB_API_KEY",
     "deepinfra": "DEEPINFRA_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "cloudflare": "CLOUDFLARE_API_KEY",
+    "cloudflare_account": "CLOUDFLARE_ACCOUNT_ID",
 }
 MODEL_SECRET = {
     "groq": "GROQ_MODEL",
@@ -836,6 +838,8 @@ MODEL_SECRET = {
     "github": "GITHUB_MODEL",
     "deepinfra": "DEEPINFRA_MODEL",
     "openrouter": "OPENROUTER_MODEL",
+    "mistral": "MISTRAL_MODEL",
+    "cloudflare": "CLOUDFLARE_MODEL",
 }
 MODELS = {
     "groq": ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"],
@@ -850,9 +854,10 @@ MODELS = {
         "deepseek-ai/DeepSeek-V3",
     ],
     "openrouter": ["google/gemini-2.5-flash", "openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"],
+    "mistral": ["mistral-small-latest", "open-mistral-nemo"],
+    "cloudflare": ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"],
 }
 TRANSIENT = (500, 502, 503, 504, 529)
-
 
 def _normalize(msgs):
     out = []
