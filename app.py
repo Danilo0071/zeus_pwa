@@ -1148,7 +1148,7 @@ def processar_prompt(prompt):
             except Exception as e_web:
                 ctx_web = f"[erro busca web: {type(e_web)._name_}: {e_web}]"
                 fonte = "Diagnóstico"
-          if not ok and ctx_web and ctx_web.strip():
+        if not ok and ctx_web and ctx_web.strip():
         response = (
             "🌐 Resultado da busca na web:\n\n"
             + ctx_web[:3800]
