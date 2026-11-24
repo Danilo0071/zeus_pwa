@@ -1283,8 +1283,12 @@ def listar_vozes_edge():
 
 
 # ============================================================
-# BUSCA NA INTERNET — v3.4 (busca real, organizada e anti-invenção)
+# BUSCA NA INTERNET — v3.6 (Google + Bing + DuckDuckGo + Wiki)
 # ============================================================
+import time
+import re
+import requests
+
 WEB_TRIGGERS = (
     "hoje", "agora", "atual", "atualmente", "últimas", "ultimas", "notícia", "noticia", "recente",
     "pesquise", "pesquisa", "busque", "procure", "google", "internet", "na web", "cotação", "cotacao",
@@ -1378,32 +1382,90 @@ def _reformular_query(q):
 
 # ------------------- buscadores -------------------
 
-def _search_duckduckgo(q, n=5):
-    """Busca real na internet usando a biblioteca duckduckgo_search."""
+def _search_google(q, n=5):
+    """Busca real no Google usando googlesearch-python (gratuito e sem chave)."""
+    linhas = []
     try:
-        from duckduckgo_search import DDGS
-        linhas = []
-        with DDGS() as ddgs:
-            resultados = ddgs.text(q, region='br-pt', safesearch='moderate', max_results=int(n or 5))
-            if resultados:
-                for r in resultados:
-                    titulo = r.get('title', '').strip()
-                    link = r.get('href', '').strip()
-                    corpo = r.get('body', '').strip()
-                    if titulo and link:
-                        linhas.append(f"- {titulo}: {corpo} ({link})")
-        return "\n".join(linhas)
+        from googlesearch import search as google_search
+        
+        # Busca os resultados do Google
+        resultados = google_search(
+            q, 
+            num_results=int(n or 5), 
+            lang="pt", 
+            region="br",
+            advanced=True, 
+            sleep_interval=1, 
+            timeout=10
+        )
+        
+        for r in resultados:
+            titulo = (getattr(r, "title", "") or "").strip()
+            link = (getattr(r, "url", "") or "").strip()
+            desc = (getattr(r, "description", "") or "").strip()
+            
+            if titulo and link:
+                linhas.append(f"- {titulo}: {desc} ({link})")
     except Exception:
-        return ""
+        pass
+    return "\n".join(linhas)
+
+
+def _search_bing(q, n=5):
+    """Busca real no Bing (raspagem leve, sem precisar de chave)."""
+    linhas = []
+    try:
+        import html
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+        r = requests.get(f"https://www.bing.com/search?q={q}&setlang=pt-br", headers=headers, timeout=10)
+        if r.status_code == 200:
+            blocos = re.findall(r'<li class="b_algo".*?</li>', r.text, re.DOTALL)
+            for bloco in blocos[:int(n or 5)]:
+                titulo_match = re.search(r'<h2.?>(.?)</h2>', bloco, re.DOTALL)
+                link_match = re.search(r'href="(http.*?)"', bloco)
+                snip_match = re.search(r'<p>(.*?)</p>', bloco, re.DOTALL)
+                
+                if titulo_match and link_match:
+                    titulo = html.unescape(re.sub(r'<.*?>', '', titulo_match.group(1))).strip()
+                    link = link_match.group(1)
+                    snip = html.unescape(re.sub(r'<.*?>', '', snip_match.group(1))).strip() if snip_match else ""
+                    linhas.append(f"- {titulo}: {snip} ({link})")
+    except Exception:
+        pass
+    return "\n".join(linhas)
+
+
+def _search_duckduckgo(q, n=5):
+    """Busca real no DuckDuckGo via API pública."""
+    linhas = []
+    try:
+        r = requests.get(
+            "https://api.duckduckgo.com/",
+            params={"q": q, "format": "json", "no_html": 1, "skip_disambig": 1},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            timeout=10
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("AbstractText"):
+                linhas.append(f"- {data.get('Heading', q)}: {data.get('AbstractText')} ({data.get('AbstractURL', '')})")
+            
+            for topic in data.get("RelatedTopics", [])[:int(n or 5)]:
+                if "Text" in topic and "FirstURL" in topic:
+                    linhas.append(f"- {topic['Text']} ({topic['FirstURL']})")
+    except Exception:
+        pass
+    return "\n".join(linhas)
 
 
 def _search_wiki(q, n=4):
+    """Busca na Wikipédia."""
     try:
         r = requests.get(
             "https://pt.wikipedia.org/w/api.php",
             params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": n},
-            headers={"User-Agent": "ZeusBot/3.4 (https://streamlit.app)"},
-            timeout=20,
+            headers={"User-Agent": "ZeusBot/3.6 (https://streamlit.app)"},
+            timeout=15,
         )
         if r.status_code != 200:
             return ""
@@ -1423,6 +1485,8 @@ def _search_wiki(q, n=4):
 # ------------------- orquestração -------------------
 
 _FONTES_WEB = (
+    ("Google", _search_google),
+    ("Bing", _search_bing),
     ("DuckDuckGo", _search_duckduckgo),
     ("Wikipédia", _search_wiki),
 )
