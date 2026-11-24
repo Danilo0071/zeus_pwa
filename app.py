@@ -949,7 +949,7 @@ def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=No
             except Exception:
                 return 200, (r.text or "").strip()
             return 200, (data["choices"][0]["message"].get("content") or "").strip()
-        return r.status_code, r.text
+            return r.status_code, r.text
 
 
 def _call_huggingface(api_key, model, msgs, system=None):
