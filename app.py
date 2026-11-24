@@ -1038,46 +1038,10 @@ def _call_deepinfra(api_key, model, msgs, system=None):
     return _call_openai_compat(base + "/chat/completions", api_key, model, msgs, system)
 
 
-import requests
-
-def _call_mistral(api_key, model, msgs, system=None):
-    key = (api_key or _secret("MISTRAL_API_KEY") or "").strip()
-    if not key:
-        return False, "chave MISTRAL_API_KEY ausente"
-
-    payload_msgs = []
-    if system:
-        payload_msgs.append({"role": "system", "content": system})
-    payload_msgs.extend(msgs)
-
-    try:
-        resp = requests.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model or "mistral-small-latest",
-                "messages": payload_msgs,
-            },
-            timeout=30,
-        )
-        data = resp.json()
-        if resp.status_code != 200:
-            msg = data.get("message") or data.get("error") or resp.text
-            return False, f"HTTP {resp.status_code}: {msg}"
-
-        texto = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-        )
-        if not texto:
-            return False, "API retornou conteúdo vazio"
-        return True, texto
-    except Exception as e:
-        return False, f"falha na requisição: {e}"
+def _call_openrouter(api_key, model, msgs, system=None):
+    return _call_openai_compat(
+        "https://openrouter.ai/api/v1/chat/completions", api_key, model, msgs, system, {"X-Title": "Zeus 3.0"}
+    )
 
 
 def _call_gemini_auto(api_key, model, msgs, system=None):
