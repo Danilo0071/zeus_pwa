@@ -1584,7 +1584,36 @@ def precisa_web(prompt):
     low = (prompt or "").lower()
     return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low))
 
-
+def buscar_web_tavily(query: str, max_results: int = 5) -> str:
+    api_key = st.secrets.get("TAVILY_API_KEY") or os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        return ""
+    try:
+        resp = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": api_key,
+                "query": query,
+                "search_depth": "basic",
+                "include_answer": True,
+                "max_results": max_results,
+            },
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return ""
+        data = resp.json()
+        partes = []
+        if data.get("answer"):
+            partes.append(f"Resumo direto: {data['answer']}")
+        for item in data.get("results", []):
+            titulo = item.get("title", "")
+            url = item.get("url", "")
+            conteudo = item.get("content", "")
+            partes.append(f"- {titulo} ({url}): {conteudo}")
+        return "\n".join(partes)
+    except Exception:
+        return ""
 _REGRAS_ANTIALUCINACAO = (
     "REGRAS OBRIGATÓRIAS DE VERACIDADE (PROIBIDO INVENTAR):\n"
     "1. Responda EXCLUSIVAMENTE com base nos fatos presentes em [DADOS DA INTERNET].\n"
