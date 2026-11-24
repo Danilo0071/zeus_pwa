@@ -1283,7 +1283,7 @@ def listar_vozes_edge():
 
 
 # ============================================================
-# BUSCA NA INTERNET — v3.4 (direta, sem loop e sem chave de IA)
+# BUSCA NA INTERNET — v3.4 (busca real, organizada e anti-invenção)
 # ============================================================
 WEB_TRIGGERS = (
     "hoje", "agora", "atual", "atualmente", "últimas", "ultimas", "notícia", "noticia", "recente",
@@ -1315,13 +1315,15 @@ _RE_EMOJI = re.compile(
     "[" "\U0001F300-\U0001FAFF" "\U00002600-\U000027BF" "\U0001F1E6-\U0001F1FF" "]+",
     flags=re.UNICODE,
 )
-_DDG_CACHE = {}
 
 
 def _limpar_query(texto, max_len=160):
+    """Limpa a query para a busca: remove saudações, comandos, URLs, emojis e ruído."""
     if not texto:
         return ""
-    q = _RE_EMOJI.sub(" ", _RE_URL.sub(" ", str(texto)))
+    q = str(texto)
+    q = _RE_URL.sub(" ", q)
+    q = _RE_EMOJI.sub(" ", q)
     q = re.sub(r"\s+", " ", q).strip()
     low = q.lower()
     mudou = True
@@ -1333,28 +1335,32 @@ def _limpar_query(texto, max_len=160):
                 low = q.lower()
                 mudou = True
     tokens = [t for t in q.split() if t.lower().strip(".,;:!?") not in _STOP_PALAVRAS]
-    return (" ".join(tokens).strip(" ,.;:!?-") or q)[:max_len]
+    q = " ".join(tokens).strip(" ,.;:!?-")
+    return q[:max_len]
 
 
 def _tokens_relevantes(texto, min_len=3):
+    """Extrai tokens significativos para validar aderência entre query e resultado."""
     if not texto:
         return set()
     t = re.sub(r"[^\wÀ-ÿ\s]", " ", str(texto).lower())
     return {w for w in t.split() if len(w) >= min_len and w not in _STOP_PALAVRAS}
 
 
-def _resultado_no_tema(query_limpa, resultado, limiar=0.15):
+def _resultado_no_tema(query_limpa, resultado, limiar=0.30):
+    """Valida se o resultado realmente trata do assunto pesquisado (bloqueia lixo aleatório)."""
     q_tokens = _tokens_relevantes(query_limpa)
     r_tokens = _tokens_relevantes(resultado)
-    if not q_tokens:
-        return True
-    if not r_tokens:
+    if not q_tokens or not r_tokens:
         return False
     inter = q_tokens & r_tokens
-    return len(inter) >= 1 or (len(inter) / len(q_tokens)) >= limiar
+    if len(q_tokens) == 1:
+        return len(inter) == 1
+    return (len(inter) / len(q_tokens)) >= limiar and len(inter) >= 2
 
 
 def _reformular_query(q):
+    """Segunda tentativa: extrai palavras-chave essenciais e adiciona o ano atual se necessário."""
     if not q:
         return ""
     ruido = {
@@ -1363,124 +1369,32 @@ def _reformular_query(q):
         "é", "eh", "foi", "será", "sera", "está", "esta", "tem", "há", "ha", "hoje", "agora",
     }
     toks = [t for t in q.split() if t.lower().strip(".,;:!?") not in ruido]
-    base = (" ".join(toks) or q).strip()[:110]
+    base = " ".join(toks).strip()[:110]
     if base and not re.search(r"\b20\d{2}\b", base):
-        return f"{base} {time.strftime('%Y')}"[:120]
+        ano = time.strftime("%Y")
+        return f"{base} {ano}"[:120]
     return base
 
 
-def _search_google_cse(q, n=5):
-    key, cx = _secret("GOOGLE_API_KEY"), _secret("GOOGLE_CSE_ID")
-    if not (key and cx):
-        return ""
+# ------------------- buscadores -------------------
+
+def _search_duckduckgo(q, n=5):
+    """Busca real na internet usando a biblioteca duckduckgo_search."""
     try:
-        r = requests.get(
-            "https://www.googleapis.com/customsearch/v1",
-            params={"key": key, "cx": cx, "q": q, "num": n, "hl": "pt", "gl": "br"},
-            timeout=15,
-        )
-        if r.status_code != 200:
-            return ""
-        linhas = [
-            f"- {(i.get('title') or '').strip()}: {(i.get('snippet') or '').strip()} ({(i.get('link') or '').strip()})"
-            for i in r.json().get("items", [])
-            if (i.get("title") or "").strip()
-        ]
+        from duckduckgo_search import DDGS
+        linhas = []
+        with DDGS() as ddgs:
+            resultados = ddgs.text(q, region='br-pt', safesearch='moderate', max_results=int(n or 5))
+            if resultados:
+                for r in resultados:
+                    titulo = r.get('title', '').strip()
+                    link = r.get('href', '').strip()
+                    corpo = r.get('body', '').strip()
+                    if titulo and link:
+                        linhas.append(f"- {titulo}: {corpo} ({link})")
         return "\n".join(linhas)
     except Exception:
         return ""
-
-
-def _search_google_html(q, n=5):
-    try:
-        r = requests.get(
-            "https://www.google.com/search",
-            params={"q": q, "hl": "pt-BR", "gl": "BR", "num": n},
-            headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"},
-            timeout=10,
-        )
-        if r.status_code != 200 or not r.text:
-            return ""
-        trechos = re.findall(r'<div class="BNeawe[^"]">(.?)</div>', r.text, re.S)
-        limpos = [
-            html.unescape(re.sub(r"<[^>]+>", "", t)).strip()
-            for t in trechos
-            if len(re.sub(r"<[^>]+>", "", t).strip()) > 20
-        ]
-        return "\n".join(f"- {x}" for x in limpos[:n])
-    except Exception:
-        return ""
-
-
-def _search_gemini_google(q):
-    api_key = _secret("GEMINI_API_KEY")
-    if not api_key:
-        return ""
-    hoje = time.strftime("%d/%m/%Y")
-    modelos = [m for m in [_secret("GEMINI_SEARCH_MODEL")] if m] + ["gemini-2.5-flash", "gemini-flash-latest"]
-    for model in modelos:
-        try:
-            r = requests.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-                json={
-                    "contents": [{"role": "user", "parts": [{
-                        "text": (
-                            f"Data de hoje: {hoje}. Pesquise no Google e responda em português SOMENTE com "
-                            "fatos reais encontrados na busca (datas, números e fontes). "
-                            "Se não houver dados confiáveis, responda EXATAMENTE: SEM_DADOS_CONFIAVEIS. Tema: " + q
-                        )
-                    }]}],
-                    "tools": [{"google_search": {}}],
-                },
-                timeout=35,
-            )
-            if r.status_code != 200:
-                continue
-            cand = r.json().get("candidates", [{}])[0]
-            texto = "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", [])).strip()
-            if not texto or "SEM_DADOS_CONFIAVEIS" in texto:
-                continue
-            fontes = [
-                f"{c['web']['title']} ({c['web']['uri']})" if c.get("web", {}).get("uri") else c["web"]["title"]
-                for c in cand.get("groundingMetadata", {}).get("groundingChunks", [])
-                if c.get("web", {}).get("title")
-            ]
-            return texto + ("\nFontes verificadas: " + "; ".join(fontes[:5]) if fontes else "")
-        except Exception:
-            continue
-    return ""
-
-
-def _search_ddg(q, n=5):
-    q_clean = (q or "").strip()
-    if not q_clean:
-        return ""
-    if q_clean in _DDG_CACHE:
-        return _DDG_CACHE[q_clean]
-
-    linhas = []
-    try:
-        r = requests.post(
-            "https://html.duckduckgo.com/html/",
-            data={"q": q_clean},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=10,
-        )
-        if r.status_code == 200 and r.text:
-            links = re.findall(r'<a[^>]class="result__a"[^>]*href="([^"]+)"[^>]>(.*?)</a>', r.text, re.S)
-            snips = re.findall(r'<a[^>]class="result__snippet"[^>]>(.*?)</a>', r.text, re.S)
-            for i, (href, tit) in enumerate(links[:min(int(n or 5), 5)]):
-                t = re.sub(r"<.*?>", "", html.unescape(tit)).strip()
-                s = re.sub(r"<.*?>", "", html.unescape(snips[i])).strip() if i < len(snips) else ""
-                if t:
-                    linhas.append(f"- {t}: {s} ({href})")
-    except Exception:
-        pass
-
-    res_final = "\n".join(linhas).strip()
-    _DDG_CACHE[q_clean] = res_final
-    return res_final
 
 
 def _search_wiki(q, n=4):
@@ -1489,7 +1403,7 @@ def _search_wiki(q, n=4):
             "https://pt.wikipedia.org/w/api.php",
             params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": n},
             headers={"User-Agent": "ZeusBot/3.4 (https://streamlit.app)"},
-            timeout=15,
+            timeout=20,
         )
         if r.status_code != 200:
             return ""
@@ -1506,19 +1420,19 @@ def _search_wiki(q, n=4):
         return ""
 
 
+# ------------------- orquestração -------------------
+
 _FONTES_WEB = (
-    ("Google CSE", _search_google_cse),
-    ("Google", _search_google_html),
-    ("Google (Gemini)", _search_gemini_google),
-    ("DuckDuckGo", _search_ddg),
+    ("DuckDuckGo", _search_duckduckgo),
     ("Wikipédia", _search_wiki),
 )
 
 
-def _executar_fontes(q, n, limiar=0.15):
+def _executar_fontes(q, n, limiar=0.30):
+    """Roda as fontes na ordem e só aceita resultados que passem no filtro de aderência ao tema."""
     for nome, fn in _FONTES_WEB:
         try:
-            txt = fn(q) if nome == "Google (Gemini)" else fn(q, n)
+            txt = fn(q, n)
         except Exception:
             txt = ""
         txt = (txt or "").strip()
@@ -1526,49 +1440,33 @@ def _executar_fontes(q, n, limiar=0.15):
             continue
         if _resultado_no_tema(q, txt, limiar=limiar):
             return txt, nome
-    # Fallback sem filtro caso as fontes retornem algo útil com termos diferentes
-    for nome, fn in _FONTES_WEB:
-        try:
-            txt = (fn(q) if nome == "Google (Gemini)" else fn(q, n) or "").strip()
-            if txt:
-                return txt, nome
-        except Exception:
-            continue
     return "", ""
 
 
 def web_search(q, n=5):
-    q_limpa = _limpar_query(q) or (q or "").strip()[:160]
+    """
+    Busca web inteligente:
+      1) limpa a query;
+      2) 1ª rodada exigindo aderência estrita ao tema;
+      3) se nada relevante -> reformula (palavras-chave essenciais + ano) e faz 2ª rodada validando tema;
+      4) se ainda falhar -> retorna ("", "") para acionar bloqueio anti-invenção.
+    """
+    q_limpa = _limpar_query(q)
     if not q_limpa:
         return "", ""
 
-    txt, fonte = _executar_fontes(q_limpa, n, limiar=0.15)
+    # 1ª tentativa: aderência estrita
+    txt, fonte = _executar_fontes(q_limpa, n, limiar=0.30)
     if txt:
         return txt, fonte
 
+    # 2ª tentativa (re-busca): query enxuta + ano atual, mantendo validação de tema
     q2 = _reformular_query(q_limpa)
     if q2 and q2 != q_limpa:
-        txt, fonte = _executar_fontes(q2, n, limiar=0.10)
+        txt, fonte = _executar_fontes(q2, n, limiar=0.22)
         if txt:
             return txt, fonte + " (re-busca)"
 
-    return "", ""
-
-
-def buscar_web_direto(prompt, n=5):
-    """Chama a busca web diretamente (ideal quando não há chave de IA configurada)."""
-    txt, fonte = web_search(prompt, n=n)
-    if txt:
-        return txt, fonte
-    # Última tentativa direta na Wikipédia e DuckDuckGo com o texto bruto
-    raw = (prompt or "").strip()[:140]
-    for fn, nome in ((_search_ddg, "DuckDuckGo"), (_search_wiki, "Wikipédia")):
-        try:
-            out = (fn(raw, n=n) or "").strip()
-            if out:
-                return out, nome
-        except Exception:
-            continue
     return "", ""
 
 
@@ -1594,12 +1492,20 @@ _REGRAS_ANTIALUCINACAO = (
 
 
 def enriquecer_com_web(prompt):
+    """
+    Enriquece o prompt com dados da internet aplicando:
+      - limpeza da query;
+      - loop de 2ª tentativa com validação de tema (sem aceitar fallback aleatório);
+      - bloqueio rígido de alucinação quando a busca falha.
+    Retorna (prompt_final, fonte).
+    """
     if not precisa_web(prompt):
         return prompt, ""
 
     ctx_web, fonte = web_search(prompt)
     hoje = time.strftime("%d/%m/%Y")
 
+    # ---- CASO 1: busca falhou -> trava anti-invenção explícita ----
     if not ctx_web:
         novo = (
             f"[BUSCA WEB em {hoje}]\n"
@@ -1614,6 +1520,7 @@ def enriquecer_com_web(prompt):
         )
         return novo, "sem resultado"
 
+    # ---- CASO 2: busca OK -> injeta dados + trava anti-invenção ----
     novo = (
         f"[DADOS DA INTERNET em {hoje}, via {fonte}]\n"
         + ctx_web[:3500] +
@@ -1623,7 +1530,6 @@ def enriquecer_com_web(prompt):
         "Pergunta do usuário: " + prompt
     )
     return novo, fonte
-
 # ============================================================
 # GERAÇÃO DE MÍDIA
 # ============================================================
