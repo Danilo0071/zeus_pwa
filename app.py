@@ -1099,16 +1099,55 @@ def processar_prompt(prompt):
     else:
         fonte_web = ""
         ok, response, prov, erros = False, "", None, ["sem chaves configuradas"]
-   # === FALLBACK OBRIGATÓRIO: busca direta na web sem depender de IA ou B2 ===
+  # === FALLBACK OBRIGATÓRIO: Google -> DuckDuckGo -> Wikipédia (sem IA ou B2) ===
     if not ok:
         ctx_web, fonte = "", ""
+        q = urllib.parse.quote_plus(prompt[:200])
+        hdrs = {"User-Agent": "Mozilla/5.0"}
+
+        # 1. Google
         try:
-            ctx_web = _search_ddg(prompt[:300], n=5)
-            if ctx_web and ctx_web.strip():
-                fonte = "Web aberta (DuckDuckGo / Wikipédia)"
-        except Exception as e_web:
-            ctx_web = f"[debug busca web: {type(e_web)._name_}: {e_web}]"
-            fonte = "Diagnóstico"
+            g_url = f"https://www.google.com/search?q={q}&hl=pt-BR&gl=BR&num=5"
+            with urllib.request.urlopen(urllib.request.Request(g_url, headers=hdrs), timeout=7) as gr:
+                g_html = gr.read().decode("utf-8", errors="ignore")
+            g_trechos = re.findall(r'<div class="BNeawe[^"]">(.?)</div>', g_html, re.S)
+            g_limpos = [html.unescape(re.sub(r"<[^>]+>", "", t)).strip() for t in g_trechos if len(re.sub(r"<[^>]+>", "", t).strip()) > 25]
+            if g_limpos:
+                ctx_web = "\n".join(f"- {x}" for x in g_limpos[:5])
+                fonte = "Google Web"
+        except Exception:
+            ctx_web, fonte = "", ""
+
+        # 2. DuckDuckGo HTML
+        if not ctx_web.strip():
+            try:
+                d_url = f"https://html.duckduckgo.com/html/?q={q}"
+                with urllib.request.urlopen(urllib.request.Request(d_url, headers=hdrs), timeout=7) as dr:
+                    d_html = dr.read().decode("utf-8", errors="ignore")
+                d_trechos = re.findall(r'class="result__snippet[^"]"[^>]>(.*?)</(?:a|div)>', d_html, re.S)
+                d_limpos = [html.unescape(re.sub(r"<[^>]+>", "", t)).strip() for t in d_trechos if t.strip()]
+                if d_limpos:
+                    ctx_web = "\n".join(f"- {x}" for x in d_limpos[:5])
+                    fonte = "DuckDuckGo Web"
+            except Exception:
+                ctx_web, fonte = "", ""
+
+        # 3. Wikipédia
+        if not ctx_web.strip():
+            try:
+                w_url = f"https://pt.wikipedia.org/w/api.php?action=query&list=search&srsearch={q}&format=json&utf8=1"
+                with urllib.request.urlopen(urllib.request.Request(w_url, headers=hdrs), timeout=7) as wr:
+                    w_data = json.loads(wr.read().decode("utf-8", errors="ignore"))
+                hits = w_data.get("query", {}).get("search", [])
+                if hits:
+                    ctx_web = "\n".join(
+                        f"- {html.unescape(h.get('title',''))}: {html.unescape(re.sub(r'<[^>]+>', '', h.get('snippet','')))}"
+                        for h in hits[:4]
+                    )
+                    fonte = "Wikipédia"
+            except Exception as e_web:
+                ctx_web = f"[erro busca web: {type(e_web)._name_}: {e_web}]"
+                fonte = "Diagnóstico"
         if ctx_web and ctx_web.strip():
             response = (
                 "🌐 As IAs não responderam. Busquei na internet por conta própria:\n\n"
