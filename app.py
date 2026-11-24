@@ -943,9 +943,13 @@ def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=No
         json={"model": model, "messages": [{"role": "system", "content": system or SYS_PROMPT}] + msgs, "temperature": 0.4, "max_tokens": 700},
         timeout=60,
     )
-    if r.status_code == 200:
-        return 200, (r.json()["choices"][0]["message"].get("content") or "").strip()
-    return r.status_code, r.text
+   if r.status_code == 200:
+            try:
+                data = r.json()
+            except Exception:
+                return 200, (r.text or "").strip()
+            return 200, (data["choices"][0]["message"].get("content") or "").strip()
+        return r.status_code, r.text
 
 
 def _call_huggingface(api_key, model, msgs, system=None):
