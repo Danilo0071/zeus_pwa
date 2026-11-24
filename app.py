@@ -1099,16 +1099,16 @@ def processar_prompt(prompt):
     else:
         fonte_web = ""
         ok, response, prov, erros = False, "", None, ["sem chaves configuradas"]
-   # === FALLBACK OBRIGATÓRIO: busca aberta rápida sem travar nas IAs ===
+   # === FALLBACK OBRIGATÓRIO: busca direta na web sem depender de IA ou B2 ===
     if not ok:
         ctx_web, fonte = "", ""
         try:
             ctx_web = _search_ddg(prompt[:300], n=5)
             if ctx_web and ctx_web.strip():
-                fonte = "Web aberta (Google / DuckDuckGo / Wikipédia)"
-        except Exception:
-            ctx_web, fonte = "", ""
-
+                fonte = "Web aberta (DuckDuckGo / Wikipédia)"
+        except Exception as e_web:
+            ctx_web = f"[debug busca web: {type(e_web)._name_}: {e_web}]"
+            fonte = "Diagnóstico"
         if ctx_web and ctx_web.strip():
             response = (
                 "🌐 As IAs não responderam. Busquei na internet por conta própria:\n\n"
