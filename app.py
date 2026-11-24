@@ -817,7 +817,8 @@ SYS_PROMPT = (
     "Você pode enviar mensagens no Telegram e e-mails quando o usuário pedir. "
     "Responda em português. Seja objetivo (respostas serão faladas em voz alta quando possível)."
 )
-PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra", "openrouter", "mistral", "cloudflare"]
+
+PROVIDERS = ["groq", "gemini", "claude", "huggingface", "github", "deepinfra", "openrouter"]
 KEYS = {
     "groq": "GROQ_API_KEY",
     "gemini": "GEMINI_API_KEY",
@@ -826,9 +827,6 @@ KEYS = {
     "github": "GITHUB_API_KEY",
     "deepinfra": "DEEPINFRA_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "cloudflare": "CLOUDFLARE_API_KEY",
-    "cloudflare_account": "CLOUDFLARE_ACCOUNT_ID",
 }
 MODEL_SECRET = {
     "groq": "GROQ_MODEL",
@@ -838,8 +836,6 @@ MODEL_SECRET = {
     "github": "GITHUB_MODEL",
     "deepinfra": "DEEPINFRA_MODEL",
     "openrouter": "OPENROUTER_MODEL",
-    "mistral": "MISTRAL_MODEL",
-    "cloudflare": "CLOUDFLARE_MODEL",
 }
 MODELS = {
     "groq": ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"],
@@ -854,10 +850,9 @@ MODELS = {
         "deepseek-ai/DeepSeek-V3",
     ],
     "openrouter": ["google/gemini-2.5-flash", "openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"],
-    "mistral": ["mistral-small-latest", "open-mistral-nemo"],
-    "cloudflare": ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"],
 }
 TRANSIENT = (500, 502, 503, 504, 529)
+
 
 def _normalize(msgs):
     out = []
@@ -949,77 +944,21 @@ def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=No
         timeout=60,
     )
     if r.status_code == 200:
-            try:
-                data = r.json()
-            except Exception:
-                return 200, (r.text or "").strip()
-            return 200, (data["choices"][0]["message"].get("content") or "").strip()
-            return r.status_code, r.text
+        return 200, (r.json()["choices"][0]["message"].get("content") or "").strip()
+    return r.status_code, r.text
 
 
 def _call_huggingface(api_key, model, msgs, system=None):
     return _call_openai_compat("https://router.huggingface.co/v1/chat/completions", api_key, model, msgs, system)
 
+
 def _call_github(api_key, model, msgs, system=None):
     return _call_openai_compat(
         "https://models.github.ai/inference/chat/completions",
         api_key, model, msgs, system,
-        {"Accept": "application/json"},
+        {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
     )
-def _get_secret(name):
-    try:
-        if name in st.secrets:
-            return st.secrets[name]
-    except Exception:
-        pass
-    return os.getenv(name, "")
 
-
-def _call_mistral(api_key, model, msgs, system=None):
-    key = (api_key or _secret("MISTRAL_API_KEY") or "").strip()
-    if not key:
-        return False, "chave MISTRAL_API_KEY ausente"
-
-    payload_msgs = []
-    if system:
-        payload_msgs.append({"role": "system", "content": system})
-    payload_msgs.extend(msgs)
-
-    try:
-        resp = requests.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model or "mistral-small-latest",
-                "messages": payload_msgs,
-            },
-            timeout=30,
-        )
-        data = resp.json()
-        if resp.status_code != 200:
-            msg = data.get("message") or data.get("error") or resp.text
-            return False, f"HTTP {resp.status_code}: {msg}"
-
-        texto = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-        )
-        if not texto:
-            return False, "API retornou conteúdo vazio"
-        return True, texto
-    except Exception as e:
-        return False, f"falha na requisição: {e}"
-
-
-def _call_cloudflare(api_key, model, msgs, system=None, account_id=None):
-    key = api_key or _get_secret("CLOUDFLARE_API_KEY")
-    acc = account_id or _get_secret("CLOUDFLARE_ACCOUNT_ID")
-    url = f"https://api.cloudflare.com/client/v4/accounts/{acc}/ai/v1/chat/completions"
-    return _call_openai_compat(url, key, model, msgs, system)
 
 def _call_deepinfra(api_key, model, msgs, system=None):
     base = (_secret("DEEPINFRA_BASE_URL") or "https://api.deepinfra.com/v1/openai").rstrip("/")
@@ -1037,46 +976,9 @@ def _call_deepinfra(api_key, model, msgs, system=None):
 
 
 def _call_openrouter(api_key, model, msgs, system=None):
-    key = (api_key or _get_secret("OPENROUTER_API_KEY") or "").strip()
-    if not key:
-        return False, "chave OPENROUTER_API_KEY ausente"
-
-    payload_msgs = []
-    if system:
-        payload_msgs.append({"role": "system", "content": system})
-    payload_msgs.extend(msgs)
-
-    try:
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://streamlit.io",
-                "X-Title": "Zeus 3.0",
-            },
-            json={
-                "model": model or "openrouter/free",
-                "messages": payload_msgs,
-            },
-            timeout=30,
-        )
-        data = resp.json()
-        if resp.status_code != 200:
-            err = data.get("error")
-            msg = err.get("message") if isinstance(err, dict) else (err or data.get("message") or resp.text)
-            return False, f"HTTP {resp.status_code}: {msg}"
-
-        texto = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-        )
-        if not texto:
-            return False, "API retornou conteúdo vazio"
-        return True, texto
-    except Exception as e:
-        return False, f"falha na requisição: {e}"
+    return _call_openai_compat(
+        "https://openrouter.ai/api/v1/chat/completions", api_key, model, msgs, system, {"X-Title": "Zeus 3.0"}
+    )
 
 
 def _call_gemini_auto(api_key, model, msgs, system=None):
@@ -1091,7 +993,6 @@ def _call_gemini_auto(api_key, model, msgs, system=None):
 CALLERS = {
     "groq": _call_groq, "gemini": _call_gemini_auto, "claude": _call_claude,
     "huggingface": _call_huggingface, "github": _call_github, "deepinfra": _call_deepinfra, "openrouter": _call_openrouter,
-    "mistral": _call_mistral, "cloudflare": _call_cloudflare,
 }
 
 
@@ -1193,9 +1094,7 @@ def processar_prompt(prompt):
 
     tem_chave_ia = any(_secret(k) for k in KEYS.values())
     if tem_chave_ia:
-        _prev_user = next((m["content"] for m in reversed(st.session_state.messages[:-1]) if m.get("role") == "user"), "")
-        _q_web = f"{_prev_user} {prompt}".strip() if (_prev_user and len(prompt.split()) <= 5) else prompt
-        prompt_llm, fonte_web = enriquecer_com_web(_q_web)
+        prompt_llm, fonte_web = enriquecer_com_web(prompt)
         ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
     else:
         fonte_web = ""
@@ -1559,55 +1458,32 @@ def _executar_fontes(q, n, limiar=0.30):
     return "", ""
 
 
+def web_search(q, n=5):
+    q_limpa = _limpar_query(q)
+    if not q_limpa:
+        return "", ""
+
+    txt, fonte = _executar_fontes(q_limpa, n, limiar=0.30)
+    if txt:
+        return txt, fonte
+
+    q2 = _reformular_query(q_limpa)
+    if q2 and q2 != q_limpa:
+        txt, fonte = _executar_fontes(q2, n, limiar=0.22)
+        if txt:
+            return txt, fonte + " (re-busca)"
+
+    return "", ""
+
+
 def precisa_web(prompt):
     modo = st.session_state.get("web_mode", "Automática")
     if modo == "Desligada":
         return False
-    if not (prompt or "").strip():
-        return False
-    return True
-
-
-def buscar_web_tavily(query: str, max_results: int = 5) -> str:
-    raw_key = (
-        st.secrets.get("TAVILY_API_KEY")
-        or st.secrets.get("tavily", {}).get("TAVILY_API_KEY")
-        or st.secrets.get("tavily", {}).get("api_key")
-        or os.getenv("TAVILY_API_KEY")
-        or ""
-    )
-    api_key = str(raw_key).strip()
-    if not api_key:
-        return ""
-    q_tavily = " ".join((query or "").split()[:10]).strip()
-    if not q_tavily:
-        return ""
-    try:
-        resp = requests.post(
-            "https://api.tavily.com/search",
-            json={
-                "api_key": api_key,
-                "query": q_tavily,
-                "search_depth": "basic",
-                "include_answer": True,
-                "max_results": max_results,
-            },
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            return ""
-        data = resp.json()
-        partes = []
-        if data.get("answer"):
-            partes.append(f"Resumo direto: {data['answer']}")
-        for item in data.get("results", []):
-            titulo = item.get("title", "")
-            url = item.get("url", "")
-            conteudo = item.get("content", "")
-            partes.append(f"- {titulo} ({url}): {conteudo}")
-        return "\n".join(partes)
-    except Exception:
-        return ""
+    if modo == "Sempre":
+        return True
+    low = (prompt or "").lower()
+    return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low))
 
 
 _REGRAS_ANTIALUCINACAO = (
@@ -1625,47 +1501,9 @@ def enriquecer_com_web(prompt):
     if not precisa_web(prompt):
         return prompt, ""
 
-    _prev_u = next((m["content"] for m in reversed(st.session_state.messages[:-1]) if m.get("role") == "user"), "")
-    _ultima_web = st.session_state.get("_ultima_pergunta_web", "")
-    _base_ctx = _prev_u or _ultima_web
-    _q_s = f"{_base_ctx} {prompt}".strip() if (_base_ctx and len(prompt.split()) <= 6) else prompt
-    if len((prompt or "").split()) > 3:
-        st.session_state["_ultima_pergunta_web"] = prompt
-    ctx_web, fonte = web_search(_q_s)
+    ctx_web, fonte = web_search(prompt)
     hoje = time.strftime("%d/%m/%Y")
-    if not ctx_web:
-        novo = (
-            f"[BUSCA WEB em {hoje}]\n"
-            "STATUS: FALHA_OU_SEM_RESULTADO_CONFIAVEL.\n"
-            "Nenhum resultado verificado e aderente ao tema foi encontrado na internet.\n"
-            "[FIM DA BUSCA]\n\n"
-            + _REGRAS_ANTIALUCINACAO +
-            "\nINSTRUÇÃO FINAL: Como a busca não retornou dados confiáveis, NÃO tente responder de memória, "
-            "NÃO chute valores/datas e NÃO crie links. Apenas informe ao usuário que não foi possível confirmar "
-            "essa informação na busca web no momento.\n"
-            "Pergunta do usuário: " + prompt
-        )
-        return novo, "sem resultado"
 
-    novo = (
-        f"[DADOS DA INTERNET em {hoje}, via {fonte}]\n"
-        + ctx_web[:3500] +
-        "\n[FIM DOS DADOS]\n\n"
-        + _REGRAS_ANTIALUCINACAO +
-        "\nUse apenas os fatos acima e informe a fonte quando citar dados.\n"
-        "Pergunta do usuário: " + prompt
-    )
-    return novo, fonte
-
-def enriquecer_com_web(prompt):
-    if not precisa_web(prompt):
-        return prompt, ""
-
-        ctx_web, fonte = "", ""
-    _prev_u = next((m["content"] for m in reversed(st.session_state.messages[:-1]) if m.get("role") == "user"), "")
-    _q_s = f"{_prev_u} {prompt}".strip() if (_prev_u and len(prompt.split()) <= 5) else prompt
-    ctx_web, fonte = web_search(_q_s)
-    hoje = time.strftime("%d/%m/%Y")
     if not ctx_web:
         novo = (
             f"[BUSCA WEB em {hoje}]\n"
@@ -2689,6 +2527,7 @@ def testar_chaves():
             ok, texto = False, "erro de conexão: " + str(e)
         linhas.append(("✅ " + prov + ": funcionando") if ok else ("❌ " + prov + ": " + _resumo(texto)))
     return linhas
+
 
 # ============================================================
 # AVATAR CYBERPUNK (Esfera 3D / Olho / Robô) + VOZ
