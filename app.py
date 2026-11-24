@@ -951,12 +951,11 @@ def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=No
 def _call_huggingface(api_key, model, msgs, system=None):
     return _call_openai_compat("https://router.huggingface.co/v1/chat/completions", api_key, model, msgs, system)
 
-
 def _call_github(api_key, model, msgs, system=None):
     return _call_openai_compat(
         "https://models.github.ai/inference/chat/completions",
         api_key, model, msgs, system,
-        {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+        {"Accept": "application/json"},
     )
 
 
