@@ -2560,7 +2560,6 @@ def testar_chaves():
         linhas.append(("✅ " + prov + ": funcionando") if ok else ("❌ " + prov + ": " + _resumo(texto)))
     return linhas
 
-
 # ============================================================
 # AVATAR CYBERPUNK (Esfera 3D / Olho / Robô) + VOZ
 # ============================================================
