@@ -958,8 +958,29 @@ def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=No
 
 
 def _call_huggingface(api_key, model, msgs, system=None):
-    return _call_openai_compat("https://router.huggingface.co/v1/chat/completions", api_key, model, msgs, system)
-
+    chave = (
+        (api_key or "").strip()
+        or (_get_secret("HF_TOKEN") if "_get_secret" in globals() else "")
+        or (_get_secret("HUNGER_FACE_API_KEY") if "_get_secret" in globals() else "")
+        or (_get_secret("HUGGINGFACE_API_KEY") if "_get_secret" in globals() else "")
+        or os.getenv("HF_TOKEN", "")
+        or os.getenv("HUNGER_FACE_API_KEY", "")
+    ).strip()
+    if not chave:
+        return "Erro: chave do Hugging Face não encontrada nos Secrets ou variáveis."
+    try:
+        res = _call_openai_compat(
+            "https://router.huggingface.co/v1/chat/completions",
+            chave,
+            model,
+            msgs,
+            system,
+        )
+        if res is None:
+            return "Erro: resposta vazia (None) do Hugging Face."
+        return res
+    except Exception as e:
+        return f"Erro de conexão Hugging Face: {e}"
 def _call_github(api_key, model, msgs, system=None):
     return _call_openai_compat(
         "https://models.github.ai/inference/chat/completions",
