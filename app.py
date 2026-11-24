@@ -1283,8 +1283,12 @@ def listar_vozes_edge():
 
 
 # ============================================================
-# BUSCA NA INTERNET — v4.0 (Google + DDGS Multi-Busca + Wiki)
+# BUSCA NA INTERNET — v3.7 (Busca real via Yahoo/Bing + anti-invenção)
 # ============================================================
+import time
+import re
+import requests
+
 WEB_TRIGGERS = (
     "hoje", "agora", "atual", "atualmente", "últimas", "ultimas", "notícia", "noticia", "recente",
     "pesquise", "pesquisa", "busque", "procure", "google", "internet", "na web", "cotação", "cotacao",
@@ -1318,6 +1322,7 @@ _RE_EMOJI = re.compile(
 
 
 def _limpar_query(texto, max_len=160):
+    """Limpa a query para a busca: remove saudações, comandos, URLs, emojis e ruído."""
     if not texto:
         return ""
     q = str(texto)
@@ -1339,6 +1344,7 @@ def _limpar_query(texto, max_len=160):
 
 
 def _tokens_relevantes(texto, min_len=3):
+    """Extrai tokens significativos para validar aderência entre query e resultado."""
     if not texto:
         return set()
     t = re.sub(r"[^\wÀ-ÿ\s]", " ", str(texto).lower())
@@ -1346,6 +1352,7 @@ def _tokens_relevantes(texto, min_len=3):
 
 
 def _resultado_no_tema(query_limpa, resultado, limiar=0.30):
+    """Valida se o resultado realmente trata do assunto pesquisado (bloqueia lixo aleatório)."""
     q_tokens = _tokens_relevantes(query_limpa)
     r_tokens = _tokens_relevantes(resultado)
     if not q_tokens or not r_tokens:
@@ -1353,10 +1360,11 @@ def _resultado_no_tema(query_limpa, resultado, limiar=0.30):
     inter = q_tokens & r_tokens
     if len(q_tokens) == 1:
         return len(inter) == 1
-    return (len(inter) / len(q_tokens)) >= limiar and len(inter) >= 1
+    return (len(inter) / len(q_tokens)) >= limiar and len(inter) >= 2
 
 
 def _reformular_query(q):
+    """Segunda tentativa: extrai palavras-chave essenciais e adiciona o ano atual se necessário."""
     if not q:
         return ""
     ruido = {
@@ -1374,45 +1382,51 @@ def _reformular_query(q):
 
 # ------------------- buscadores -------------------
 
-def _search_google(q, n=5):
-    """Tenta buscar no Google (pode falhar em servidores de nuvem, mas tentamos)."""
+def _search_yahoo(q, n=5):
+    """Busca real na internet usando o Yahoo (alimentado pelo Bing, super estável em nuvem)."""
     linhas = []
     try:
-        from googlesearch import search as google_search
-        for r in google_search(q, num_results=int(n or 5), lang="pt", region="br", advanced=True, sleep_interval=1, timeout=10):
-            if r.title and r.url:
-                linhas.append(f"- {r.title}: {getattr(r, 'description', '')} ({r.url})")
-    except Exception:
-        pass
-    return "\n".join(linhas)
+        import html
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"
+        }
+        url = f"https://search.yahoo.com/search?p={q}&ei=UTF-8"
+        r = requests.get(url, headers=headers, timeout=10)
+        
+        if r.status_code == 200:
+            blocos = re.findall(r'<div class="algo.?</div>\s</div>\s*</div>', r.text, re.DOTALL)
+            if not blocos:
+                blocos = re.findall(r'<div class="dd algo.?</div>\s</div>', r.text, re.DOTALL)
 
+            for bloco in blocos[:int(n or 5)]:
+                titulo_match = re.search(r'<h3.?>(.?)</h3>', bloco, re.DOTALL)
+                link_match = re.search(r'href="([^"]+)"', bloco)
+                snip_match = re.search(r'<div class="compText.?>(.?)</div>', bloco, re.DOTALL)
 
-def _search_multi(q, n=5):
-    """Busca no Bing, DuckDuckGo e Yahoo simultaneamente usando a biblioteca ddgs."""
-    linhas = []
-    try:
-        from ddgs import DDGS
-        with DDGS() as ddgs:
-            resultados = ddgs.text(q, region='br-pt', safesearch='moderate', max_results=int(n or 5))
-            if resultados:
-                for r in resultados:
-                    titulo = r.get('title', '').strip()
-                    link = r.get('href', '').strip()
-                    corpo = r.get('body', '').strip()
-                    if titulo and link:
-                        linhas.append(f"- {titulo}: {corpo} ({link})")
+                if titulo_match and link_match:
+                    titulo = html.unescape(re.sub(r'<.*?>', '', titulo_match.group(1))).strip()
+                    link = link_match.group(1)
+                    if "r.search.yahoo.com" in link:
+                        link_match_real = re.search(r'/RU=([^/]+)/', link)
+                        if link_match_real:
+                            link = html.unescape(link_match_real.group(1))
+                    
+                    snip = html.unescape(re.sub(r'<.*?>', '', snip_match.group(1))).strip() if snip_match else ""
+                    linhas.append(f"- {titulo}: {snip} ({link})")
     except Exception:
         pass
     return "\n".join(linhas)
 
 
 def _search_wiki(q, n=4):
+    """Busca na Wikipédia."""
     try:
         r = requests.get(
             "https://pt.wikipedia.org/w/api.php",
             params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": n},
-            headers={"User-Agent": "ZeusBot/4.0 (https://streamlit.app)"},
-            timeout=10,
+            headers={"User-Agent": "ZeusBot/3.7 (https://streamlit.app)"},
+            timeout=15,
         )
         if r.status_code != 200:
             return ""
@@ -1432,13 +1446,13 @@ def _search_wiki(q, n=4):
 # ------------------- orquestração -------------------
 
 _FONTES_WEB = (
-    ("Google", _search_google),
-    ("Bing/DuckDuckGo/Yahoo", _search_multi),
+    ("Yahoo (Bing)", _search_yahoo),
     ("Wikipédia", _search_wiki),
 )
 
 
 def _executar_fontes(q, n, limiar=0.30):
+    """Roda as fontes na ordem e só aceita resultados que passem no filtro de aderência ao tema."""
     for nome, fn in _FONTES_WEB:
         try:
             txt = fn(q, n)
@@ -1447,26 +1461,29 @@ def _executar_fontes(q, n, limiar=0.30):
         txt = (txt or "").strip()
         if not txt:
             continue
-            
-        # Para os motores de busca grandes, a gente confia no resultado.
-        # Só usamos o filtro rígido para a Wikipédia.
-        if "Wikipédia" not in nome:
-            return txt, nome
-            
         if _resultado_no_tema(q, txt, limiar=limiar):
             return txt, nome
     return "", ""
 
 
 def web_search(q, n=5):
+    """
+    Busca web inteligente:
+      1) limpa a query;
+      2) 1ª rodada exigindo aderência estrita ao tema;
+      3) se nada relevante -> reformula (palavras-chave essenciais + ano) e faz 2ª rodada validando tema;
+      4) se ainda falhar -> retorna ("", "") para acionar bloqueio anti-invenção.
+    """
     q_limpa = _limpar_query(q)
     if not q_limpa:
         return "", ""
 
+    # 1ª tentativa: aderência estrita
     txt, fonte = _executar_fontes(q_limpa, n, limiar=0.30)
     if txt:
         return txt, fonte
 
+    # 2ª tentativa (re-busca): query enxuta + ano atual, mantendo validação de tema
     q2 = _reformular_query(q_limpa)
     if q2 and q2 != q_limpa:
         txt, fonte = _executar_fontes(q2, n, limiar=0.22)
@@ -1498,12 +1515,20 @@ _REGRAS_ANTIALUCINACAO = (
 
 
 def enriquecer_com_web(prompt):
+    """
+    Enriquece o prompt com dados da internet aplicando:
+      - limpeza da query;
+      - loop de 2ª tentativa com validação de tema (sem aceitar fallback aleatório);
+      - bloqueio rígido de alucinação quando a busca falha.
+    Retorna (prompt_final, fonte).
+    """
     if not precisa_web(prompt):
         return prompt, ""
 
     ctx_web, fonte = web_search(prompt)
     hoje = time.strftime("%d/%m/%Y")
 
+    # ---- CASO 1: busca falhou -> trava anti-invenção explícita ----
     if not ctx_web:
         novo = (
             f"[BUSCA WEB em {hoje}]\n"
@@ -1518,6 +1543,7 @@ def enriquecer_com_web(prompt):
         )
         return novo, "sem resultado"
 
+    # ---- CASO 2: busca OK -> injeta dados + trava anti-invenção ----
     novo = (
         f"[DADOS DA INTERNET em {hoje}, via {fonte}]\n"
         + ctx_web[:3500] +
