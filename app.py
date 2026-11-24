@@ -1594,15 +1594,23 @@ def precisa_web(prompt):
     return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low)) or len(low.split()) <= 5
 
 def buscar_web_tavily(query: str, max_results: int = 5) -> str:
-    api_key = st.secrets.get("TAVILY_API_KEY") or os.getenv("TAVILY_API_KEY")
+    api_key = (
+        st.secrets.get("TAVILY_API_KEY")
+        or st.secrets.get("tavily", {}).get("TAVILY_API_KEY")
+        or st.secrets.get("tavily", {}).get("api_key")
+        or os.getenv("TAVILY_API_KEY", "")
+    )
     if not api_key:
+        return ""
+    q_tavily = " ".join((query or "").split()[:10]).strip()
+    if not q_tavily:
         return ""
     try:
         resp = requests.post(
             "https://api.tavily.com/search",
             json={
                 "api_key": api_key,
-                "query": query,
+                "query": q_tavily,
                 "search_depth": "basic",
                 "include_answer": True,
                 "max_results": max_results,
