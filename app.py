@@ -1208,6 +1208,7 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
         erros.append(f"{prov}: {_resumo(text)}")
     return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
 # ============================================================
+## ============================================================
 # ZEUS TELEGRAM REAL (Sem Teatro, 100% Autônomo para Danilo)
 # ============================================================
 
@@ -1390,39 +1391,6 @@ def interceptar_comando_autonomo_telegram(texto):
     if any(k in low for k in ("telegram", "tg", "bunker", "telemetria")):
         return True, _rt_comando_telegram(texto)
     return False, ""
-
-
-def processar_prompt(prompt):
-    tratado, resposta = interceptar_comando_autonomo_telegram(prompt)
-    if tratado:
-        sid = st.session_state.session_id
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        if "add_message" in globals():
-            add_message(sid, "user", prompt)
-        st.session_state.messages.append({"role": "assistant", "content": resposta})
-        if "add_message" in globals():
-            add_message(sid, "assistant", resposta)
-        st.session_state.last_info = "⚡ Comando autônomo executado com sucesso"
-        return resposta
-
-    sid = st.session_state.session_id
-    escolhido = st.session_state.get("model_sel", "groq")
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    if "add_message" in globals():
-        add_message(sid, "user", prompt)
-
-    tem_chave_ia = any(_secret(k) for k in KEYS.values()) if "KEYS" in globals() and "_secret" in globals() else True
-    if tem_chave_ia:
-        prompt_llm, _ = enriquecer_com_web(prompt)
-        ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
-        resposta_final = (response or "").strip() if ok else "Não foi possível obter resposta das IAs no momento."
-    else:
-        resposta_final = "Nenhuma chave de IA configurada."
-
-    st.session_state.messages.append({"role": "assistant", "content": resposta_final})
-    if "add_message" in globals():
-        add_message(sid, "assistant", resposta_final)
-    return resposta_final
 
 
 # Disparo automático ao carregar/atualizar o app (a cada 15s)
