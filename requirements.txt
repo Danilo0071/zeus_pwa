@@ -9,3 +9,5 @@ pywhatkit
 plotly
 numpy
 boto3
+ddgs
+googlesearch-python
