@@ -943,7 +943,7 @@ def _call_openai_compat(url, api_key, model, msgs, system=None, extra_headers=No
         json={"model": model, "messages": [{"role": "system", "content": system or SYS_PROMPT}] + msgs, "temperature": 0.4, "max_tokens": 700},
         timeout=60,
     )
-   if r.status_code == 200:
+     if r.status_code == 200:
             try:
                 data = r.json()
             except Exception:
