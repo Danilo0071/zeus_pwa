@@ -1594,43 +1594,42 @@ def precisa_web(prompt):
     return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low)) or len(low.split()) <= 5
 
 def buscar_web_tavily(query: str, max_results: int = 5) -> str:
-    api_key = (
-        st.secrets.get("TAVILY_API_KEY")
-        or st.secrets.get("tavily", {}).get("TAVILY_API_KEY")
-        or st.secrets.get("tavily", {}).get("api_key")
-        or os.getenv("TAVILY_API_KEY", "")
-    )
+    api_key = st.secrets.get("TAVILY_API_KEY") or os.getenv("TAVILY_API_KEY")
     if not api_key:
-        return ""
-    q_tavily = " ".join((query or "").split()[:10]).strip()
-    if not q_tavily:
-        return ""
-    try:
+        return "Erro: TAVILY_API_KEY não está configurada."
+try:
         resp = requests.post(
             "https://api.tavily.com/search",
             json={
                 "api_key": api_key,
-                "query": q_tavily,
+                "query": query,
                 "search_depth": "basic",
                 "include_answer": True,
                 "max_results": max_results,
             },
-            timeout=15,
+            timeout=(5, 15),
         )
-        if resp.status_code != 200:
-            return ""
+        resp.raise_for_status()
         data = resp.json()
-        partes = []
-        if data.get("answer"):
-            partes.append(f"Resumo direto: {data['answer']}")
-        for item in data.get("results", []):
-            titulo = item.get("title", "")
-            url = item.get("url", "")
-            conteudo = item.get("content", "")
-            partes.append(f"- {titulo} ({url}): {conteudo}")
-        return "\n".join(partes)
-    except Exception:
-        return ""
+except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else "desconhecido"
+        detalhe = e.response.text[:500] if e.response is not None else str(e)
+        return f"Erro da API Tavily ({status}): {detalhe}"
+    except requests.exceptions.Timeout:
+        return "Erro: a busca na Web excedeu o tempo limite."
+    except requests.exceptions.RequestException as e:
+        return f"Erro de conexão com Tavily: {e}"
+    except ValueError:
+        return "Erro: Tavily retornou uma resposta que não é JSON válido."
+partes = []
+    if data.get("answer"):
+        partes.append(data["answer"])
+for item in data.get("results", []):
+        titulo = item.get("title", "Sem título")
+        url = item.get("url", "")
+        conteudo = item.get("content", "")
+        partes.append(f"{titulo}\n{url}\n{conteudo}")
+return "\n\n".join(partes) or "A busca não retornou resultados."
 _REGRAS_ANTIALUCINACAO = (
     "REGRAS OBRIGATÓRIAS DE VERACIDADE (PROIBIDO INVENTAR):\n"
     "1. Responda EXCLUSIVAMENTE com base nos fatos presentes em [DADOS DA INTERNET].\n"
