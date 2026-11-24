@@ -1148,16 +1148,16 @@ def processar_prompt(prompt):
             except Exception as e_web:
                 ctx_web = f"[erro busca web: {type(e_web)._name_}: {e_web}]"
                 fonte = "Diagnóstico"
-        if not ok and ctx_web and ctx_web.strip():
-        response = (
-            "🌐 Resultado da busca na web:\n\n"
-            + ctx_web[:3800]
-            + (f"\n\n*Fonte: {fonte}*" if fonte else "")
-        )
-        ok = True
-        prov = fonte or "Web aberta"
-        fonte_web = fonte or "Web aberta"
-        erros = (erros or []) + ["fallback_web_ativo"]
+        if ctx_web and ctx_web.strip():
+            response = (
+                "🌐 As IAs não responderam. Busquei na internet por conta própria:\n\n"
+                + ctx_web[:3800]
+                + f"\n\n(Fonte: {fonte})"
+            )
+            ok = True
+            prov = "Web Search (autônomo)"
+            fonte_web = fonte
+            erros = (erros or []) + ["fallback web forçado"]
         else:
             ctx2 = _search_ddg("explicação " + prompt[:200], n=4)
             if ctx2 and ctx2.strip():
