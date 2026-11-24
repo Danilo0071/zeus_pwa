@@ -961,7 +961,31 @@ def _call_github(api_key, model, msgs, system=None):
         api_key, model, msgs, system,
         {"Accept": "application/json"},
     )
+def _get_secret(name):
+    try:
+        if name in st.secrets:
+            return st.secrets[name]
+    except Exception:
+        pass
+    return os.getenv(name, "")
 
+
+def _call_mistral(api_key, model, msgs, system=None):
+    key = api_key or _get_secret("MISTRAL_API_KEY")
+    return _call_openai_compat(
+        "https://api.mistral.ai/v1/chat/completions",
+        key,
+        model,
+        msgs,
+        system,
+    )
+
+
+def _call_cloudflare(api_key, model, msgs, system=None, account_id=None):
+    key = api_key or _get_secret("CLOUDFLARE_API_KEY")
+    acc = account_id or _get_secret("CLOUDFLARE_ACCOUNT_ID")
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acc}/ai/v1/chat/completions"
+    return _call_openai_compat(url, key, model, msgs, system)
 
 def _call_deepinfra(api_key, model, msgs, system=None):
     base = (_secret("DEEPINFRA_BASE_URL") or "https://api.deepinfra.com/v1/openai").rstrip("/")
