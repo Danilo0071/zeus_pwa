@@ -1560,10 +1560,12 @@ def _executar_fontes(q, n, limiar=0.30):
 
 
 def web_search(q, n=5):
-    q_limpa = _limpar_query(q)
+    _prev_u = next((m["content"] for m in reversed(st.session_state.messages[:-1]) if m.get("role") == "user"), "")
+    _q_full = f"{_prev_u} {q}".strip() if (_prev_u and len(q.split()) <= 5) else q
+    q_limpa = _limpar_query(_q_full) or _limpar_query(q) or _q_full
     if not q_limpa:
         return "", ""
-    _termo_tavily = q_limpa or q
+    _termo_tavily = q_limpa or _q_full or q
     res_tavily = buscar_web_tavily(_termo_tavily, max_results=n)
     if res_tavily:
         return res_tavily, "Tavily"
