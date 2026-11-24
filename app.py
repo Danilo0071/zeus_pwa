@@ -967,22 +967,75 @@ def _call_huggingface(api_key, model, msgs, system=None):
         or os.getenv("HUNGER_FACE_API_KEY", "")
     ).strip()
     if not chave:
-        return False, "chave do Hugging Face não encontrada nos Secrets ou variáveis."
+        return False, "chave do Hugging Face não encontrada nos Secrets."
+
+    modelo_limpo = (model or "").strip()
+    if not modelo_limpo or modelo_limpo.lower() in ("default", "auto", "none"):
+        modelo_limpo = "Qwen/Qwen2.5-7B-Instruct"
+
     try:
         res = _call_openai_compat(
             "https://router.huggingface.co/v1/chat/completions",
             chave,
-            model,
+            modelo_limpo,
             msgs,
             system,
         )
-        if res is None:
-            return False, "resposta vazia (None) do Hugging Face."
         if isinstance(res, tuple) and len(res) == 2:
-            return res
-        return True, str(res)
+            ok, info = res
+            if ok and info not in (None, ""):
+                return True, info
+            if info not in (None, ""):
+                return False, str(info)
+        elif res not in (None, ""):
+            return True, str(res)
+    except Exception:
+        pass
+
+    try:
+        import requests
+
+        mensagens = []
+        if system:
+            mensagens.append({"role": "system", "content": system})
+        for m in (msgs or []):
+            if isinstance(m, dict) and "role" in m and "content" in m:
+                mensagens.append({"role": m["role"], "content": m["content"]})
+        if not mensagens:
+            mensagens = [{"role": "user", "content": "Responda apenas: ok"}]
+
+        resp = requests.post(
+            "https://router.huggingface.co/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {chave}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": modelo_limpo,
+                "messages": mensagens,
+                "max_tokens": 64,
+            },
+            timeout=25,
+        )
+        if resp.status_code == 200:
+            dados = resp.json()
+            escolhas = dados.get("choices") or []
+            if escolhas:
+                texto = ((escolhas[0].get("message") or {}).get("content") or "").strip()
+                if texto:
+                    return True, texto
+            return False, f"HTTP 200 sem conteúdo de texto: {resp.text[:200]}"
+        return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
     except Exception as e:
-        return False, f"Erro de conexão Hugging Face: {e}"
+        return False, f"falha na conexão com Hugging Face: {e}"
+
+
+def _call_github(api_key, model, msgs, system=None):
+    return _call_openai_compat(
+        "https://models.github.ai/inference/chat/completions",
+        api_key, model, msgs, system,
+        {"Accept": "application/json"},
+    )
 
 
 def _call_github(api_key, model, msgs, system=None):
