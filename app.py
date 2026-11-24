@@ -1634,6 +1634,7 @@ def enriquecer_com_web(prompt):
     if not precisa_web(prompt):
         return prompt, ""
 
+        ctx_web, fonte = "", ""
         _prev_u = next((m["content"] for m in reversed(st.session_state.messages[:-1]) if m.get("role") == "user"), "")
         _q_s = f"{_prev_u} {prompt}".strip() if (_prev_u and len(prompt.split()) <= 5) else prompt
         ctx_web, fonte = web_search(_q_s)
