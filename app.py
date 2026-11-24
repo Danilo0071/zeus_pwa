@@ -1592,7 +1592,8 @@ def precisa_web(prompt):
         return True
     low = (prompt or "").lower()
     return any(t in low for t in WEB_TRIGGERS) or bool(re.search(r"\b20(2[4-9]|3[0-9])\b", low)) or len(low.split()) <= 5
-
+    if st.session_state.get("_ultima_pergunta_web") and len((prompt or "").split()) <= 6:
+        return True
 def buscar_web_tavily(query: str, max_results: int = 5) -> str:
     api_key = (
         st.secrets.get("TAVILY_API_KEY")
