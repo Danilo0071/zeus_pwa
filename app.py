@@ -1283,7 +1283,7 @@ def listar_vozes_edge():
 
 
 # ============================================================
-# BUSCA NA INTERNET — v3.6 (Google + Bing + DuckDuckGo + Wiki)
+# BUSCA NA INTERNET — v3.7 (Busca real via Yahoo/Bing + anti-invenção)
 # ============================================================
 import time
 import re
@@ -1382,77 +1382,38 @@ def _reformular_query(q):
 
 # ------------------- buscadores -------------------
 
-def _search_google(q, n=5):
-    """Busca real no Google usando googlesearch-python (gratuito e sem chave)."""
-    linhas = []
-    try:
-        from googlesearch import search as google_search
-        
-        # Busca os resultados do Google
-        resultados = google_search(
-            q, 
-            num_results=int(n or 5), 
-            lang="pt", 
-            region="br",
-            advanced=True, 
-            sleep_interval=1, 
-            timeout=10
-        )
-        
-        for r in resultados:
-            titulo = (getattr(r, "title", "") or "").strip()
-            link = (getattr(r, "url", "") or "").strip()
-            desc = (getattr(r, "description", "") or "").strip()
-            
-            if titulo and link:
-                linhas.append(f"- {titulo}: {desc} ({link})")
-    except Exception:
-        pass
-    return "\n".join(linhas)
-
-
-def _search_bing(q, n=5):
-    """Busca real no Bing (raspagem leve, sem precisar de chave)."""
+def _search_yahoo(q, n=5):
+    """Busca real na internet usando o Yahoo (alimentado pelo Bing, super estável em nuvem)."""
     linhas = []
     try:
         import html
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-        r = requests.get(f"https://www.bing.com/search?q={q}&setlang=pt-br", headers=headers, timeout=10)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"
+        }
+        url = f"https://search.yahoo.com/search?p={q}&ei=UTF-8"
+        r = requests.get(url, headers=headers, timeout=10)
+        
         if r.status_code == 200:
-            blocos = re.findall(r'<li class="b_algo".*?</li>', r.text, re.DOTALL)
+            blocos = re.findall(r'<div class="algo.?</div>\s</div>\s*</div>', r.text, re.DOTALL)
+            if not blocos:
+                blocos = re.findall(r'<div class="dd algo.?</div>\s</div>', r.text, re.DOTALL)
+
             for bloco in blocos[:int(n or 5)]:
-                titulo_match = re.search(r'<h2.?>(.?)</h2>', bloco, re.DOTALL)
-                link_match = re.search(r'href="(http.*?)"', bloco)
-                snip_match = re.search(r'<p>(.*?)</p>', bloco, re.DOTALL)
-                
+                titulo_match = re.search(r'<h3.?>(.?)</h3>', bloco, re.DOTALL)
+                link_match = re.search(r'href="([^"]+)"', bloco)
+                snip_match = re.search(r'<div class="compText.?>(.?)</div>', bloco, re.DOTALL)
+
                 if titulo_match and link_match:
                     titulo = html.unescape(re.sub(r'<.*?>', '', titulo_match.group(1))).strip()
                     link = link_match.group(1)
+                    if "r.search.yahoo.com" in link:
+                        link_match_real = re.search(r'/RU=([^/]+)/', link)
+                        if link_match_real:
+                            link = html.unescape(link_match_real.group(1))
+                    
                     snip = html.unescape(re.sub(r'<.*?>', '', snip_match.group(1))).strip() if snip_match else ""
                     linhas.append(f"- {titulo}: {snip} ({link})")
-    except Exception:
-        pass
-    return "\n".join(linhas)
-
-
-def _search_duckduckgo(q, n=5):
-    """Busca real no DuckDuckGo via API pública."""
-    linhas = []
-    try:
-        r = requests.get(
-            "https://api.duckduckgo.com/",
-            params={"q": q, "format": "json", "no_html": 1, "skip_disambig": 1},
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-            timeout=10
-        )
-        if r.status_code == 200:
-            data = r.json()
-            if data.get("AbstractText"):
-                linhas.append(f"- {data.get('Heading', q)}: {data.get('AbstractText')} ({data.get('AbstractURL', '')})")
-            
-            for topic in data.get("RelatedTopics", [])[:int(n or 5)]:
-                if "Text" in topic and "FirstURL" in topic:
-                    linhas.append(f"- {topic['Text']} ({topic['FirstURL']})")
     except Exception:
         pass
     return "\n".join(linhas)
@@ -1464,7 +1425,7 @@ def _search_wiki(q, n=4):
         r = requests.get(
             "https://pt.wikipedia.org/w/api.php",
             params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": n},
-            headers={"User-Agent": "ZeusBot/3.6 (https://streamlit.app)"},
+            headers={"User-Agent": "ZeusBot/3.7 (https://streamlit.app)"},
             timeout=15,
         )
         if r.status_code != 200:
@@ -1485,9 +1446,7 @@ def _search_wiki(q, n=4):
 # ------------------- orquestração -------------------
 
 _FONTES_WEB = (
-    ("Google", _search_google),
-    ("Bing", _search_bing),
-    ("DuckDuckGo", _search_duckduckgo),
+    ("Yahoo (Bing)", _search_yahoo),
     ("Wikipédia", _search_wiki),
 )
 
