@@ -976,14 +976,17 @@ def _get_secret(name):
 
 
 def _call_mistral(api_key, model, msgs, system=None):
-    key = api_key or _get_secret("MISTRAL_API_KEY")
-    return _call_openai_compat(
+    key = api_key or _secret("MISTRAL_API_KEY")
+    res = _call_openai_compat(
         "https://api.mistral.ai/v1/chat/completions",
         key,
         model,
         msgs,
         system,
     )
+    if not res or len(res) != 2:
+        return False, "resposta vazia da Mistral"
+    return res
 
 
 def _call_cloudflare(api_key, model, msgs, system=None, account_id=None):
