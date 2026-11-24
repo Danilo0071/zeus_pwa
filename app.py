@@ -1040,20 +1040,43 @@ def _call_openrouter(api_key, model, msgs, system=None):
     key = (api_key or _get_secret("OPENROUTER_API_KEY") or "").strip()
     if not key:
         return False, "chave OPENROUTER_API_KEY ausente"
+
+    payload_msgs = []
+    if system:
+        payload_msgs.append({"role": "system", "content": system})
+    payload_msgs.extend(msgs)
+
     try:
-        res = _call_openai_compat(
+        resp = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
-            key,
-            model or "openrouter/free",
-            msgs,
-            system,
-            {"X-Title": "Zeus 3.0"},
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://streamlit.io",
+                "X-Title": "Zeus 3.0",
+            },
+            json={
+                "model": model or "openrouter/free",
+                "messages": payload_msgs,
+            },
+            timeout=30,
         )
-        if isinstance(res, tuple) and len(res) == 2:
-            return res
-        return False, "resposta vazia ou inválida do OpenRouter"
+        data = resp.json()
+        if resp.status_code != 200:
+            err = data.get("error")
+            msg = err.get("message") if isinstance(err, dict) else (err or data.get("message") or resp.text)
+            return False, f"HTTP {resp.status_code}: {msg}"
+
+        texto = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        if not texto:
+            return False, "API retornou conteúdo vazio"
+        return True, texto
     except Exception as e:
-        return False, f"erro no OpenRouter: {e}"
+        return False, f"falha na requisição: {e}"
 
 
 def _call_gemini_auto(api_key, model, msgs, system=None):
