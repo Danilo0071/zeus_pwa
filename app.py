@@ -1560,8 +1560,10 @@ def _executar_fontes(q, n, limiar=0.30):
 
 
 def web_search(q, n=5):
-    _prev_u = next((m["content"] for m in reversed(st.session_state.messages[:-1]) if m.get("role") == "user"), "")
-    _q_full = f"{_prev_u} {q}".strip() if (_prev_u and len(q.split()) <= 5) else q
+    _ant = st.session_state.get("_ultima_pergunta_web", "")
+    _q_full = f"{_ant} {q}".strip() if (_ant and len(q.split()) <= 6) else q
+    if len(q.split()) > 3:
+        st.session_state["_ultima_pergunta_web"] = q
     q_limpa = _limpar_query(_q_full) or _limpar_query(q) or _q_full
     if not q_limpa:
         return "", ""
