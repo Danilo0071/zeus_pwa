@@ -1306,7 +1306,7 @@ def sincronizar_e_responder_telegram(responder_fn=None) -> int:
         else:
             resposta_zeus = f"Recebido: {texto}"
 
-        zf_enviar_telegram(resposta_zeus, chat_id_destino=cid)
+        zf_enviar_telegram(resposta_zeus)
         respondidas += 1
 
     return respondidas
