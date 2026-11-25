@@ -109,36 +109,24 @@ def buscar_contexto_web(consulta):
     return ""
 
 
-def descobrir_modelos_gemini(api_key):
-    modelos = ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-flash-latest"]
-    try:
-        r = requests.get(
-            f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
-            timeout=12,
-        )
-        if r.status_code == 200:
-            encontrados = []
-            for m in r.json().get("models", []):
-                nome = (m.get("name") or "").replace("models/", "")
-                metodos = m.get("supportedGenerationMethods", [])
-                if "generateContent" in metodos and "flash" in nome and "embedding" not in nome:
-                    encontrados.append(nome)
-            if encontrados:
-                return encontrados[:3]
-    except Exception as e:
-        print(f"Aviso listar modelos Gemini: {e}")
-    return modelos
-
-
 def chamar_gemini(prompt, api_key):
     if not api_key:
         return None
-    for modelo in descobrir_modelos_gemini(api_key):
+    # Lista fixa de modelos: evita a chamada extra de descoberta (que causava os erros 404/400/503).
+    modelos = [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-flash-latest",
+    ]
+    for modelo in modelos:
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{modelo}:generateContent?key={api_key}"
         )
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024},
+        }
         try:
             r = requests.post(url, json=payload, timeout=20)
             if r.status_code == 200:
@@ -195,17 +183,19 @@ def gerar_resposta(texto, gemini_key):
 
     contexto_web = buscar_contexto_web(texto)
 
+    # Prompt reforçado para garantir resposta em português do Brasil.
     prompt = (
-        "IMPORTANTE: Responda OBRIGATORIAMENTE em portugues do Brasil, mesmo que as informacoes da web estejam em ingles.\n"
-        "Voce e o Zeus, assistente pessoal direto, parceiro, inteligente e objetivo, "
-        "com o mesmo estilo natural do app Zeus (sem listar links crus nem parecer robo).\n"
-        f"Mensagem do usuario: {texto}\n"
+        "INSTRUÇÃO OBRIGATÓRIA: Você DEVE responder exclusivamente em português do Brasil. "
+        "Não importa o idioma do contexto ou da pergunta; a resposta final deve ser em português brasileiro natural.\n"
+        "Você é o Zeus, assistente pessoal direto, parceiro, inteligente e objetivo, "
+        "com o mesmo estilo natural do app Zeus (sem listar links crus nem parecer robô).\n"
+        f"Mensagem do usuário: {texto}\n"
     )
     if contexto_web:
         prompt += (
-            f"\nContexto encontrado na web (traduza e adapte para portugues natural):\n{contexto_web}\n"
+            f"\nContexto encontrado na web (traduza e adapte para português natural):\n{contexto_web}\n"
         )
-    prompt += "\nLembrete final: escreva a resposta inteira em portugues."
+    prompt += "\nLembrete final: escreva a resposta inteira em português do Brasil."
 
     resp_gem = chamar_gemini(prompt, gemini_key)
     if resp_gem:
