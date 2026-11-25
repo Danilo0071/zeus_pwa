@@ -43,42 +43,28 @@ TEMPO_TRADE = 300
 
 # ================= B2 (API S3-COMPATIBLE VIA REQUESTS) =================
 def b2_s3_headers(method, filename, payload=None):
-    """Gera os cabeçalhos de autenticação AWS Signature V4 para o B2"""
-    # Data/hora no formato exigido
     t = datetime.now(timezone.utc)
     amz_date = t.strftime('%Y%m%dT%H%M%SZ')
     date_stamp = t.strftime('%Y%m%d')
     
-    # Domínio sem https://
     host = B2_ENDPOINT.replace("https://", "").replace("http://", "")
     
-    # Chave de assinatura
     kDate = hmac.new(("AWS4" + B2_APP_KEY).encode('utf-8'), date_stamp.encode('utf-8'), hashlib.sha256).digest()
-    kRegion = hmac.new(kDate, b'us-east-005', hashlib.sha256).digest() # Região padrão do endpoint
+    kRegion = hmac.new(kDate, b'us-east-005', hashlib.sha256).digest()
     kService = hmac.new(kRegion, b's3', hashlib.sha256).digest()
     kSigning = hmac.new(kService, b'aws4_request', hashlib.sha256).digest()
     
-    # URL Path
     path = f"/{B2_BUCKET}/{filename}"
-    
-    # Payload Hash
     payload_hash = hashlib.sha256(payload if payload else b'').hexdigest()
     
-    # Cabeçalhos canônicos
     canonical_headers = f"host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
     signed_headers = "host;x-amz-content-sha256;x-amz-date"
     
-    # Requisição Canônica
     canonical_request = f"{method}\n{path}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
-    
-    # String para Assinar
     credential_scope = f"{date_stamp}/us-east-005/s3/aws4_request"
     string_to_sign = f"AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
     
-    # Assinatura Final
     signing_key = hmac.new(kSigning, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
-    
-    # Header de Autorização
     auth_header = f"AWS4-HMAC-SHA256 Credential={B2_KEY_ID}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signing_key}"
     
     return {
@@ -93,6 +79,9 @@ def b2_salvar(nome_arquivo, dados):
     try:
         corpo = json.dumps(dados, ensure_ascii=False).encode('utf-8')
         headers = b2_s3_headers("PUT", nome_arquivo, corpo)
+        # A CORREÇÃO ESTÁ AQUI: Força o envio do tamanho do arquivo
+        headers["Content-Length"] = str(len(corpo))
+        
         url = f"{B2_ENDPOINT}/{B2_BUCKET}/{nome_arquivo}"
         
         r = requests.put(url, headers=headers, data=corpo, timeout=15)
@@ -108,19 +97,15 @@ def b2_salvar(nome_arquivo, dados):
 
 def b2_listar(prefixo):
     try:
-        # Para listar no S3, usamos GET com parâmetros na URL
+        # Para o Backblaze S3, a listagem é um GET na raiz do bucket com parâmetros
         params = f"list-type=2&prefix={urllib.parse.quote(prefixo)}&max-keys=50"
+        # O path para assinar é apenas a barra "/" na raiz, a query vai na URL
         headers = b2_s3_headers("GET", f"?{params}")
-        # O path para listar é na raiz do bucket
         url = f"{B2_ENDPOINT}/{B2_BUCKET}?{params}"
         
-        # Ajuste na assinatura para incluir os parâmetros da query
-        # (Simplificação: como o S3 exige a query na assinatura, isso pode falhar se o prefixo for complexo)
-        # Para evitar complexidade, usamos a API nativa apenas para listar (se falhar, retorna vazio)
-        # Mas como queremos simplicidade, tentamos o GET direto
         r = requests.get(url, headers=headers, timeout=15)
         if r.status_code == 200:
-            # Parse XML simples para pegar os nomes dos arquivos
+            # Parser simples de XML para pegar as chaves dos arquivos
             matches = re.findall(r'<Key>(.*?)</Key>', r.text)
             return [{"fileName": m} for m in matches]
     except Exception: pass
@@ -287,88 +272,3 @@ def analisar_e_operar():
         b2_salvar(f"trades/log_{int(time.time())}.json", log_acao)
     
     return decisao
-
-def enviar_telegram(msg):
-    if not TG_TOKEN or not TG_CHAT_ID: return
-    try:
-        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                      json={"chat_id": TG_CHAT_ID, "text": msg}, timeout=15)
-    except Exception: pass
-
-def rotina_trade():
-    while True:
-        try:
-            print("[Trade] Iniciando ciclo de análise e operação...")
-            decisao = analisar_e_operar()
-            saldo = consultar_saldo()
-            
-            if saldo:
-                msg = (f"🤖 Relatório Zeus Trader\n"
-                       f"💰 Saldo: {saldo['saldo']:.2f} USDT\n"
-                       f"📈 PnL: {saldo['pnl']:.2f} USDT\n"
-                       f"🎯 Ação: {decisao['acao']}\n"
-                       f"🧠 Motivo: {decisao['motivo']}")
-                enviar_telegram(msg)
-        except Exception as e:
-            print(f"[Trade] Erro na rotina: {e}")
-        time.sleep(TEMPO_TRADE)
-
-# ================= TELEGRAM LOOP (MAIN) =================
-def gerar_resposta(texto):
-    arquivos = b2_listar("memoria/")
-    for arq in reversed(arquivos[-5:]):
-        dados = b2_baixar(arq["fileName"])
-        if dados and texto.lower() in dados.get("topico", "").lower():
-            return f"📚 Da minha memória:\n\n{dados['resumo']}"
-    
-    contexto = buscar_web(texto)
-    prompt = f"VOCÊ É O ZEUS. Responda SEMPRE em português do Brasil, de forma direta e amigável.\nUsuário: {texto}\n"
-    if contexto: prompt += f"Contexto da web:\n{contexto}\n"
-    
-    resp = chamar_gemini(prompt) or chamar_grok(prompt)
-    return resp or "Poxa, meus servidores estão ocupados. Tente novamente em instantes!"
-
-def main():
-    if not TG_TOKEN:
-        print("Erro: TELEGRAM_BOT_TOKEN não configurado.")
-        return
-
-    threading.Thread(target=rotina_estudo, daemon=True).start()
-    threading.Thread(target=rotina_trade, daemon=True).start()
-
-    offset = None
-    print("Zeus online (Telegram + Estudo + Trade + B2 S3).")
-
-    while True:
-        try:
-            params = {"timeout": 20}
-            if offset: params["offset"] = offset
-            
-            r = requests.get(f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates", params=params, timeout=25)
-            if r.status_code != 200:
-                time.sleep(3); continue
-            
-            for att in r.json().get("result", []):
-                offset = att["update_id"] + 1
-                msg = att.get("message") or att.get("edited_message") or {}
-                texto = (msg.get("text") or "").strip()
-                chat_id = str(msg.get("chat", {}).get("id", ""))
-                
-                if not texto or not chat_id: continue
-                if TG_CHAT_ID and chat_id != TG_CHAT_ID: continue
-                
-                texto_lower = texto.lower()
-                if texto_lower == "status trade":
-                    s = consultar_saldo()
-                    resp = f"💰 Saldo: {s['saldo']:.2f} | 📈 PnL: {s['pnl']:.2f}" if s else "❌ Erro ao acessar Binance Demo."
-                else:
-                    resp = gerar_resposta(texto)
-                
-                enviar_telegram(resp)
-                
-        except Exception as e:
-            print(f"Erro no loop do Telegram: {e}")
-            time.sleep(5)
-
-if __name__ == "__main__":
-    main()
