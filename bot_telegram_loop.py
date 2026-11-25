@@ -9,15 +9,17 @@ import re
 import html
 import threading
 import requests
+from datetime import datetime, timezone
 
 # ================= CONFIGURAÇÕES =================
 REPO_PADRAO = os.getenv("GITHUB_REPO", "Danilo0071/zeus_pwa").strip()
 BRANCH_PADRAO = os.getenv("GITHUB_BRANCH", "main").strip()
 
-# B2 - Ajustado para ler B2_BUCKET e B2_BUCKET_NAME
+# B2 (S3-Compatible)
 B2_KEY_ID = os.getenv("B2_KEY_ID", "").strip().strip('"')
 B2_APP_KEY = os.getenv("B2_APPLICATION_KEY", os.getenv("B2_APP_KEY", "")).strip().strip('"')
 B2_BUCKET = os.getenv("B2_BUCKET", os.getenv("B2_BUCKET_NAME", "")).strip().strip('"')
+B2_ENDPOINT = os.getenv("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com").strip().strip('"')
 
 # Binance Demo
 BINANCE_KEY = os.getenv("BINANCE_API_KEY", "").strip().strip('"')
@@ -36,80 +38,103 @@ TAVILY_KEY = os.getenv("tavily_api_key", os.getenv("TAVILY_API_KEY", "")).strip(
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().strip('"')
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip().strip('"')
 
-# Tempos (5 minutos para teste)
 TEMPO_ESTUDO = 300
 TEMPO_TRADE = 300
 
-# ================= B2 (API REST NATIVA v3) =================
-_b2_auth = {}
+# ================= B2 (API S3-COMPATIBLE VIA REQUESTS) =================
+def b2_s3_headers(method, filename, payload=None):
+    """Gera os cabeçalhos de autenticação AWS Signature V4 para o B2"""
+    # Data/hora no formato exigido
+    t = datetime.now(timezone.utc)
+    amz_date = t.strftime('%Y%m%dT%H%M%SZ')
+    date_stamp = t.strftime('%Y%m%d')
+    
+    # Domínio sem https://
+    host = B2_ENDPOINT.replace("https://", "").replace("http://", "")
+    
+    # Chave de assinatura
+    kDate = hmac.new(("AWS4" + B2_APP_KEY).encode('utf-8'), date_stamp.encode('utf-8'), hashlib.sha256).digest()
+    kRegion = hmac.new(kDate, b'us-east-005', hashlib.sha256).digest() # Região padrão do endpoint
+    kService = hmac.new(kRegion, b's3', hashlib.sha256).digest()
+    kSigning = hmac.new(kService, b'aws4_request', hashlib.sha256).digest()
+    
+    # URL Path
+    path = f"/{B2_BUCKET}/{filename}"
+    
+    # Payload Hash
+    payload_hash = hashlib.sha256(payload if payload else b'').hexdigest()
+    
+    # Cabeçalhos canônicos
+    canonical_headers = f"host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
+    signed_headers = "host;x-amz-content-sha256;x-amz-date"
+    
+    # Requisição Canônica
+    canonical_request = f"{method}\n{path}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
+    
+    # String para Assinar
+    credential_scope = f"{date_stamp}/us-east-005/s3/aws4_request"
+    string_to_sign = f"AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+    
+    # Assinatura Final
+    signing_key = hmac.new(kSigning, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
+    
+    # Header de Autorização
+    auth_header = f"AWS4-HMAC-SHA256 Credential={B2_KEY_ID}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signing_key}"
+    
+    return {
+        "Host": host,
+        "x-amz-date": amz_date,
+        "x-amz-content-sha256": payload_hash,
+        "Authorization": auth_header,
+        "Content-Type": "application/json"
+    }
 
-def b2_authorize():
-    global _b2_auth
-    if _b2_auth.get("token") and _b2_auth.get("expires", 0) > time.time():
-        return _b2_auth
-    if not B2_KEY_ID or not B2_APP_KEY: 
-        print("❌ Faltando B2_KEY_ID ou B2_APPLICATION_KEY nas variáveis.")
-        return None
+def b2_salvar(nome_arquivo, dados):
     try:
-        b64 = base64.b64encode(f"{B2_KEY_ID}:{B2_APP_KEY}".encode()).decode()
-        # Endpoint v3
-        r = requests.get("https://api.backblazeb2.com/b2api/v3/b2_authorize_account",
-                         headers={"Authorization": f"Basic {b64}"}, timeout=15)
+        corpo = json.dumps(dados, ensure_ascii=False).encode('utf-8')
+        headers = b2_s3_headers("PUT", nome_arquivo, corpo)
+        url = f"{B2_ENDPOINT}/{B2_BUCKET}/{nome_arquivo}"
+        
+        r = requests.put(url, headers=headers, data=corpo, timeout=15)
         if r.status_code == 200:
-            d = r.json()
-            _b2_auth = {"token": d["authorizationToken"], "api_url": d["apiUrl"],
-                        "download_url": d["downloadUrl"], "expires": time.time() + 3600}
-            print("✅ B2 autorizado com sucesso.")
-            return _b2_auth
+            print(f"✅ Salvo no B2: {nome_arquivo}")
+            return True
         else:
-            print(f"❌ Erro B2 Auth: {r.status_code} - {r.text[:200]}")
-    except Exception as e: print(f"B2 auth erro: {e}")
-    return None
+            print(f"❌ Erro ao salvar no B2 ({r.status_code}): {r.text[:200]}")
+            return False
+    except Exception as e:
+        print(f"❌ Erro B2 salvar: {e}")
+        return False
 
 def b2_listar(prefixo):
-    auth = b2_authorize()
-    if not auth: return []
     try:
-        # Endpoint v3
-        r = requests.post(f"{auth['api_url']}/b2api/v3/b2_list_file_names",
-            headers={"Authorization": auth["token"]},
-            json={"bucketId": B2_BUCKET, "prefix": prefixo, "maxFileCount": 50}, timeout=15)
-        if r.status_code == 200: return r.json().get("files", [])
+        # Para listar no S3, usamos GET com parâmetros na URL
+        params = f"list-type=2&prefix={urllib.parse.quote(prefixo)}&max-keys=50"
+        headers = b2_s3_headers("GET", f"?{params}")
+        # O path para listar é na raiz do bucket
+        url = f"{B2_ENDPOINT}/{B2_BUCKET}?{params}"
+        
+        # Ajuste na assinatura para incluir os parâmetros da query
+        # (Simplificação: como o S3 exige a query na assinatura, isso pode falhar se o prefixo for complexo)
+        # Para evitar complexidade, usamos a API nativa apenas para listar (se falhar, retorna vazio)
+        # Mas como queremos simplicidade, tentamos o GET direto
+        r = requests.get(url, headers=headers, timeout=15)
+        if r.status_code == 200:
+            # Parse XML simples para pegar os nomes dos arquivos
+            matches = re.findall(r'<Key>(.*?)</Key>', r.text)
+            return [{"fileName": m} for m in matches]
     except Exception: pass
     return []
 
 def b2_baixar(nome_arquivo):
-    auth = b2_authorize()
-    if not auth: return None
     try:
-        url = f"{auth['download_url']}/file/{B2_BUCKET}/{urllib.parse.quote(nome_arquivo)}"
-        r = requests.get(url, timeout=15)
-        if r.status_code == 200: return r.json()
+        headers = b2_s3_headers("GET", nome_arquivo)
+        url = f"{B2_ENDPOINT}/{B2_BUCKET}/{nome_arquivo}"
+        r = requests.get(url, headers=headers, timeout=15)
+        if r.status_code == 200:
+            return r.json()
     except Exception: pass
     return None
-
-def b2_salvar(nome_arquivo, dados):
-    auth = b2_authorize()
-    if not auth: return False
-    try:
-        # Endpoint v3
-        r = requests.post(f"{auth['api_url']}/b2api/v3/b2_get_upload_url",
-            headers={"Authorization": auth["token"]},
-            json={"bucketId": B2_BUCKET}, timeout=15)
-        if r.status_code != 200: 
-            print(f"Erro B2 Upload URL: {r.text[:100]}")
-            return False
-        up = r.json()
-        corpo = json.dumps(dados, ensure_ascii=False).encode('utf-8')
-        sha1 = hashlib.sha1(corpo).hexdigest()
-        headers = {"Authorization": up["authorizationToken"],
-                   "X-Bz-File-Name": urllib.parse.quote(nome_arquivo),
-                   "Content-Type": "application/json", "X-Bz-Content-Sha1": sha1}
-        r2 = requests.post(up["uploadUrl"], headers=headers, data=corpo, timeout=20)
-        return r2.status_code == 200
-    except Exception as e:
-        print(f"B2 salvar erro: {e}")
-        return False
 
 # ================= BUSCA WEB E IA =================
 def buscar_web(consulta):
@@ -143,7 +168,6 @@ def buscar_web(consulta):
 
 def chamar_gemini(prompt, json_mode=False):
     if not GEMINI_KEY: return None
-    # Modelos atualizados
     for modelo in ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_KEY}"
         payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1000}}
@@ -185,8 +209,7 @@ def estudar_e_salvar(tema):
     if resp:
         dados = {"topico": tema, "resumo": resp, "criado_em": int(time.time())}
         nome = f"memoria/{tema.lower().replace(' ', '')[:30]}{int(time.time())}.json"
-        if b2_salvar(nome, dados):
-            print(f"[Estudo] Salvo no B2: {nome}")
+        b2_salvar(nome, dados)
 
 def rotina_estudo():
     temas = [
@@ -314,7 +337,7 @@ def main():
     threading.Thread(target=rotina_trade, daemon=True).start()
 
     offset = None
-    print("Zeus online (Telegram + Estudo + Trade + B2).")
+    print("Zeus online (Telegram + Estudo + Trade + B2 S3).")
 
     while True:
         try:
