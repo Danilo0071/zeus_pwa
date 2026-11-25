@@ -25,44 +25,97 @@ def _salvar_ultimo_id(update_id: int) -> None:
         print(f"Aviso ao salvar estado: {e}")
 
 
+def _chamar_gemini(texto: str, gemini_key: str) -> str:
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.5-flash:generateContent?key={gemini_key}"
+    )
+    payload = {
+        "systemInstruction": {
+            "parts": [
+                {
+                    "text": "Você é o Zeus. Responda de forma direta, objetiva e em português."
+                }
+            ]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": texto}],
+            }
+        ],
+        "generationConfig": {
+            "maxOutputTokens": 600,
+        },
+    }
+    r = requests.post(url, json=payload, timeout=25)
+    if r.status_code == 200:
+        parts = (
+            r.json()
+            .get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [])
+        )
+        textos = [p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")]
+        return "".join(textos).strip()
+    print(f"Erro Gemini ({r.status_code}): {r.text[:200]}")
+    return ""
+
+
+def _chamar_groq(texto: str, groq_key: str) -> str:
+    r = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {groq_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Você é o Zeus. Responda de forma direta, objetiva e em português.",
+                },
+                {"role": "user", "content": texto},
+            ],
+            "max_tokens": 600,
+        },
+        timeout=25,
+    )
+    if r.status_code == 200:
+        return (
+            r.json()
+            .get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+    print(f"Erro Groq ({r.status_code}): {r.text[:200]}")
+    return ""
+
+
 def _gerar_resposta(texto: str) -> str:
-    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
     if texto == "/start":
         return "Zeus ativo em tempo real no Telegram. Pode mandar."
 
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+
+    if gemini_key:
+        try:
+            resposta = _chamar_gemini(texto, gemini_key)
+            if resposta:
+                return resposta
+        except Exception as e:
+            print(f"Exceção Gemini: {e}")
+
     if groq_key:
         try:
-            r = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {groq_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "Você é o Zeus. Responda de forma direta, objetiva e em português.",
-                        },
-                        {"role": "user", "content": texto},
-                    ],
-                    "max_tokens": 600,
-                },
-                timeout=25,
-            )
-            if r.status_code == 200:
-                conteudo = (
-                    r.json()
-                    .get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                    .strip()
-                )
-                if conteudo:
-                    return conteudo
+            resposta = _chamar_groq(texto, groq_key)
+            if resposta:
+                return resposta
         except Exception as e:
-            print(f"Erro Groq: {e}")
+            print(f"Exceção Groq: {e}")
 
     return f"Recebido: {texto}"
 
@@ -94,7 +147,7 @@ def main() -> None:
         pass
 
     ultimo_id = _carregar_ultimo_id()
-    print("Zeus escutando mensagens em tempo real...")
+    print("Zeus escutando mensagens em tempo real (Gemini)...")
 
     while True:
         params = {"timeout": 20}
