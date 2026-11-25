@@ -1229,7 +1229,7 @@ def zf_enviar_telegram(texto: str, chat_id_destino: str = "") -> str:
     destino = str(chat_id_destino or chat_id_padrao or "").strip()
 
     if not token or not destino:
-        return "❌ ERRO CRÍTICO: Token do Telegram ou Chat ID não encontrados nos Secrets."
+        return "❌ ERRO CRÍTICO: Token do Telegram ou Chat ID não encontrados no secrets.toml."
 
     msg_limpa = (texto or "").strip() or "Teste de telemetria e protocolo de bunker acionado por Danilo."
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -1246,7 +1246,6 @@ def zf_enviar_telegram(texto: str, chat_id_destino: str = "") -> str:
         return f"❌ FALHA NA API DO TELEGRAM (Status {r.status_code}): {r.text}"
     except Exception as e:
         return f"❌ EXCEÇÃO DE REDE NO TELEGRAM: {str(e)}"
-
 
 def _rt_comando_telegram(texto: str) -> str:
     t = re.sub(
