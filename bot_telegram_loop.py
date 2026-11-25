@@ -10,16 +10,16 @@ import html
 import threading
 import requests
 
-# ================= CONFIGURAÇÕES (PUXANDO DO SEU AMBIENTE) =================
+# ================= CONFIGURAÇÕES =================
 REPO_PADRAO = os.getenv("GITHUB_REPO", "Danilo0071/zeus_pwa").strip()
 BRANCH_PADRAO = os.getenv("GITHUB_BRANCH", "main").strip()
 
-# B2 (Ajustado para os nomes das suas fotos)
+# B2
 B2_KEY_ID = os.getenv("B2_KEY_ID", "").strip()
 B2_APP_KEY = os.getenv("B2_APPLICATION_KEY", "").strip()
 B2_BUCKET = os.getenv("B2_BUCKET_NAME", os.getenv("B2_BUCKET", "")).strip()
 
-# Binance Demo (Ajustado conforme fotos)
+# Binance Demo
 BINANCE_KEY = os.getenv("BINANCE_API_KEY", "").strip()
 BINANCE_SECRET = os.getenv("BINANCE_API_SECRET", "").strip()
 BINANCE_USE_DEMO = os.getenv("BINANCE_USE_DEMO", "true").lower() == "true"
@@ -27,7 +27,7 @@ BINANCE_MAX_LEVERAGE = float(os.getenv("BINANCE_MAX_LEVERAGE", "2"))
 BINANCE_BASE_URL = "https://demo-fapi.binance.com" if BINANCE_USE_DEMO else "https://fapi.binance.com"
 BINANCE_SYMBOL = "BTCUSDT"
 
-# IA (Ajustado o Tavily para minúsculo, igual na sua foto)
+# IA
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GROK_KEY = os.getenv("GROK_API_KEY", "").strip()
 TAVILY_KEY = os.getenv("tavily_api_key", os.getenv("TAVILY_API_KEY", "")).strip()
@@ -36,12 +36,11 @@ TAVILY_KEY = os.getenv("tavily_api_key", os.getenv("TAVILY_API_KEY", "")).strip(
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-# Tempos (em segundos) - Mudei para 5 minutos para você ver a ação mais rápido nos testes
-TEMPO_ESTUDO = 300   # Estuda um tema novo a cada 5 minutos
-TEMPO_TRADE = 300    # Operação e relatório a cada 5 minutos (mude para 3600 depois que validar)
-TEMPO_RELATORIO = 300
+# Tempos (5 minutos para teste)
+TEMPO_ESTUDO = 300
+TEMPO_TRADE = 300
 
-# ================= B2 (API REST NATIVA - SEM SDK) =================
+# ================= B2 (API REST NATIVA - CORRIGIDO PARA v3) =================
 _b2_auth = {}
 
 def b2_authorize():
@@ -50,16 +49,22 @@ def b2_authorize():
         return _b2_auth
     if not B2_KEY_ID or not B2_APP_KEY: return None
     try:
-        b64 = base64.b64encode(f"{B2_KEY_ID}:{B2_APP_KEY}".encode()).decode()
-        r = requests.get("https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
+        # Limpeza extra para evitar espaços invisíveis
+        key_id_limpa = B2_KEY_ID.strip().strip('"')
+        app_key_limpa = B2_APP_KEY.strip().strip('"')
+        
+        b64 = base64.b64encode(f"{key_id_limpa}:{app_key_limpa}".encode()).decode()
+        # Mudança para a versão v3 da API
+        r = requests.get("https://api.backblazeb2.com/b2api/v3/b2_authorize_account",
                          headers={"Authorization": f"Basic {b64}"}, timeout=15)
         if r.status_code == 200:
             d = r.json()
             _b2_auth = {"token": d["authorizationToken"], "api_url": d["apiUrl"],
                         "download_url": d["downloadUrl"], "expires": time.time() + 3600}
+            print("✅ B2 autorizado com sucesso.")
             return _b2_auth
         else:
-            print(f"Erro B2 Auth: {r.status_code} - {r.text[:100]}")
+            print(f"❌ Erro B2 Auth: {r.status_code} - {r.text[:200]}")
     except Exception as e: print(f"B2 auth erro: {e}")
     return None
 
@@ -67,11 +72,10 @@ def b2_listar(prefixo):
     auth = b2_authorize()
     if not auth: return []
     try:
-        r = requests.post(f"{auth['api_url']}/b2api/v2/b2_list_file_names",
+        r = requests.post(f"{auth['api_url']}/b2api/v3/b2_list_file_names",
             headers={"Authorization": auth["token"]},
             json={"bucketId": B2_BUCKET, "prefix": prefixo, "maxFileCount": 50}, timeout=15)
         if r.status_code == 200: return r.json().get("files", [])
-        else: print(f"Erro B2 Listar: {r.text[:100]}")
     except Exception: pass
     return []
 
@@ -89,7 +93,7 @@ def b2_salvar(nome_arquivo, dados):
     auth = b2_authorize()
     if not auth: return False
     try:
-        r = requests.post(f"{auth['api_url']}/b2api/v2/b2_get_upload_url",
+        r = requests.post(f"{auth['api_url']}/b2api/v3/b2_get_upload_url",
             headers={"Authorization": auth["token"]},
             json={"bucketId": B2_BUCKET}, timeout=15)
         if r.status_code != 200: 
@@ -139,8 +143,8 @@ def buscar_web(consulta):
 
 def chamar_gemini(prompt, json_mode=False):
     if not GEMINI_KEY: return None
-    # Modelos estáveis para contas novas (evita 404)
-    for modelo in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]:
+    # Modelos que estão funcionando para contas novas
+    for modelo in ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash"]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_KEY}"
         payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1000}}
         if json_mode: payload["generationConfig"]["responseMimeType"] = "application/json"
@@ -167,7 +171,7 @@ def chamar_grok(prompt):
     except Exception: pass
     return None
 
-# ================= MÓDULO DE ESTUDO (BACKGROUND) =================
+# ================= MÓDULO DE ESTUDO =================
 def estudar_e_salvar(tema):
     print(f"[Estudo] Buscando conhecimento sobre: {tema}")
     contexto = buscar_web(tema)
@@ -189,7 +193,6 @@ def rotina_estudo():
         "Alavancagem e gerenciamento de risco em cripto",
         "Análise técnica: suporte, resistência e tendências",
         "Estratégias de trade para iniciantes na Binance Futures",
-        "Como usar stop loss e take profit com segurança",
         "Psicologia do trading e controle emocional"
     ]
     while True:
@@ -217,36 +220,28 @@ def binance_request(method, endpoint, params=None, assinado=True):
         if method == "GET": r = requests.get(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=15)
         else: r = requests.post(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=15)
         return r.json() if r.status_code in (200, 400) else None
-    except Exception as e: 
-        print(f"[Binance] Erro: {e}")
-        return None
+    except Exception: return None
 
 def consultar_saldo():
     conta = binance_request("GET", "/fapi/v2/account")
-    if not conta: 
-        # Tenta buscar o erro exato da Binance Demo
-        if "msg" in conta: print(f"[Binance] {conta['msg']}")
-        return None
+    if not conta: return None
     return {
         "saldo": float(conta.get("totalWalletBalance", 0)),
         "pnl": float(conta.get("totalUnrealizedProfit", 0))
     }
 
 def analisar_e_operar():
-    # 1. Busca conhecimento no B2 para decidir (Não gasta cota de IA)
     arquivos = b2_listar("memoria/")
     estrategia = "Estratégia padrão: seguir tendência e usar stop curto."
     if arquivos:
         recente = b2_baixar(arquivos[-1]["fileName"])
         if recente: estrategia = recente.get("resumo", estrategia)[:500]
     
-    # 2. Pega dados de mercado
     ticker = binance_request("GET", "/fapi/v1/ticker/price", {"symbol": BINANCE_SYMBOL}, assinado=False)
     if not ticker or "price" not in ticker: 
         return {"acao": "WAIT", "motivo": "Falha ao obter preço da Binance"}
     preco = float(ticker["price"])
     
-    # 3. LLM decide com base no que aprendeu
     prompt = f"""Você é o Zeus Trader. Decida se deve ABRIR (BUY/SELL) ou AGUARDAR (WAIT).
     Estratégia da memória: {estrategia}
     Preço atual do {BINANCE_SYMBOL}: {preco}
@@ -258,7 +253,6 @@ def analisar_e_operar():
     except:
         decisao = {"acao": "WAIT", "motivo": "IA indisponível no momento", "tamanho": 0}
     
-    # 4. Executa ordem
     log_acao = {"preco": preco, "decisao": decisao, "ts": int(time.time())}
     if decisao.get("acao") in ["BUY", "SELL"]:
         binance_request("POST", "/fapi/v1/leverage", {"symbol": BINANCE_SYMBOL, "leverage": int(BINANCE_MAX_LEVERAGE)})
@@ -292,15 +286,12 @@ def rotina_trade():
                        f"🎯 Ação: {decisao['acao']}\n"
                        f"🧠 Motivo: {decisao['motivo']}")
                 enviar_telegram(msg)
-            else:
-                print("[Trade] Saldo não obtido (A Binance Demo pode estar com instabilidade).")
         except Exception as e:
             print(f"[Trade] Erro na rotina: {e}")
         time.sleep(TEMPO_TRADE)
 
 # ================= TELEGRAM LOOP (MAIN) =================
 def gerar_resposta(texto):
-    # Tenta achar resposta na memória B2 primeiro
     arquivos = b2_listar("memoria/")
     for arq in reversed(arquivos[-5:]):
         dados = b2_baixar(arq["fileName"])
@@ -319,7 +310,6 @@ def main():
         print("Erro: TELEGRAM_BOT_TOKEN não configurado.")
         return
 
-    # Inicia as rotinas em segundo plano
     threading.Thread(target=rotina_estudo, daemon=True).start()
     threading.Thread(target=rotina_trade, daemon=True).start()
 
@@ -344,14 +334,10 @@ def main():
                 if not texto or not chat_id: continue
                 if TG_CHAT_ID and chat_id != TG_CHAT_ID: continue
                 
-                # Comandos
                 texto_lower = texto.lower()
                 if texto_lower == "status trade":
                     s = consultar_saldo()
-                    resp = f"💰 Saldo: {s['saldo']:.2f} | 📈 PnL: {s['pnl']:.2f}" if s else "❌ Erro ao acessar Binance Demo (verifique as chaves)."
-                elif texto_lower == "estudar agora":
-                    threading.Thread(target=estudar_e_salvar, args=("Estratégias avançadas de price action",), daemon=True).start()
-                    resp = "🧠 Iniciei um novo ciclo de estudos em segundo plano!"
+                    resp = f"💰 Saldo: {s['saldo']:.2f} | 📈 PnL: {s['pnl']:.2f}" if s else "❌ Erro ao acessar Binance Demo."
                 else:
                     resp = gerar_resposta(texto)
                 
@@ -361,5 +347,5 @@ def main():
             print(f"Erro no loop do Telegram: {e}")
             time.sleep(5)
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
