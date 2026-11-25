@@ -14,47 +14,45 @@ import requests
 REPO_PADRAO = os.getenv("GITHUB_REPO", "Danilo0071/zeus_pwa").strip()
 BRANCH_PADRAO = os.getenv("GITHUB_BRANCH", "main").strip()
 
-# B2
-B2_KEY_ID = os.getenv("B2_KEY_ID", "").strip()
-B2_APP_KEY = os.getenv("B2_APPLICATION_KEY", "").strip()
-B2_BUCKET = os.getenv("B2_BUCKET_NAME", os.getenv("B2_BUCKET", "")).strip()
+# B2 - Ajustado para ler B2_BUCKET e B2_BUCKET_NAME
+B2_KEY_ID = os.getenv("B2_KEY_ID", "").strip().strip('"')
+B2_APP_KEY = os.getenv("B2_APPLICATION_KEY", os.getenv("B2_APP_KEY", "")).strip().strip('"')
+B2_BUCKET = os.getenv("B2_BUCKET", os.getenv("B2_BUCKET_NAME", "")).strip().strip('"')
 
 # Binance Demo
-BINANCE_KEY = os.getenv("BINANCE_API_KEY", "").strip()
-BINANCE_SECRET = os.getenv("BINANCE_API_SECRET", "").strip()
+BINANCE_KEY = os.getenv("BINANCE_API_KEY", "").strip().strip('"')
+BINANCE_SECRET = os.getenv("BINANCE_API_SECRET", "").strip().strip('"')
 BINANCE_USE_DEMO = os.getenv("BINANCE_USE_DEMO", "true").lower() == "true"
 BINANCE_MAX_LEVERAGE = float(os.getenv("BINANCE_MAX_LEVERAGE", "2"))
 BINANCE_BASE_URL = "https://demo-fapi.binance.com" if BINANCE_USE_DEMO else "https://fapi.binance.com"
 BINANCE_SYMBOL = "BTCUSDT"
 
 # IA
-GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GROK_KEY = os.getenv("GROK_API_KEY", "").strip()
-TAVILY_KEY = os.getenv("tavily_api_key", os.getenv("TAVILY_API_KEY", "")).strip()
+GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip().strip('"')
+GROK_KEY = os.getenv("GROK_API_KEY", "").strip().strip('"')
+TAVILY_KEY = os.getenv("tavily_api_key", os.getenv("TAVILY_API_KEY", "")).strip().strip('"')
 
 # Telegram
-TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().strip('"')
+TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip().strip('"')
 
 # Tempos (5 minutos para teste)
 TEMPO_ESTUDO = 300
 TEMPO_TRADE = 300
 
-# ================= B2 (API REST NATIVA - CORRIGIDO PARA v3) =================
+# ================= B2 (API REST NATIVA v3) =================
 _b2_auth = {}
 
 def b2_authorize():
     global _b2_auth
     if _b2_auth.get("token") and _b2_auth.get("expires", 0) > time.time():
         return _b2_auth
-    if not B2_KEY_ID or not B2_APP_KEY: return None
+    if not B2_KEY_ID or not B2_APP_KEY: 
+        print("❌ Faltando B2_KEY_ID ou B2_APPLICATION_KEY nas variáveis.")
+        return None
     try:
-        # Limpeza extra para evitar espaços invisíveis
-        key_id_limpa = B2_KEY_ID.strip().strip('"')
-        app_key_limpa = B2_APP_KEY.strip().strip('"')
-        
-        b64 = base64.b64encode(f"{key_id_limpa}:{app_key_limpa}".encode()).decode()
-        # Mudança para a versão v3 da API
+        b64 = base64.b64encode(f"{B2_KEY_ID}:{B2_APP_KEY}".encode()).decode()
+        # Endpoint v3
         r = requests.get("https://api.backblazeb2.com/b2api/v3/b2_authorize_account",
                          headers={"Authorization": f"Basic {b64}"}, timeout=15)
         if r.status_code == 200:
@@ -72,6 +70,7 @@ def b2_listar(prefixo):
     auth = b2_authorize()
     if not auth: return []
     try:
+        # Endpoint v3
         r = requests.post(f"{auth['api_url']}/b2api/v3/b2_list_file_names",
             headers={"Authorization": auth["token"]},
             json={"bucketId": B2_BUCKET, "prefix": prefixo, "maxFileCount": 50}, timeout=15)
@@ -93,6 +92,7 @@ def b2_salvar(nome_arquivo, dados):
     auth = b2_authorize()
     if not auth: return False
     try:
+        # Endpoint v3
         r = requests.post(f"{auth['api_url']}/b2api/v3/b2_get_upload_url",
             headers={"Authorization": auth["token"]},
             json={"bucketId": B2_BUCKET}, timeout=15)
@@ -143,8 +143,8 @@ def buscar_web(consulta):
 
 def chamar_gemini(prompt, json_mode=False):
     if not GEMINI_KEY: return None
-    # Modelos que estão funcionando para contas novas
-    for modelo in ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash"]:
+    # Modelos atualizados
+    for modelo in ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_KEY}"
         payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1000}}
         if json_mode: payload["generationConfig"]["responseMimeType"] = "application/json"
