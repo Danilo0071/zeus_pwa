@@ -84,10 +84,8 @@ def buscar_contexto_web(consulta):
                         partes.append(f"- {titulo}: {trecho}")
                 if partes:
                     return "\n".join(partes)
-            else:
-                print(f"Aviso Tavily ({r.status_code}): {r.text[:160]}")
-        except Exception as e:
-            print(f"Erro Tavily: {e}")
+        except Exception:
+            pass
 
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
@@ -104,20 +102,23 @@ def buscar_contexto_web(consulta):
                     linhas.append(f"- {t_limpo}: {s_limpo}")
             if linhas:
                 return "\n".join(linhas)
-    except Exception as e:
-        print(f"Erro DDG: {e}")
+    except Exception:
+        pass
     return ""
 
 
 def chamar_gemini(prompt, api_key):
     if not api_key:
         return None
-    # Lista fixa de modelos: evita a chamada extra de descoberta (que causava os erros 404/400/503).
+        
+    # MODELOS ATUALIZADOS: O 1.5-flash é o mais estável no momento. 
+    # Os modelos 2.0 e 2.5 estão dando erro 404 para novas contas.
     modelos = [
-        "gemini-2.0-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-flash-latest",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-pro"
     ]
+    
     for modelo in modelos:
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
@@ -125,7 +126,7 @@ def chamar_gemini(prompt, api_key):
         )
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024},
+            "generationConfig": {"temperature": 0.5, "maxOutputTokens": 1000},
         }
         try:
             r = requests.post(url, json=payload, timeout=20)
@@ -136,43 +137,9 @@ def chamar_gemini(prompt, api_key):
                     texto_resp = "".join(p.get("text", "") for p in partes).strip()
                     if texto_resp:
                         return texto_resp
-            print(f"Aviso Gemini ({modelo} - {r.status_code}): {r.text[:160]}")
+            print(f"Aviso Gemini ({modelo} - {r.status_code}): {r.text[:100]}")
         except Exception as e:
             print(f"Erro Gemini ({modelo}): {e}")
-    return None
-
-
-def chamar_grok(prompt):
-    grok_key = os.getenv("GROK_API_KEY", "").strip().strip('"')
-    if not grok_key:
-        return None
-    for modelo in ["grok-2-latest", "grok-3-mini", "grok-beta"]:
-        try:
-            r = requests.post(
-                "https://api.x.ai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {grok_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": modelo,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=20,
-            )
-            if r.status_code == 200:
-                conteudo = (
-                    r.json()
-                    .get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                    .strip()
-                )
-                if conteudo:
-                    return conteudo
-            print(f"Aviso Grok ({modelo} - {r.status_code}): {r.text[:160]}")
-        except Exception as e:
-            print(f"Erro Grok ({modelo}): {e}")
     return None
 
 
@@ -183,32 +150,21 @@ def gerar_resposta(texto, gemini_key):
 
     contexto_web = buscar_contexto_web(texto)
 
-    # Prompt reforçado para garantir resposta em português do Brasil.
     prompt = (
-        "INSTRUÇÃO OBRIGATÓRIA: Você DEVE responder exclusivamente em português do Brasil. "
-        "Não importa o idioma do contexto ou da pergunta; a resposta final deve ser em português brasileiro natural.\n"
-        "Você é o Zeus, assistente pessoal direto, parceiro, inteligente e objetivo, "
-        "com o mesmo estilo natural do app Zeus (sem listar links crus nem parecer robô).\n"
-        f"Mensagem do usuário: {texto}\n"
+        "VOCÊ É O ZEUS. Sua única função é responder em PORTUGUÊS DO BRASIL de forma direta e amigável.\n"
+        "NUNCA responda em inglês, mesmo que o contexto abaixo esteja em inglês. Traduza tudo.\n"
+        f"Usuário perguntou: {texto}\n"
     )
     if contexto_web:
-        prompt += (
-            f"\nContexto encontrado na web (traduza e adapte para português natural):\n{contexto_web}\n"
-        )
-    prompt += "\nLembrete final: escreva a resposta inteira em português do Brasil."
+        prompt += f"\nUse estas informações da web para responder (se não fizer sentido com a pergunta, ignore):\n{contexto_web}\n"
 
     resp_gem = chamar_gemini(prompt, gemini_key)
     if resp_gem:
         return resp_gem
 
-    resp_grok = chamar_grok(prompt)
-    if resp_grok:
-        return resp_grok
-
-    if contexto_web:
-        return f"Achei isso na busca:\n\n{contexto_web}"
-
-    return "As IAs e a busca falharam agora. Tente novamente em instantes."
+    # Se o Gemini falhar por completo (erro 404, 503, etc), NÃO joga o texto em inglês na tela.
+    # Em vez disso, avisa o usuário amigavelmente.
+    return "Poxa, meus servidores de inteligência artificial estão sobrecarregados agora e não consegui processar sua resposta. Tente me perguntar novamente em alguns minutinhos!"
 
 
 def enviar_mensagem(token, chat_id, texto):
@@ -216,17 +172,9 @@ def enviar_mensagem(token, chat_id, texto):
     for inicio in range(0, len(texto), 4000):
         parte = texto[inicio : inicio + 4000]
         try:
-            r = requests.post(
-                url,
-                json={"chat_id": chat_id, "text": parte},
-                timeout=20,
-            )
-            if r.status_code == 200:
-                print(f"Envio para {chat_id}: OK")
-            else:
-                print(f"Erro ao enviar para {chat_id} ({r.status_code}): {r.text[:200]}")
+            requests.post(url, json={"chat_id": chat_id, "text": parte}, timeout=20)
         except Exception as e:
-            print(f"Falha de rede ao enviar para {chat_id}: {e}")
+            print(f"Falha ao enviar: {e}")
 
 
 def main():
@@ -239,7 +187,7 @@ def main():
         return
 
     offset = None
-    print("Zeus escutando mensagens em tempo real...")
+    print("Zeus online e escutando...")
 
     while True:
         try:
@@ -253,7 +201,6 @@ def main():
                 timeout=35,
             )
             if r.status_code != 200:
-                print(f"Aviso getUpdates ({r.status_code}): {r.text[:200]}")
                 time.sleep(3)
                 continue
 
@@ -268,16 +215,15 @@ def main():
                     continue
 
                 if chat_id_autorizado and chat_id != chat_id_autorizado:
-                    print(f"Ignorando chat_id nao autorizado: {chat_id}")
                     continue
 
                 resposta = gerar_resposta(texto, gemini_key)
                 enviar_mensagem(token, chat_id, resposta)
 
         except Exception as e:
-            print(f"Erro no loop principal: {e}")
+            print(f"Erro no loop: {e}")
             time.sleep(3)
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
