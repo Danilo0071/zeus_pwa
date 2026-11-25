@@ -81,3 +81,75 @@ def gerar_resposta(texto, gemini_key):
         return resp_web
 
     return "No momento a IA e a busca estao com instabilidade temporaria. Tente novamente em alguns segundos."
+
+
+def enviar_mensagem(token, chat_id, texto):
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    for inicio in range(0, len(texto), 4000):
+        parte = texto[inicio : inicio + 4000]
+        try:
+            r = requests.post(
+                url,
+                json={"chat_id": chat_id, "text": parte},
+                timeout=20,
+            )
+            if r.status_code == 200:
+                print(f"Envio para {chat_id}: OK")
+            else:
+                print(f"Erro ao enviar para {chat_id} ({r.status_code}): {r.text[:200]}")
+        except Exception as e:
+            print(f"Falha de rede ao enviar para {chat_id}: {e}")
+
+
+def main():
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    chat_id_autorizado = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+
+    if not token:
+        print("Erro: TELEGRAM_BOT_TOKEN nao configurado.")
+        return
+
+    offset = None
+    print("Zeus escutando mensagens em tempo real...")
+
+    while True:
+        try:
+            params = {"timeout": 25}
+            if offset is not None:
+                params["offset"] = offset
+
+            r = requests.get(
+                f"https://api.telegram.org/bot{token}/getUpdates",
+                params=params,
+                timeout=35,
+            )
+            if r.status_code != 200:
+                print(f"Aviso getUpdates ({r.status_code}): {r.text[:200]}")
+                time.sleep(3)
+                continue
+
+            dados = r.json()
+            for att in dados.get("result", []):
+                offset = att["update_id"] + 1
+                msg = att.get("message") or att.get("edited_message") or {}
+                texto = (msg.get("text") or "").strip()
+                chat_id = str(msg.get("chat", {}).get("id", "")).strip()
+
+                if not texto or not chat_id:
+                    continue
+
+                if chat_id_autorizado and chat_id != chat_id_autorizado:
+                    print(f"Ignorando chat_id nao autorizado: {chat_id}")
+                    continue
+
+                resposta = gerar_resposta(texto, gemini_key)
+                enviar_mensagem(token, chat_id, resposta)
+
+        except Exception as e:
+            print(f"Erro no loop principal: {e}")
+            time.sleep(3)
+
+
+if __name__ == "__main__":
+    main()
