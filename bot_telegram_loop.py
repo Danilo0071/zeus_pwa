@@ -43,16 +43,24 @@ TG_MAX_IDADE = int(os.getenv("TG_MAX_IDADE", "3600"))
 ZEUS_JANELA_SEG = int(os.getenv("ZEUS_JANELA_SEG", "240"))
 ZEUS_MODO = os.getenv("ZEUS_MODO", "continuo").strip().lower()
 
-# Ciclos: estudo a cada 5 min (300s) ou 10 min (600s) via TEMPO_ESTUDO; trade a cada 5 min; relatório a cada 1h
-TEMPO_ESTUDO = int(os.getenv("TEMPO_ESTUDO", "300"))
-TEMPO_TRADE = int(os.getenv("TEMPO_TRADE", "300"))
+# Ciclos: estudo mais espaçado (padrão 30 min / 1800s) e trade a cada 15 min (900s) para poupar cota; relatório a cada 1h
+TEMPO_ESTUDO = int(os.getenv("TEMPO_ESTUDO", "1800"))
+TEMPO_TRADE = int(os.getenv("TEMPO_TRADE", "900"))
 TEMPO_RELATORIO_HORARIO = int(os.getenv("TEMPO_RELATORIO_HORARIO", "3600"))
+
+# Timeout curto (conexao, leitura) para pular rapido se uma IA demorar ou travar
+TIMEOUT_IA = (4, 8)
 
 # Contadores de desenvoltura na sessão
 _inicio_bot_ts = time.time()
 _ciclos_trade_rodados = 0
 _ciclos_estudo_rodados = 0
 _ultimos_aprendizados_sessao = []
+
+
+def log(msg):
+    print(msg, flush=True)
+
 
 # ================= B2 (API NATIVA) =================
 _b2_auth = {}
@@ -70,7 +78,7 @@ def b2_authorize():
         r = requests.get(
             "https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
             headers={"Authorization": f"Basic {b64}"},
-            timeout=15,
+            timeout=(4, 8),
         )
         if r.status_code == 200:
             d = r.json()
@@ -81,10 +89,10 @@ def b2_authorize():
                 "account_id": d.get("accountId", ""),
                 "expires": time.time() + 3600,
             }
-            print("✅ B2 autorizado com sucesso.")
+            log("✅ B2 autorizado com sucesso.")
             return _b2_auth
     except Exception as e:
-        print(f"B2 auth erro: {e}")
+        log(f"B2 auth erro: {e}")
     return None
 
 
@@ -102,7 +110,7 @@ def b2_bucket_alvo(auth):
             f"{auth['api_url']}/b2api/v2/b2_list_buckets",
             headers={"Authorization": auth["token"]},
             json={"accountId": auth.get("account_id", ""), "bucketName": B2_BUCKET},
-            timeout=15,
+            timeout=(4, 8),
         )
         if r.status_code == 200:
             for b in r.json().get("buckets", []):
@@ -127,7 +135,7 @@ def b2_listar(prefixo):
             f"{auth['api_url']}/b2api/v2/b2_list_file_names",
             headers={"Authorization": auth["token"]},
             json={"bucketId": bucket_alvo, "prefix": prefixo, "maxFileCount": 50},
-            timeout=15,
+            timeout=(4, 8),
         )
         if r.status_code == 200:
             return r.json().get("files", [])
@@ -142,7 +150,7 @@ def b2_baixar(nome_arquivo):
         return None
     try:
         url = f"{auth['download_url']}/file/{B2_BUCKET}/{urllib.parse.quote(nome_arquivo)}"
-        r = requests.get(url, headers={"Authorization": auth["token"]}, timeout=15)
+        r = requests.get(url, headers={"Authorization": auth["token"]}, timeout=(4, 8))
         if r.status_code == 200:
             return r.json()
     except Exception:
@@ -162,7 +170,7 @@ def b2_salvar(nome_arquivo, dados):
             f"{auth['api_url']}/b2api/v2/b2_get_upload_url",
             headers={"Authorization": auth["token"]},
             json={"bucketId": bucket_alvo},
-            timeout=15,
+            timeout=(4, 8),
         )
         if r.status_code != 200:
             return False
@@ -175,23 +183,23 @@ def b2_salvar(nome_arquivo, dados):
             "Content-Type": "application/json",
             "X-Bz-Content-Sha1": sha1,
         }
-        r2 = requests.post(up["uploadUrl"], headers=headers, data=corpo, timeout=20)
+        r2 = requests.post(up["uploadUrl"], headers=headers, data=corpo, timeout=(4, 10))
         if r2.status_code == 200:
-            print(f"✅ Salvo no B2: {nome_arquivo}")
+            log(f"✅ Salvo no B2: {nome_arquivo}")
             return True
     except Exception as e:
-        print(f"B2 salvar erro: {e}")
+        log(f"B2 salvar erro: {e}")
     return False
 
 
-def buscar_estudos_trade_b2(consulta="", limite=4):
-    """Consulta os estudos salvos em estudo_trade/ no B2 para reutilizar e aprimorar conhecimento."""
+def buscar_estudos_trade_b2(consulta="", limite=5):
+    """Consulta e acumula os estudos salvos em estudo_trade/ no B2."""
     arquivos = b2_listar("estudo_trade/")
     if not arquivos:
         return []
     palavras = [p for p in re.findall(r"[a-zA-ZÀ-ÿ0-9_]{3,}", consulta.lower())]
     encontrados = []
-    for arq in reversed(arquivos[-15:]):
+    for arq in reversed(arquivos[-20:]):
         nome = arq.get("fileName", "")
         if not nome:
             continue
@@ -215,10 +223,10 @@ def buscar_web(consulta):
                 json={
                     "api_key": TAVILY_KEY,
                     "query": consulta,
-                    "max_results": 3,
+                    "max_results": 2,
                     "include_answer": True,
                 },
-                timeout=15,
+                timeout=(4, 8),
             )
             if r.status_code == 200:
                 d = r.json()
@@ -226,21 +234,21 @@ def buscar_web(consulta):
                 if d.get("answer"):
                     partes.append(d["answer"])
                 for item in d.get("results", [])[:2]:
-                    partes.append(f"- {item.get('title','')}: {item.get('content','')[:300]}")
+                    partes.append(f"- {item.get('title','')}: {item.get('content','')[:250]}")
                 if partes:
-                    print("[Web] Tavily encontrou resultados.")
+                    log("[Web] Tavily encontrou resultados.")
                     return "\n".join(partes)
             else:
-                print(f"Aviso Tavily: {r.status_code}")
+                log(f"Aviso Tavily: {r.status_code}")
         except Exception as e:
-            print(f"Erro Tavily: {e}")
+            log(f"Erro Tavily: {e}")
 
     try:
         q = urllib.parse.quote_plus(consulta)
         r = requests.get(
             f"https://html.duckduckgo.com/html/?q={q}",
             headers={"User-Agent": "Mozilla/5.0"},
-            timeout=10,
+            timeout=(4, 7),
         )
         if r.status_code == 200:
             titulos = re.findall(r'class="result__a"[^>]>(.?)</a>', r.text, re.S)[:2]
@@ -280,8 +288,8 @@ def _listar_modelos_gemini():
         return [_gemini_modelo_ativo]
 
     candidatos_padrao = [
-        "gemini-3.8-flash",
         "gemini-3.5-flash-lite",
+        "gemini-3.8-flash",
         "gemini-4-hydrogen",
         "gemini-4-neon",
         "gemini-2.0-flash-lite",
@@ -291,7 +299,7 @@ def _listar_modelos_gemini():
         try:
             r = requests.get(
                 f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}",
-                timeout=12,
+                timeout=(3, 6),
             )
             if r.status_code == 200:
                 disponiveis = []
@@ -319,9 +327,11 @@ def chamar_gemini(prompt, json_mode=False):
     if not GEMINI_KEY:
         return None
     if time.time() < _gemini_bloqueado_ate:
+        log("[IA] Gemini em pausa temporária por limite; pulando direto para próxima IA...")
         return None
 
     for modelo in _listar_modelos_gemini():
+        log(f"[IA] Tentando Gemini ({modelo})...")
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{modelo}:generateContent?key={GEMINI_KEY}"
@@ -335,12 +345,12 @@ def chamar_gemini(prompt, json_mode=False):
                 ]
             },
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1000},
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800},
         }
         if json_mode:
             payload["generationConfig"]["responseMimeType"] = "application/json"
         try:
-            r = requests.post(url, json=payload, timeout=25)
+            r = requests.post(url, json=payload, timeout=TIMEOUT_IA)
             if r.status_code == 200:
                 _gemini_modelo_ativo = modelo
                 cands = r.json().get("candidates", [])
@@ -352,21 +362,27 @@ def chamar_gemini(prompt, json_mode=False):
                     if txt:
                         return txt
             elif r.status_code == 404:
-                print(f"Aviso Gemini ({modelo}): 404 (modelo indisponível/antigo); pulando.")
+                log(f"Aviso Gemini ({modelo}): 404; pulando.")
                 _gemini_modelos_invalidos.add(modelo)
                 if modelo == _gemini_modelo_ativo:
                     _gemini_modelo_ativo = None
             elif r.status_code == 429:
-                print(f"Aviso Gemini ({modelo}): limite 429; tentando próxima IA...")
-                _gemini_bloqueado_ate = time.time() + 60
+                log(f"Aviso Gemini ({modelo}): limite 429; pausando Gemini por 120s e tentando próxima IA...")
+                _gemini_bloqueado_ate = time.time() + 120
                 if modelo == _gemini_modelo_ativo:
                     _gemini_modelo_ativo = None
                 return None
             else:
-                print(f"Aviso Gemini ({modelo}): {r.status_code}")
+                log(f"Aviso Gemini ({modelo}): {r.status_code}; tentando próxima IA...")
                 if modelo == _gemini_modelo_ativo:
                     _gemini_modelo_ativo = None
-        except Exception:
+                return None
+        except requests.Timeout:
+            log(f"Tempo esgotado no Gemini ({modelo}); pulando para próxima IA...")
+            if modelo == _gemini_modelo_ativo:
+                _gemini_modelo_ativo = None
+        except Exception as e:
+            log(f"Erro Gemini ({modelo}): {e}; pulando...")
             if modelo == _gemini_modelo_ativo:
                 _gemini_modelo_ativo = None
     return None
@@ -381,6 +397,7 @@ def chamar_groq(prompt):
         "llama-3.3-70b-versatile",
     ]
     for modelo in modelos_groq:
+        log(f"[IA] Tentando Groq ({modelo})...")
         try:
             r = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
@@ -396,19 +413,22 @@ def chamar_groq(prompt):
                     ],
                     "temperature": 0.4,
                 },
-                timeout=25,
+                timeout=TIMEOUT_IA,
             )
             if r.status_code == 200:
                 txt = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 if txt:
                     return txt
             elif r.status_code == 404:
-                print(f"Aviso Groq ({modelo}): 404; tentando próximo modelo Groq...")
+                log(f"Aviso Groq ({modelo}): 404; tentando próximo modelo Groq...")
             else:
-                print(f"Aviso Groq ({modelo}): {r.status_code}")
+                log(f"Aviso Groq ({modelo}): {r.status_code}; pulando para próxima IA...")
                 return None
+        except requests.Timeout:
+            log(f"Tempo esgotado na Groq ({modelo}); pulando para próxima IA...")
+            return None
         except Exception as e:
-            print(f"Erro Groq ({modelo}): {e}")
+            log(f"Erro Groq ({modelo}): {e}; pulando...")
             return None
     return None
 
@@ -416,6 +436,7 @@ def chamar_groq(prompt):
 def chamar_openrouter(prompt):
     if not OPENROUTER_KEY:
         return None
+    log("[IA] Tentando OpenRouter (openrouter/free)...")
     try:
         r = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -431,22 +452,25 @@ def chamar_openrouter(prompt):
                 ],
                 "temperature": 0.4,
             },
-            timeout=25,
+            timeout=TIMEOUT_IA,
         )
         if r.status_code == 200:
             txt = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
             if txt:
                 return txt
         else:
-            print(f"Aviso OpenRouter: {r.status_code}")
+            log(f"Aviso OpenRouter: {r.status_code}; pulando para próxima IA...")
+    except requests.Timeout:
+        log("Tempo esgotado no OpenRouter; pulando para próxima IA...")
     except Exception as e:
-        print(f"Erro OpenRouter: {e}")
+        log(f"Erro OpenRouter: {e}; pulando...")
     return None
 
 
 def chamar_claude(prompt):
     if not ANTHROPIC_KEY:
         return None
+    log("[IA] Tentando Claude...")
     try:
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -457,11 +481,11 @@ def chamar_claude(prompt):
             },
             json={
                 "model": "claude-3-5-haiku-latest",
-                "max_tokens": 1000,
+                "max_tokens": 800,
                 "system": "Você é o Zeus. Responda SEMPRE em português do Brasil, de forma clara e objetiva.",
                 "messages": [{"role": "user", "content": prompt}],
             },
-            timeout=25,
+            timeout=TIMEOUT_IA,
         )
         if r.status_code == 200:
             blocos = r.json().get("content", [])
@@ -469,15 +493,18 @@ def chamar_claude(prompt):
             if txt:
                 return txt
         else:
-            print(f"Aviso Claude: {r.status_code}")
+            log(f"Aviso Claude: {r.status_code}; pulando para próxima IA...")
+    except requests.Timeout:
+        log("Tempo esgotado no Claude; pulando para próxima IA...")
     except Exception as e:
-        print(f"Erro Claude: {e}")
+        log(f"Erro Claude: {e}; pulando...")
     return None
 
 
 def chamar_mistral(prompt):
     if not MISTRAL_KEY or not USAR_MISTRAL:
         return None
+    log("[IA] Tentando Mistral...")
     try:
         r = requests.post(
             "https://api.mistral.ai/v1/chat/completions",
@@ -493,14 +520,16 @@ def chamar_mistral(prompt):
                 ],
                 "temperature": 0.4,
             },
-            timeout=25,
+            timeout=TIMEOUT_IA,
         )
         if r.status_code == 200:
             return r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         elif r.status_code in (401, 402, 403):
-            print(f"Aviso Mistral ({r.status_code}): ignorando neste ciclo.")
+            log(f"Aviso Mistral ({r.status_code}): ignorando neste ciclo.")
         else:
-            print(f"Aviso Mistral: {r.status_code}")
+            log(f"Aviso Mistral: {r.status_code}; pulando.")
+    except requests.Timeout:
+        log("Tempo esgotado no Mistral; pulando.")
     except Exception:
         pass
     return None
@@ -518,17 +547,18 @@ def chamar_ia(prompt, contexto_web="", json_mode=False):
         if resp:
             return resp
 
+    log("[IA] Nenhuma IA respondeu a tempo neste ciclo; usando fallback local/web.")
     if json_mode:
         return json.dumps({
             "acao": "WAIT",
-            "motivo": "IAs em limite temporário; aguardando próxima janela em português",
+            "motivo": "IAs em limite ou lentas; aguardando próximo ciclo com segurança",
             "tamanho": 0,
         })
 
     if contexto_web:
         trecho = contexto_web[:450].replace("\n", " ")
         return (
-            "As IAs estão com limite temporário agora, mas aqui está o resumo "
+            "As IAs estão com limite ou demora agora, mas aqui está o resumo "
             f"encontrado na busca web: {trecho}"
         )
 
@@ -556,10 +586,10 @@ def resumo_provedores():
     return "Zeus ativos: " + (", ".join(ativos) if ativos else "nenhum configurado")
 
 
-# ================= MÓDULO DE ESTUDO (estudo_trade/ NO B2) =================
+# ================= MÓDULO DE ESTUDO ACUMULATIVO (estudo_trade/ NO B2) =================
 def estudar_e_salvar(tema):
-    print(f"[Estudo] Buscando e aprimorando trade/alavancagem sobre: {tema}")
-    estudos_anteriores = buscar_estudos_trade_b2(tema, limite=2)
+    log(f"[Estudo] Buscando e acumulando conhecimento sobre: {tema}")
+    estudos_anteriores = buscar_estudos_trade_b2(tema, limite=3)
     base_anterior = "\n".join(
         f"- [{e.get('topico','')}]: {e.get('resumo','')[:320]}"
         for e in estudos_anteriores
@@ -567,14 +597,14 @@ def estudar_e_salvar(tema):
 
     contexto = buscar_web(f"{tema} alavancagem binance futures")
     prompt = (
-        f"Você é um trader especialista em futuros e alavancagem controlada. Crie e aprimore "
+        f"Você é um trader especialista em futuros e alavancagem controlada. Crie e acumule "
         f"um guia prático e direto em português do Brasil sobre: {tema}.\n"
         "Foque em leitura de gráficos, estrutura de mercado, pontos de entrada/saída, stop loss, "
         "alavancagem segura e prevenção de perdas excessivas.\n"
     )
     if base_anterior:
         prompt += (
-            "Estudos anteriores já salvos em estudo_trade/ (corrija falhas e aprofunde sem repetir):\n"
+            "Conhecimento já acumulado em estudo_trade/ (preserve o que funciona, corrija falhas e adicione novas camadas):\n"
             f"{base_anterior}\n"
         )
     if contexto:
@@ -595,8 +625,8 @@ def estudar_e_salvar(tema):
 
         resumo_curto = resp.replace("\n", " ").strip()[:130]
         _ultimos_aprendizados_sessao.append(f"{tema}: {resumo_curto}")
-        if len(_ultimos_aprendizados_sessao) > 10:
-            del _ultimos_aprendizados_sessao[:-10]
+        if len(_ultimos_aprendizados_sessao) > 12:
+            del _ultimos_aprendizados_sessao[:-12]
 
 
 def rotina_estudo():
@@ -608,13 +638,15 @@ def rotina_estudo():
         "Stop loss, take profit e proteção contra liquidação",
         "Estratégias de trade com alavancagem controlada",
     ]
+    indice = 0
     while True:
         try:
             _ciclos_estudo_rodados += 1
-            tema_escolhido = temas[int(time.time()) % len(temas)]
+            tema_escolhido = temas[indice % len(temas)]
+            indice += 1
             estudar_e_salvar(tema_escolhido)
         except Exception as e:
-            print(f"[Estudo] Erro: {e}")
+            log(f"[Estudo] Erro: {e}")
         time.sleep(TEMPO_ESTUDO)
 
 
@@ -636,9 +668,9 @@ def binance_request(method, endpoint, params=None, assinado=True):
 
     try:
         if method == "GET":
-            r = requests.get(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=15)
+            r = requests.get(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=(4, 8))
         else:
-            r = requests.post(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=15)
+            r = requests.post(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=(4, 8))
         return r.json() if r.status_code in (200, 400) else None
     except Exception:
         return None
@@ -707,8 +739,8 @@ def consultar_resultados_binance():
 
 
 def analisar_e_operar():
-    estudos = buscar_estudos_trade_b2(f"trade alavancagem {BINANCE_SYMBOL}", limite=2)
-    estrategia = "Estratégia padrão: seguir tendência, usar alavancagem baixa e stop curto."
+    estudos = buscar_estudos_trade_b2(f"trade alavancagem {BINANCE_SYMBOL}", limite=3)
+    estrategia = "Estratégia acumulada: seguir tendência, usar alavancagem baixa e stop curto."
     if estudos:
         estrategia = "\n".join(
             f"- {e.get('topico','')}: {e.get('resumo','')[:300]}" for e in estudos
@@ -727,7 +759,7 @@ def analisar_e_operar():
 
     prompt = f"""Você é o Zeus Trader operando com alavancagem controlada na Binance Futures Demo.
 Decida se deve ABRIR (BUY/SELL) ou AGUARDAR (WAIT).
-Estudos salvos em estudo_trade/: {estrategia}
+Conhecimento acumulado em estudo_trade/: {estrategia}
 Preço atual do {BINANCE_SYMBOL}: {preco} | Alavancagem máxima permitida: {int(BINANCE_MAX_LEVERAGE)}x
 Responda APENAS um JSON válido com: {{"acao": "BUY"|"SELL"|"WAIT", "motivo": "texto curto em português", "tamanho": 0.001}}"""
 
@@ -752,6 +784,7 @@ Responda APENAS um JSON válido com: {{"acao": "BUY"|"SELL"|"WAIT", "motivo": "t
         )
         log_acao["ordem"] = ordem
         b2_salvar(f"trades/log_{int(time.time())}.json", log_acao)
+        log(f"[Trade] Ordem {decisao['acao']} enviada na Binance Demo em {preco}.")
 
     return decisao
 
@@ -764,14 +797,14 @@ def enviar_telegram(msg, chat_id=None):
         requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
             json={"chat_id": destino, "text": msg[:4000]},
-            timeout=15,
+            timeout=(4, 8),
         )
     except Exception:
         pass
 
 
 def montar_relatorio_de_hora_em_hora():
-    """Monta o resumo horário com lucro/prejuízo, saldo, desenvoltura e aprendizados."""
+    """Monta o resumo horário com lucro/prejuízo, saldo, desenvoltura e aprendizados acumulados."""
     horas_ativas = max(0.1, (time.time() - _inicio_bot_ts) / 3600.0)
     res = consultar_resultados_binance()
 
@@ -820,7 +853,7 @@ def montar_relatorio_de_hora_em_hora():
         "⏰ RELATÓRIO HORÁRIO DO ZEUS (BINANCE DEMO)\n\n"
         f"{bloco_binance}\n\n"
         f"⚡ Desenvoltura:\n{desenvoltura}\n\n"
-        f"📚 O que ele aprendeu:\n{bloco_aprendizado}"
+        f"📚 O que ele aprendeu e acumulou:\n{bloco_aprendizado}"
     )
 
 
@@ -832,9 +865,9 @@ def rotina_relatorio_horario():
             if TG_TOKEN and TG_CHAT_ID:
                 msg = montar_relatorio_de_hora_em_hora()
                 enviar_telegram(msg, chat_id=TG_CHAT_ID)
-                print("✅ Relatório horário enviado ao Telegram.")
+                log("✅ Relatório horário enviado ao Telegram.")
         except Exception as e:
-            print(f"[Relatório Horário] Erro: {e}")
+            log(f"[Relatório Horário] Erro: {e}")
 
 
 def rotina_trade():
@@ -842,7 +875,7 @@ def rotina_trade():
     while True:
         try:
             _ciclos_trade_rodados += 1
-            print("[Trade] Iniciando ciclo de análise e operação...")
+            log("[Trade] Iniciando ciclo de análise e operação...")
             decisao = analisar_e_operar()
             saldo = consultar_saldo()
 
@@ -856,7 +889,7 @@ def rotina_trade():
                 )
                 enviar_telegram(msg)
         except Exception as e:
-            print(f"[Trade] Erro na rotina: {e}")
+            log(f"[Trade] Erro na rotina: {e}")
         time.sleep(TEMPO_TRADE)
 
 
@@ -932,15 +965,15 @@ def tratar_update(att):
 
 def main():
     if not TG_TOKEN:
-        print("Erro: TELEGRAM_BOT_TOKEN não configurado.")
+        log("Erro: TELEGRAM_BOT_TOKEN não configurado.")
         return
 
-    print(resumo_provedores(), flush=True)
+    log(resumo_provedores())
 
     if ZEUS_MODO == "janela":
         base = f"https://api.telegram.org/bot{TG_TOKEN}"
         try:
-            requests.get(f"{base}/deleteWebhook", timeout=10)
+            requests.get(f"{base}/deleteWebhook", timeout=(4, 8))
         except Exception:
             pass
 
@@ -952,9 +985,9 @@ def main():
             if offset:
                 params["offset"] = offset
             try:
-                r = requests.get(f"{base}/getUpdates", params=params, timeout=restante + 15)
+                r = requests.get(f"{base}/getUpdates", params=params, timeout=restante + 10)
                 if r.status_code == 409:
-                    print("ERRO 409: outro processo já está lendo este bot. Encerrando janela.")
+                    log("ERRO 409: outro processo já está lendo este bot. Encerrando janela.")
                     break
                 if r.status_code != 200:
                     time.sleep(2)
@@ -963,18 +996,20 @@ def main():
                     offset = att["update_id"] + 1
                     tratar_update(att)
             except Exception as e:
-                print(f"Erro na janela Telegram: {e}")
+                log(f"Erro na janela Telegram: {e}")
                 break
 
         if offset:
             try:
-                requests.get(f"{base}/getUpdates", params={"offset": offset, "timeout": 0}, timeout=15)
+                requests.get(f"{base}/getUpdates", params={"offset": offset, "timeout": 0}, timeout=(4, 8))
             except Exception:
                 pass
         return
 
     threading.Thread(target=rotina_estudo, daemon=True).start()
+    time.sleep(3)
     threading.Thread(target=rotina_trade, daemon=True).start()
+    time.sleep(2)
     threading.Thread(target=rotina_relatorio_horario, daemon=True).start()
 
     offset = None
@@ -990,7 +1025,7 @@ def main():
                 timeout=25,
             )
             if r.status_code == 409:
-                print("Aviso 409: outro leitor ativo no mesmo token; aguardando 10s...")
+                log("Aviso 409: outro leitor ativo no mesmo token; aguardando 10s...")
                 time.sleep(10)
                 continue
             if r.status_code != 200:
@@ -1002,9 +1037,9 @@ def main():
                 tratar_update(att)
 
         except Exception as e:
-            print(f"Erro no loop do Telegram: {e}")
+            log(f"Erro no loop do Telegram: {e}")
             time.sleep(5)
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
