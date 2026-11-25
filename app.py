@@ -6277,3 +6277,9 @@ try:
     _zf_envolver_roteador_chat_v3()
 except Exception:
     pass
+if st.sidebar.button("📲 Ler e responder Telegram"):
+    qtd = sincronizar_e_responder_telegram(processar_prompt)
+    if qtd > 0:
+        st.sidebar.success(f"{qtd} mensagem(ns) respondida(s) no Telegram!")
+    else:
+        st.sidebar.info("Nenhuma mensagem nova no Telegram.")
