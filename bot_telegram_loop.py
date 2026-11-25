@@ -31,10 +31,10 @@ BINANCE_SYMBOL = os.getenv("BINANCE_SYMBOL", "BTCUSDT").strip().strip('"')
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip().strip('"')
 GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip().strip('"')
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "").strip().strip('"')
-GROK_KEY = os.getenv("GROK_API_KEY", "").strip().strip('"')
-TAVILY_KEY = os.getenv("tavily_api_key", os.getenv("TAVILY_API_KEY", "")).strip().strip('"')
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip().strip('"')
 MISTRAL_KEY = os.getenv("MISTRAL_API_KEY", "").strip().strip('"')
-USAR_MISTRAL = os.getenv("USAR_MISTRAL", "false").lower() == "true"
+USAR_MISTRAL = os.getenv("USAR_MISTRAL", "true").lower() == "true"
+TAVILY_KEY = os.getenv("tavily_api_key", os.getenv("TAVILY_API_KEY", "")).strip().strip('"')
 
 # Telegram e execução
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().strip('"')
@@ -43,6 +43,7 @@ TG_MAX_IDADE = int(os.getenv("TG_MAX_IDADE", "3600"))
 ZEUS_JANELA_SEG = int(os.getenv("ZEUS_JANELA_SEG", "240"))
 ZEUS_MODO = os.getenv("ZEUS_MODO", "continuo").strip().lower()
 
+# Ciclos: estudo a cada 5 min (300s) ou 10 min (600s) via TEMPO_ESTUDO; trade a cada 5 min; relatório a cada 1h
 TEMPO_ESTUDO = int(os.getenv("TEMPO_ESTUDO", "300"))
 TEMPO_TRADE = int(os.getenv("TEMPO_TRADE", "300"))
 TEMPO_RELATORIO_HORARIO = int(os.getenv("TEMPO_RELATORIO_HORARIO", "3600"))
@@ -51,6 +52,7 @@ TEMPO_RELATORIO_HORARIO = int(os.getenv("TEMPO_RELATORIO_HORARIO", "3600"))
 _inicio_bot_ts = time.time()
 _ciclos_trade_rodados = 0
 _ciclos_estudo_rodados = 0
+_ultimos_aprendizados_sessao = []
 
 # ================= B2 (API NATIVA) =================
 _b2_auth = {}
@@ -410,33 +412,34 @@ def chamar_openrouter(prompt):
     return None
 
 
-def chamar_grok(prompt):
-    if not GROK_KEY:
+def chamar_claude(prompt):
+    if not ANTHROPIC_KEY:
         return None
     try:
         r = requests.post(
-            "https://api.x.ai/v1/chat/completions",
+            "https://api.anthropic.com/v1/messages",
             headers={
-                "Authorization": f"Bearer {GROK_KEY}",
-                "Content-Type": "application/json",
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
             },
             json={
-                "model": "grok-2-latest",
-                "messages": [
-                    {"role": "system", "content": "Responda sempre em português do Brasil."},
-                    {"role": "user", "content": prompt},
-                ],
+                "model": "claude-3-5-haiku-latest",
+                "max_tokens": 1000,
+                "system": "Você é o Zeus. Responda SEMPRE em português do Brasil, de forma clara e objetiva.",
+                "messages": [{"role": "user", "content": prompt}],
             },
             timeout=25,
         )
         if r.status_code == 200:
-            txt = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            blocos = r.json().get("content", [])
+            txt = "".join(b.get("text", "") for b in blocos if b.get("type") == "text").strip()
             if txt:
                 return txt
         else:
-            print(f"Aviso Grok: {r.status_code}")
-    except Exception:
-        pass
+            print(f"Aviso Claude: {r.status_code}")
+    except Exception as e:
+        print(f"Erro Claude: {e}")
     return None
 
 
@@ -462,8 +465,8 @@ def chamar_mistral(prompt):
         )
         if r.status_code == 200:
             return r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        elif r.status_code == 402:
-            print("❌ Mistral: Sem créditos (Erro 402). Ignorando...")
+        elif r.status_code in (401, 402, 403):
+            print(f"Aviso Mistral ({r.status_code}): ignorando neste ciclo.")
         else:
             print(f"Aviso Mistral: {r.status_code}")
     except Exception:
@@ -478,7 +481,7 @@ def chamar_ia(prompt, contexto_web="", json_mode=False):
         f"{prompt}"
     )
 
-    for provedor in (chamar_gemini, chamar_groq, chamar_openrouter, chamar_grok, chamar_mistral):
+    for provedor in (chamar_gemini, chamar_groq, chamar_openrouter, chamar_claude, chamar_mistral):
         resp = provedor(prompt_pt, json_mode) if provedor == chamar_gemini else provedor(prompt_pt)
         if resp:
             return resp
@@ -510,8 +513,10 @@ def resumo_provedores():
         ativos.append("Groq")
     if OPENROUTER_KEY:
         ativos.append("OpenRouter")
-    if GROK_KEY:
-        ativos.append("Grok")
+    if ANTHROPIC_KEY:
+        ativos.append("Claude")
+    if MISTRAL_KEY and USAR_MISTRAL:
+        ativos.append("Mistral")
     if TAVILY_KEY:
         ativos.append("Tavily")
     if BINANCE_KEY and BINANCE_SECRET:
@@ -521,19 +526,19 @@ def resumo_provedores():
 
 # ================= MÓDULO DE ESTUDO (estudo_trade/ NO B2) =================
 def estudar_e_salvar(tema):
-    print(f"[Estudo] Buscando e aprimorando trade sobre: {tema}")
+    print(f"[Estudo] Buscando e aprimorando trade/alavancagem sobre: {tema}")
     estudos_anteriores = buscar_estudos_trade_b2(tema, limite=2)
     base_anterior = "\n".join(
         f"- [{e.get('topico','')}]: {e.get('resumo','')[:320]}"
         for e in estudos_anteriores
     )
 
-    contexto = buscar_web(tema)
+    contexto = buscar_web(f"{tema} alavancagem binance futures")
     prompt = (
-        f"Você é um trader especialista em alavancagem responsável. Crie e aprimore um guia "
-        f"prático e direto em português do Brasil sobre: {tema}.\n"
-        "Foque em leitura de gráfico, gatilhos de entrada, saída, stop loss, gestão de margem "
-        "e correção de erros comuns.\n"
+        f"Você é um trader especialista em futuros e alavancagem controlada. Crie e aprimore "
+        f"um guia prático e direto em português do Brasil sobre: {tema}.\n"
+        "Foque em leitura de gráficos, estrutura de mercado, pontos de entrada/saída, stop loss, "
+        "alavancagem segura e prevenção de perdas excessivas.\n"
     )
     if base_anterior:
         prompt += (
@@ -556,14 +561,20 @@ def estudar_e_salvar(tema):
         b2_salvar(f"estudo_trade/{slug}_{ts}.json", dados)
         b2_salvar(f"memoria/{slug}_{ts}.json", dados)
 
+        resumo_curto = resp.replace("\n", " ").strip()[:130]
+        _ultimos_aprendizados_sessao.append(f"{tema}: {resumo_curto}")
+        if len(_ultimos_aprendizados_sessao) > 10:
+            del _ultimos_aprendizados_sessao[:-10]
+
 
 def rotina_estudo():
     global _ciclos_estudo_rodados
     temas = [
-        "Alavancagem e gerenciamento de risco em cripto",
-        "Análise técnica: suporte, resistência e tendências",
-        "Estratégias de trade para iniciantes na Binance Futures",
-        "Psicologia do trading e controle emocional",
+        "Alavancagem na Binance Futures e gestão de risco",
+        "Leitura de gráficos: suporte, resistência e rompimentos",
+        "Tendência, volume e confirmação de entrada em futuros",
+        "Stop loss, take profit e proteção contra liquidação",
+        "Estratégias de trade com alavancagem controlada",
     ]
     while True:
         try:
@@ -665,7 +676,7 @@ def consultar_resultados_binance():
 
 def analisar_e_operar():
     estudos = buscar_estudos_trade_b2(f"trade alavancagem {BINANCE_SYMBOL}", limite=2)
-    estrategia = "Estratégia padrão: seguir tendência e usar stop curto."
+    estrategia = "Estratégia padrão: seguir tendência, usar alavancagem baixa e stop curto."
     if estudos:
         estrategia = "\n".join(
             f"- {e.get('topico','')}: {e.get('resumo','')[:300]}" for e in estudos
@@ -682,9 +693,10 @@ def analisar_e_operar():
         return {"acao": "WAIT", "motivo": "Falha ao obter preço da Binance"}
     preco = float(ticker["price"])
 
-    prompt = f"""Você é o Zeus Trader. Decida se deve ABRIR (BUY/SELL) ou AGUARDAR (WAIT).
+    prompt = f"""Você é o Zeus Trader operando com alavancagem controlada na Binance Futures Demo.
+Decida se deve ABRIR (BUY/SELL) ou AGUARDAR (WAIT).
 Estudos salvos em estudo_trade/: {estrategia}
-Preço atual do {BINANCE_SYMBOL}: {preco}
+Preço atual do {BINANCE_SYMBOL}: {preco} | Alavancagem máxima permitida: {int(BINANCE_MAX_LEVERAGE)}x
 Responda APENAS um JSON válido com: {{"acao": "BUY"|"SELL"|"WAIT", "motivo": "texto curto em português", "tamanho": 0.001}}"""
 
     resp = chamar_ia(prompt, json_mode=True)
@@ -727,23 +739,25 @@ def enviar_telegram(msg, chat_id=None):
 
 
 def montar_relatorio_de_hora_em_hora():
-    """Monta o resumo horário com saldo, ganhos, perdas, desenvoltura e aprendizados."""
+    """Monta o resumo horário com lucro/prejuízo, saldo, desenvoltura e aprendizados."""
     horas_ativas = max(0.1, (time.time() - _inicio_bot_ts) / 3600.0)
     res = consultar_resultados_binance()
 
     if res:
-        liquido_24h = (
+        resultado_realizado_liquido = (
             res["ganhos_realizados"]
             + res["perdas_realizadas"]
             + res["taxas_e_funding"]
         )
+        resultado_total_com_aberto = resultado_realizado_liquido + res["pnl_aberto"]
         bloco_binance = (
             f"💰 Saldo Demo: {res['saldo']:.2f} USDT\n"
-            f"🟢 O que conseguiu (ganhos 24h): +{res['ganhos_realizados']:.4f} USDT\n"
-            f"🔴 O que perdeu (perdas 24h): {res['perdas_realizadas']:.4f} USDT\n"
+            f"🟢 Lucro realizado (24h): +{res['ganhos_realizados']:.4f} USDT\n"
+            f"🔴 Prejuízo realizado (24h): {res['perdas_realizadas']:.4f} USDT\n"
             f"💸 Taxas/Funding (24h): {res['taxas_e_funding']:.4f} USDT\n"
-            f"📊 Resultado líquido realizado (24h): {liquido_24h:+.4f} USDT\n"
+            f"📊 Resultado líquido realizado (24h): {resultado_realizado_liquido:+.4f} USDT\n"
             f"📈 PnL aberto agora: {res['pnl_aberto']:+.4f} USDT\n"
+            f"🧮 Resultado total (realizado + aberto): {resultado_total_com_aberto:+.4f} USDT\n"
             "📌 Posições abertas: "
             + (
                 ", ".join(res["posicoes_abertas"])
@@ -754,29 +768,16 @@ def montar_relatorio_de_hora_em_hora():
     else:
         bloco_binance = "⚠️ Não consegui ler os dados da Binance Demo neste ciclo."
 
-    estudos = buscar_estudos_trade_b2("", limite=4)
-    if not estudos:
-        arqs_mem = b2_listar("memoria/")
-        estudos = []
-        for arq in reversed(arqs_mem[-4:]):
-            d = b2_baixar(arq.get("fileName", ""))
-            if isinstance(d, dict):
-                estudos.append(d)
-
-    topicos_aprendidos = []
-    for e in estudos:
-        t = str(e.get("topico", "")).strip()
-        if t and t not in topicos_aprendidos:
-            topicos_aprendidos.append(t)
-
-    bloco_aprendizado = (
-        f"🧠 Tópicos salvos no B2: {len(topicos_aprendidos)}\n"
-        + (
-            "\n".join(f"• {t}" for t in topicos_aprendidos[:4])
-            if topicos_aprendidos
-            else "• Aguardando próximo ciclo de estudo no B2."
+    if _ultimos_aprendizados_sessao:
+        bloco_aprendizado = "\n".join(f"• {item}" for item in _ultimos_aprendizados_sessao[-4:])
+    else:
+        estudos = buscar_estudos_trade_b2("", limite=4)
+        topicos = [str(e.get("topico", "")).strip() for e in estudos if e.get("topico")]
+        bloco_aprendizado = (
+            "\n".join(f"• {t}" for t in topicos[:4])
+            if topicos
+            else "• Aguardando próximo ciclo de estudo em estudo_trade/ no B2."
         )
-    )
 
     desenvoltura = (
         f"⏱️ Online há {horas_ativas:.1f}h | Ciclos de trade: {_ciclos_trade_rodados} "
@@ -973,5 +974,5 @@ def main():
             time.sleep(5)
 
 
-if __name__ == "_main_":
+if __name__ == "__main__":
     main()
