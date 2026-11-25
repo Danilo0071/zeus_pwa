@@ -25,7 +25,7 @@ BINANCE_SECRET = os.getenv("BINANCE_API_SECRET", "").strip().strip('"')
 BINANCE_USE_DEMO = os.getenv("BINANCE_USE_DEMO", "true").lower() == "true"
 BINANCE_MAX_LEVERAGE = float(os.getenv("BINANCE_MAX_LEVERAGE", "2"))
 BINANCE_BASE_URL = "https://demo-fapi.binance.com" if BINANCE_USE_DEMO else "https://fapi.binance.com"
-BINANCE_SYMBOL = "BTCUSDT"
+BINANCE_SYMBOL = os.getenv("BINANCE_SYMBOL", "BTCUSDT").strip().strip('"')
 
 # IA
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip().strip('"')
@@ -41,11 +41,18 @@ TG_MAX_IDADE = int(os.getenv("TG_MAX_IDADE", "3600"))
 ZEUS_JANELA_SEG = int(os.getenv("ZEUS_JANELA_SEG", "240"))
 ZEUS_MODO = os.getenv("ZEUS_MODO", "continuo").strip().lower()
 
-TEMPO_ESTUDO = 300
-TEMPO_TRADE = 300
+TEMPO_ESTUDO = int(os.getenv("TEMPO_ESTUDO", "300"))
+TEMPO_TRADE = int(os.getenv("TEMPO_TRADE", "300"))
+TEMPO_RELATORIO_HORARIO = int(os.getenv("TEMPO_RELATORIO_HORARIO", "3600"))
+
+# Contadores de desenvoltura na sessão
+_inicio_bot_ts = time.time()
+_ciclos_trade_rodados = 0
+_ciclos_estudo_rodados = 0
 
 # ================= B2 (API NATIVA) =================
 _b2_auth = {}
+_b2_bucket_id_cache = None
 
 
 def b2_authorize():
@@ -67,6 +74,7 @@ def b2_authorize():
                 "token": d["authorizationToken"],
                 "api_url": d["apiUrl"],
                 "download_url": d["downloadUrl"],
+                "account_id": d.get("accountId", ""),
                 "expires": time.time() + 3600,
             }
             print("✅ B2 autorizado com sucesso.")
@@ -76,15 +84,45 @@ def b2_authorize():
     return None
 
 
+def b2_bucket_alvo(auth):
+    global _b2_bucket_id_cache
+    if not B2_BUCKET:
+        return None
+    if _b2_bucket_id_cache:
+        return _b2_bucket_id_cache
+    if re.fullmatch(r"[0-9a-fA-F]{16,32}", B2_BUCKET):
+        _b2_bucket_id_cache = B2_BUCKET
+        return _b2_bucket_id_cache
+    try:
+        r = requests.post(
+            f"{auth['api_url']}/b2api/v2/b2_list_buckets",
+            headers={"Authorization": auth["token"]},
+            json={"accountId": auth.get("account_id", ""), "bucketName": B2_BUCKET},
+            timeout=15,
+        )
+        if r.status_code == 200:
+            for b in r.json().get("buckets", []):
+                if b.get("bucketName") == B2_BUCKET:
+                    _b2_bucket_id_cache = b.get("bucketId")
+                    return _b2_bucket_id_cache
+    except Exception:
+        pass
+    _b2_bucket_id_cache = B2_BUCKET
+    return _b2_bucket_id_cache
+
+
 def b2_listar(prefixo):
     auth = b2_authorize()
     if not auth:
+        return []
+    bucket_alvo = b2_bucket_alvo(auth)
+    if not bucket_alvo:
         return []
     try:
         r = requests.post(
             f"{auth['api_url']}/b2api/v2/b2_list_file_names",
             headers={"Authorization": auth["token"]},
-            json={"bucketId": B2_BUCKET, "prefix": prefixo, "maxFileCount": 50},
+            json={"bucketId": bucket_alvo, "prefix": prefixo, "maxFileCount": 50},
             timeout=15,
         )
         if r.status_code == 200:
@@ -96,11 +134,11 @@ def b2_listar(prefixo):
 
 def b2_baixar(nome_arquivo):
     auth = b2_authorize()
-    if not auth:
+    if not auth or not B2_BUCKET:
         return None
     try:
         url = f"{auth['download_url']}/file/{B2_BUCKET}/{urllib.parse.quote(nome_arquivo)}"
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, headers={"Authorization": auth["token"]}, timeout=15)
         if r.status_code == 200:
             return r.json()
     except Exception:
@@ -112,11 +150,14 @@ def b2_salvar(nome_arquivo, dados):
     auth = b2_authorize()
     if not auth:
         return False
+    bucket_alvo = b2_bucket_alvo(auth)
+    if not bucket_alvo:
+        return False
     try:
         r = requests.post(
             f"{auth['api_url']}/b2api/v2/b2_get_upload_url",
             headers={"Authorization": auth["token"]},
-            json={"bucketId": B2_BUCKET},
+            json={"bucketId": bucket_alvo},
             timeout=15,
         )
         if r.status_code != 200:
@@ -137,6 +178,28 @@ def b2_salvar(nome_arquivo, dados):
     except Exception as e:
         print(f"B2 salvar erro: {e}")
     return False
+
+
+def buscar_estudos_trade_b2(consulta="", limite=4):
+    """Consulta os estudos salvos em estudo_trade/ no B2 para reutilizar e aprimorar conhecimento."""
+    arquivos = b2_listar("estudo_trade/")
+    if not arquivos:
+        return []
+    palavras = [p for p in re.findall(r"[a-zA-ZÀ-ÿ0-9_]{3,}", consulta.lower())]
+    encontrados = []
+    for arq in reversed(arquivos[-15:]):
+        nome = arq.get("fileName", "")
+        if not nome:
+            continue
+        dados = b2_baixar(nome)
+        if not isinstance(dados, dict):
+            continue
+        texto = f"{dados.get('topico', '')} {dados.get('resumo', '')}".lower()
+        pontos = sum(1 for p in palavras if p in texto) if palavras else 1
+        if pontos > 0 or not palavras:
+            encontrados.append((pontos, dados))
+    encontrados.sort(key=lambda x: x[0], reverse=True)
+    return [item[1] for item in encontrados[:limite]]
 
 
 # ================= BUSCA WEB (TAVILY + FALLBACK) =================
@@ -197,18 +260,20 @@ def buscar_web(consulta):
 _gemini_modelo_ativo = None
 
 
+def _modelo_gemini_valido_para_texto(nome):
+    n = nome.lower()
+    bloqueados = ("tts", "image", "audio", "realtime", "live", "embedding", "veo", "imagen")
+    if any(b in n for b in bloqueados):
+        return False
+    return "flash" in n or "pro" in n
+
+
 def _listar_modelos_gemini():
     global _gemini_modelo_ativo
     if _gemini_modelo_ativo:
         return [_gemini_modelo_ativo]
 
-    candidatos = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
-    ]
+    candidatos = ["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-2.0-flash"]
     if GEMINI_KEY:
         try:
             r = requests.get(
@@ -220,10 +285,12 @@ def _listar_modelos_gemini():
                 for m in r.json().get("models", []):
                     metodos = m.get("supportedGenerationMethods", [])
                     nome = m.get("name", "").replace("models/", "")
-                    if "generateContent" in metodos and "flash" in nome:
+                    if "generateContent" in metodos and _modelo_gemini_valido_para_texto(nome):
                         disponiveis.append(nome)
-                if disponiveis:
-                    return disponiveis + [c for c in candidatos if c not in disponiveis]
+                priorizados = [c for c in candidatos if c in disponiveis]
+                outros = [d for d in disponiveis if d not in priorizados]
+                if priorizados or outros:
+                    return priorizados + outros
         except Exception:
             pass
     return candidatos
@@ -295,10 +362,11 @@ def chamar_gemini(prompt, json_mode=False):
                     ).strip()
                     if txt:
                         return txt
-            elif r.status_code in (429, 403):
-                print(f"Aviso Gemini ({modelo}): limite/bloqueio {r.status_code}.")
+            elif r.status_code == 429:
+                print(f"Aviso Gemini ({modelo}): limite/bloqueio 429.")
                 if modelo == _gemini_modelo_ativo:
                     _gemini_modelo_ativo = None
+                time.sleep(2)
             else:
                 print(f"Aviso Gemini ({modelo}): {r.status_code}")
                 if modelo == _gemini_modelo_ativo:
@@ -386,25 +454,46 @@ def resumo_provedores():
     return "Zeus ativos: " + (", ".join(ativos) if ativos else "nenhum configurado")
 
 
-# ================= MÓDULO DE ESTUDO =================
+# ================= MÓDULO DE ESTUDO (estudo_trade/ NO B2) =================
 def estudar_e_salvar(tema):
-    print(f"[Estudo] Buscando conhecimento sobre: {tema}")
+    print(f"[Estudo] Buscando e aprimorando trade sobre: {tema}")
+    estudos_anteriores = buscar_estudos_trade_b2(tema, limite=2)
+    base_anterior = "\n".join(
+        f"- [{e.get('topico','')}]: {e.get('resumo','')[:320]}"
+        for e in estudos_anteriores
+    )
+
     contexto = buscar_web(tema)
     prompt = (
-        f"Você é um trader especialista. Crie um guia prático e direto em português do Brasil sobre: {tema}.\n"
-        "Foque em regras de entrada, saída, gestão de risco e alavancagem segura.\n"
+        f"Você é um trader especialista em alavancagem responsável. Crie e aprimore um guia "
+        f"prático e direto em português do Brasil sobre: {tema}.\n"
+        "Foque em leitura de gráfico, gatilhos de entrada, saída, stop loss, gestão de margem "
+        "e correção de erros comuns.\n"
     )
+    if base_anterior:
+        prompt += (
+            "Estudos anteriores já salvos em estudo_trade/ (corrija falhas e aprofunde sem repetir):\n"
+            f"{base_anterior}\n"
+        )
     if contexto:
         prompt += f"Contexto atual:\n{contexto}\n"
 
     resp = chamar_ia(prompt, contexto)
     if resp:
-        dados = {"topico": tema, "resumo": resp, "criado_em": int(time.time())}
-        nome = f"memoria/{tema.lower().replace(' ', '')[:30]}{int(time.time())}.json"
-        b2_salvar(nome, dados)
+        slug = re.sub(r"[^a-z0-9_]+", "", tema.lower().replace(" ", "_"))[:25] or "trade"
+        ts = int(time.time())
+        dados = {
+            "topico": tema,
+            "resumo": resp,
+            "aprimorado_de_estudo_anterior": bool(base_anterior),
+            "criado_em": ts,
+        }
+        b2_salvar(f"estudo_trade/{slug}_{ts}.json", dados)
+        b2_salvar(f"memoria/{slug}_{ts}.json", dados)
 
 
 def rotina_estudo():
+    global _ciclos_estudo_rodados
     temas = [
         "Alavancagem e gerenciamento de risco em cripto",
         "Análise técnica: suporte, resistência e tendências",
@@ -413,6 +502,7 @@ def rotina_estudo():
     ]
     while True:
         try:
+            _ciclos_estudo_rodados += 1
             tema_escolhido = temas[int(time.time()) % len(temas)]
             estudar_e_salvar(tema_escolhido)
         except Exception as e:
@@ -456,13 +546,71 @@ def consultar_saldo():
     }
 
 
+def consultar_resultados_binance():
+    """Consulta saldo, PnL aberto e ganhos/perdas realizados recentes na Binance Demo."""
+    conta = binance_request("GET", "/fapi/v2/account")
+    posicoes = binance_request("GET", "/fapi/v2/positionRisk")
+    rendimentos = binance_request(
+        "GET",
+        "/fapi/v1/income",
+        {"limit": 100, "startTime": int((time.time() - 86400) * 1000)},
+    )
+
+    if not conta or "totalWalletBalance" not in conta:
+        return None
+
+    saldo = float(conta.get("totalWalletBalance", 0.0))
+    pnl_aberto = float(conta.get("totalUnrealizedProfit", 0.0))
+
+    ganhos_realizados = 0.0
+    perdas_realizadas = 0.0
+    taxas_e_funding = 0.0
+
+    if isinstance(rendimentos, list):
+        for item in rendimentos:
+            tipo = str(item.get("incomeType", ""))
+            valor = float(item.get("income", 0.0) or 0.0)
+            if tipo == "REALIZED_PNL":
+                if valor > 0:
+                    ganhos_realizados += valor
+                elif valor < 0:
+                    perdas_realizadas += valor
+            elif tipo in ("COMMISSION", "FUNDING_FEE"):
+                taxas_e_funding += valor
+
+    posicoes_abertas = []
+    if isinstance(posicoes, list):
+        for p in posicoes:
+            qtd = float(p.get("positionAmt", 0.0) or 0.0)
+            if qtd != 0:
+                pnl_p = float(p.get("unRealizedProfit", 0.0) or 0.0)
+                posicoes_abertas.append(
+                    f"{p.get('symbol')} {qtd} (PnL: {pnl_p:+.4f} USDT)"
+                )
+
+    return {
+        "saldo": saldo,
+        "pnl_aberto": pnl_aberto,
+        "ganhos_realizados": ganhos_realizados,
+        "perdas_realizadas": perdas_realizadas,
+        "taxas_e_funding": taxas_e_funding,
+        "posicoes_abertas": posicoes_abertas,
+    }
+
+
 def analisar_e_operar():
-    arquivos = b2_listar("memoria/")
+    estudos = buscar_estudos_trade_b2(f"trade alavancagem {BINANCE_SYMBOL}", limite=2)
     estrategia = "Estratégia padrão: seguir tendência e usar stop curto."
-    if arquivos:
-        recente = b2_baixar(arquivos[-1]["fileName"])
-        if recente:
-            estrategia = recente.get("resumo", estrategia)[:500]
+    if estudos:
+        estrategia = "\n".join(
+            f"- {e.get('topico','')}: {e.get('resumo','')[:300]}" for e in estudos
+        )
+    else:
+        arquivos = b2_listar("memoria/")
+        if arquivos:
+            recente = b2_baixar(arquivos[-1]["fileName"])
+            if recente:
+                estrategia = recente.get("resumo", estrategia)[:500]
 
     ticker = binance_request("GET", "/fapi/v1/ticker/price", {"symbol": BINANCE_SYMBOL}, assinado=False)
     if not ticker or "price" not in ticker:
@@ -470,7 +618,7 @@ def analisar_e_operar():
     preco = float(ticker["price"])
 
     prompt = f"""Você é o Zeus Trader. Decida se deve ABRIR (BUY/SELL) ou AGUARDAR (WAIT).
-Estratégia da memória: {estrategia}
+Estudos salvos em estudo_trade/: {estrategia}
 Preço atual do {BINANCE_SYMBOL}: {preco}
 Responda APENAS um JSON válido com: {{"acao": "BUY"|"SELL"|"WAIT", "motivo": "texto curto em português", "tamanho": 0.001}}"""
 
@@ -513,9 +661,89 @@ def enviar_telegram(msg, chat_id=None):
         pass
 
 
+def montar_relatorio_de_hora_em_hora():
+    """Monta o resumo horário com saldo, ganhos, perdas, desenvoltura e aprendizados."""
+    horas_ativas = max(0.1, (time.time() - _inicio_bot_ts) / 3600.0)
+    res = consultar_resultados_binance()
+
+    if res:
+        liquido_24h = (
+            res["ganhos_realizados"]
+            + res["perdas_realizadas"]
+            + res["taxas_e_funding"]
+        )
+        bloco_binance = (
+            f"💰 Saldo Demo: {res['saldo']:.2f} USDT\n"
+            f"🟢 O que conseguiu (ganhos 24h): +{res['ganhos_realizados']:.4f} USDT\n"
+            f"🔴 O que perdeu (perdas 24h): {res['perdas_realizadas']:.4f} USDT\n"
+            f"💸 Taxas/Funding (24h): {res['taxas_e_funding']:.4f} USDT\n"
+            f"📊 Resultado líquido realizado (24h): {liquido_24h:+.4f} USDT\n"
+            f"📈 PnL aberto agora: {res['pnl_aberto']:+.4f} USDT\n"
+            "📌 Posições abertas: "
+            + (
+                ", ".join(res["posicoes_abertas"])
+                if res["posicoes_abertas"]
+                else "nenhuma"
+            )
+        )
+    else:
+        bloco_binance = "⚠️ Não consegui ler os dados da Binance Demo neste ciclo."
+
+    estudos = buscar_estudos_trade_b2("", limite=4)
+    if not estudos:
+        arqs_mem = b2_listar("memoria/")
+        estudos = []
+        for arq in reversed(arqs_mem[-4:]):
+            d = b2_baixar(arq.get("fileName", ""))
+            if isinstance(d, dict):
+                estudos.append(d)
+
+    topicos_aprendidos = []
+    for e in estudos:
+        t = str(e.get("topico", "")).strip()
+        if t and t not in topicos_aprendidos:
+            topicos_aprendidos.append(t)
+
+    bloco_aprendizado = (
+        f"🧠 Tópicos salvos no B2: {len(topicos_aprendidos)}\n"
+        + (
+            "\n".join(f"• {t}" for t in topicos_aprendidos[:4])
+            if topicos_aprendidos
+            else "• Aguardando próximo ciclo de estudo no B2."
+        )
+    )
+
+    desenvoltura = (
+        f"⏱️ Online há {horas_ativas:.1f}h | Ciclos de trade: {_ciclos_trade_rodados} "
+        f"| Ciclos de estudo: {_ciclos_estudo_rodados}"
+    )
+
+    return (
+        "⏰ RELATÓRIO HORÁRIO DO ZEUS (BINANCE DEMO)\n\n"
+        f"{bloco_binance}\n\n"
+        f"⚡ Desenvoltura:\n{desenvoltura}\n\n"
+        f"📚 O que ele aprendeu:\n{bloco_aprendizado}"
+    )
+
+
+def rotina_relatorio_horario():
+    """Envia o relatório no Telegram a cada 1 hora (3600s) sem interromper os outros loops."""
+    while True:
+        time.sleep(TEMPO_RELATORIO_HORARIO)
+        try:
+            if TG_TOKEN and TG_CHAT_ID:
+                msg = montar_relatorio_de_hora_em_hora()
+                enviar_telegram(msg, chat_id=TG_CHAT_ID)
+                print("✅ Relatório horário enviado ao Telegram.")
+        except Exception as e:
+            print(f"[Relatório Horário] Erro: {e}")
+
+
 def rotina_trade():
+    global _ciclos_trade_rodados
     while True:
         try:
+            _ciclos_trade_rodados += 1
             print("[Trade] Iniciando ciclo de análise e operação...")
             decisao = analisar_e_operar()
             saldo = consultar_saldo()
@@ -536,6 +764,11 @@ def rotina_trade():
 
 # ================= TELEGRAM LOOP (MAIN) =================
 def gerar_resposta(texto):
+    estudos = buscar_estudos_trade_b2(texto, limite=2)
+    if estudos and any(k in texto.lower() for k in ("estudo", "trade", "alavanc", "grafico", "gráfico", "suporte", "risco")):
+        top = estudos[0]
+        return f"📘 De estudo_trade/ ({top.get('topico','')}):\n\n{top.get('resumo','')}"
+
     arquivos = b2_listar("memoria/")
     for arq in reversed(arquivos[-5:]):
         dados = b2_baixar(arq["fileName"])
@@ -547,10 +780,19 @@ def gerar_resposta(texto):
         "VOCÊ É O ZEUS. Responda SEMPRE em português do Brasil, de forma direta e amigável.\n"
         f"Usuário: {texto}\n"
     )
+    if estudos:
+        resumo_est = "\n".join(f"- {e.get('topico','')}: {e.get('resumo','')[:220]}" for e in estudos)
+        prompt += f"\nEstudos salvos em estudo_trade/:\n{resumo_est}\n"
     if contexto:
         prompt += f"Contexto da web:\n{contexto}\n"
 
     resp = chamar_ia(prompt, contexto)
+    if resp and any(k in texto.lower() for k in ("trade", "alavanc", "grafico", "gráfico", "suporte", "risco", "mercado", "btc", "futuros")):
+        ts = int(time.time())
+        b2_salvar(
+            f"estudo_trade/consulta_{ts}.json",
+            {"topico": texto[:120], "resumo": resp[:1500], "criado_em": ts},
+        )
     return resp or "Poxa, meus servidores estão ocupados. Tente novamente em instantes!"
 
 
@@ -575,6 +817,15 @@ def tratar_update(att):
             if s
             else "❌ Erro ao acessar Binance Demo."
         )
+    elif texto_lower in ("relatorio", "relatório"):
+        resp = montar_relatorio_de_hora_em_hora()
+    elif texto_lower in ("estudos trade", "ver estudos", "estudo trade"):
+        estudos = buscar_estudos_trade_b2("", limite=5)
+        if estudos:
+            linhas = [f"• {e.get('topico','')} — {e.get('resumo','')[:140]}..." for e in estudos]
+            resp = "📘 Estudos salvos em estudo_trade/:\n\n" + "\n\n".join(linhas)
+        else:
+            resp = "Ainda não há arquivos em estudo_trade/ no B2. Aguarde o próximo ciclo de estudo."
     else:
         resp = gerar_resposta(texto)
 
@@ -626,6 +877,7 @@ def main():
 
     threading.Thread(target=rotina_estudo, daemon=True).start()
     threading.Thread(target=rotina_trade, daemon=True).start()
+    threading.Thread(target=rotina_relatorio_horario, daemon=True).start()
 
     offset = None
     while True:
