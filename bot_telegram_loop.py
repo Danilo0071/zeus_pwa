@@ -9,13 +9,8 @@ REPO_PADRAO = os.getenv("GITHUB_REPO", "Danilo0071/zeus_pwa").strip()
 BRANCH_PADRAO = os.getenv("GITHUB_BRANCH", "main").strip()
 
 
-def formatar_zeus(conteudo):
-    return f"Zeus aqui:\n\n{conteudo.strip()}"
-
-
 def ler_github_leve(texto):
-    t = texto.strip()
-    t_lower = t.lower()
+    t_lower = texto.strip().lower()
     if not (
         t_lower.startswith("github")
         or t_lower.startswith("repo")
@@ -24,7 +19,7 @@ def ler_github_leve(texto):
     ):
         return None
 
-    gh_token = os.getenv("GITHUB_TOKEN", "").strip()
+    gh_token = os.getenv("GITHUB_TOKEN", "").strip().strip('"')
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "zeus-bot"}
     if gh_token:
         headers["Authorization"] = f"Bearer {gh_token}"
@@ -37,58 +32,67 @@ def ler_github_leve(texto):
                 itens = [i for i in r.json() if "pull_request" not in i]
                 if not itens:
                     return f"No GitHub ({REPO_PADRAO}), nao ha issues abertas agora."
-                linhas = [f"Issues abertas em {REPO_PADRAO}:"]
-                for it in itens[:5]:
-                    linhas.append(f"- #{it.get('number')}: {it.get('title', 'Sem titulo')}")
-                return "\n".join(linhas)
+                return "Issues abertas:\n" + "\n".join(
+                    f"- #{it.get('number')}: {it.get('title', 'Sem titulo')}" for it in itens[:5]
+                )
 
         if "readme" in t_lower:
             url = f"https://raw.githubusercontent.com/{REPO_PADRAO}/{BRANCH_PADRAO}/README.md"
             r = requests.get(url, headers={"User-Agent": "zeus-bot"}, timeout=15)
             if r.status_code == 200 and r.text.strip():
-                return f"README de {REPO_PADRAO}:\n\n{r.text.strip()[:900]}"
+                return f"README ({REPO_PADRAO}):\n{r.text.strip()[:900]}"
 
         url = f"https://api.github.com/repos/{REPO_PADRAO}/commits?sha={BRANCH_PADRAO}&per_page=5"
         r = requests.get(url, headers=headers, timeout=15)
-        if r.status_code == 200:
+        if r.status_code == 200 and isinstance(r.json(), list):
             commits = r.json()
-            if isinstance(commits, list) and commits:
-                linhas = [f"Ultimos commits em {REPO_PADRAO} ({BRANCH_PADRAO}):"]
+            if commits:
+                linhas = [f"Ultimos commits em {REPO_PADRAO}:"]
                 for c in commits[:5]:
                     msg = (c.get("commit", {}).get("message") or "").splitlines()[0][:100]
                     sha = (c.get("sha") or "")[:7]
                     linhas.append(f"- {sha}: {msg}")
                 return "\n".join(linhas)
     except Exception as e:
-        print(f"Erro na leitura leve do GitHub: {e}")
+        print(f"Erro GitHub leve: {e}")
     return None
 
 
-def buscar_na_web(consulta):
+def buscar_contexto_web(consulta):
+    tavily_key = os.getenv("TAVILY_API_KEY", "").strip().strip('"')
+    if tavily_key:
+        try:
+            r = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": tavily_key,
+                    "query": consulta,
+                    "max_results": 3,
+                    "include_answer": True,
+                },
+                timeout=15,
+            )
+            if r.status_code == 200:
+                dados = r.json()
+                partes = []
+                if dados.get("answer"):
+                    partes.append(dados["answer"])
+                for item in dados.get("results", [])[:3]:
+                    titulo = item.get("title", "")
+                    trecho = item.get("content", "").strip()[:220]
+                    if titulo or trecho:
+                        partes.append(f"- {titulo}: {trecho}")
+                if partes:
+                    return "\n".join(partes)
+            else:
+                print(f"Aviso Tavily ({r.status_code}): {r.text[:160]}")
+        except Exception as e:
+            print(f"Erro Tavily: {e}")
+
     headers = {"User-Agent": "Mozilla/5.0"}
-
-    try:
-        r = requests.get(
-            "https://api.duckduckgo.com/",
-            params={"q": consulta, "format": "json", "no_html": 1, "skip_disambig": 1},
-            headers=headers,
-            timeout=15,
-        )
-        if r.status_code == 200:
-            dados = r.json()
-            resumo = (dados.get("AbstractText") or dados.get("Answer") or "").strip()
-            if resumo:
-                return f"Achei isso na web:\n\n{resumo}"
-    except Exception as e:
-        print(f"Aviso DDG JSON: {e}")
-
     try:
         q = urllib.parse.quote_plus(consulta)
-        r = requests.get(
-            f"https://html.duckduckgo.com/html/?q={q}",
-            headers=headers,
-            timeout=15,
-        )
+        r = requests.get(f"https://html.duckduckgo.com/html/?q={q}", headers=headers, timeout=12)
         if r.status_code == 200:
             titulos = re.findall(r'class="result__a"[^>]>(.?)</a>', r.text, re.S)
             trechos = re.findall(r'class="result__snippet"[^>]>(.?)</a>', r.text, re.S)
@@ -99,46 +103,62 @@ def buscar_na_web(consulta):
                 if t_limpo and s_limpo:
                     linhas.append(f"- {t_limpo}: {s_limpo}")
             if linhas:
-                return "Resultados na web:\n\n" + "\n".join(linhas)
+                return "\n".join(linhas)
     except Exception as e:
-        print(f"Erro na busca web DDG: {e}")
+        print(f"Erro DDG: {e}")
+    return ""
 
-    return None
+
+def descobrir_modelos_gemini(api_key):
+    modelos = ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-flash-latest"]
+    try:
+        r = requests.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+            timeout=12,
+        )
+        if r.status_code == 200:
+            encontrados = []
+            for m in r.json().get("models", []):
+                nome = (m.get("name") or "").replace("models/", "")
+                metodos = m.get("supportedGenerationMethods", [])
+                if "generateContent" in metodos and "flash" in nome and "embedding" not in nome:
+                    encontrados.append(nome)
+            if encontrados:
+                return encontrados[:3]
+    except Exception as e:
+        print(f"Aviso listar modelos Gemini: {e}")
+    return modelos
 
 
-def chamar_gemini(prompt, api_key, modelo):
+def chamar_gemini(prompt, api_key):
     if not api_key:
         return None
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{modelo}:generateContent?key={api_key}"
-    )
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    for _ in range(2):
+    for modelo in descobrir_modelos_gemini(api_key):
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{modelo}:generateContent?key={api_key}"
+        )
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
         try:
             r = requests.post(url, json=payload, timeout=20)
             if r.status_code == 200:
-                dados = r.json()
-                candidatos = dados.get("candidates", [])
+                candidatos = r.json().get("candidates", [])
                 if candidatos:
                     partes = candidatos[0].get("content", {}).get("parts", [])
                     texto_resp = "".join(p.get("text", "") for p in partes).strip()
                     if texto_resp:
                         return texto_resp
-            elif r.status_code == 503:
-                time.sleep(2)
-                continue
-            print(f"Aviso Gemini ({modelo} - {r.status_code}): {r.text[:200]}")
-            return None
+            print(f"Aviso Gemini ({modelo} - {r.status_code}): {r.text[:160]}")
         except Exception as e:
-            print(f"Erro na requisicao Gemini ({modelo}): {e}")
-            time.sleep(1)
+            print(f"Erro Gemini ({modelo}): {e}")
     return None
 
 
-def chamar_outra_chave(prompt, consulta):
-    grok_key = os.getenv("GROK_API_KEY", "").strip()
-    if grok_key:
+def chamar_grok(prompt):
+    grok_key = os.getenv("GROK_API_KEY", "").strip().strip('"')
+    if not grok_key:
+        return None
+    for modelo in ["grok-2-latest", "grok-3-mini", "grok-beta"]:
         try:
             r = requests.post(
                 "https://api.x.ai/v1/chat/completions",
@@ -147,7 +167,7 @@ def chamar_outra_chave(prompt, consulta):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "grok-beta",
+                    "model": modelo,
                     "messages": [{"role": "user", "content": prompt}],
                 },
                 timeout=20,
@@ -162,65 +182,43 @@ def chamar_outra_chave(prompt, consulta):
                 )
                 if conteudo:
                     return conteudo
-            print(f"Aviso Grok ({r.status_code}): {r.text[:200]}")
+            print(f"Aviso Grok ({modelo} - {r.status_code}): {r.text[:160]}")
         except Exception as e:
-            print(f"Erro na requisicao Grok: {e}")
-
-    tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
-    if tavily_key:
-        try:
-            r = requests.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": tavily_key,
-                    "query": consulta,
-                    "max_results": 3,
-                    "include_answer": True,
-                },
-                timeout=20,
-            )
-            if r.status_code == 200:
-                dados = r.json()
-                if dados.get("answer"):
-                    return f"Encontrei isso na web:\n\n{dados['answer']}"
-        except Exception as e:
-            print(f"Erro na busca Tavily: {e}")
-
+            print(f"Erro Grok ({modelo}): {e}")
     return None
 
 
 def gerar_resposta(texto, gemini_key):
-    # 1. Primeiro leitura leve do GitHub e busca na web (sem depender de LLM)
     resp_gh = ler_github_leve(texto)
     if resp_gh:
-        return formatar_zeus(resp_gh)
+        return resp_gh
 
-    resp_web = buscar_na_web(texto)
-    if resp_web:
-        return formatar_zeus(resp_web)
+    contexto_web = buscar_contexto_web(texto)
 
     prompt = (
-        "Voce e o Zeus, um assistente direto, parceiro e prestativo, respondendo em portugues "
-        "com o mesmo estilo claro e objetivo do app Zeus. Responda: " + texto
+        "IMPORTANTE: Responda OBRIGATORIAMENTE em portugues do Brasil, mesmo que as informacoes da web estejam em ingles.\n"
+        "Voce e o Zeus, assistente pessoal direto, parceiro, inteligente e objetivo, "
+        "com o mesmo estilo natural do app Zeus (sem listar links crus nem parecer robo).\n"
+        f"Mensagem do usuario: {texto}\n"
     )
+    if contexto_web:
+        prompt += (
+            f"\nContexto encontrado na web (traduza e adapte para portugues natural):\n{contexto_web}\n"
+        )
+    prompt += "\nLembrete final: escreva a resposta inteira em portugues."
 
-    # 2. Depois tenta o Gemini
-    resp_gem = chamar_gemini(prompt, gemini_key, "gemini-3.8-flash")
+    resp_gem = chamar_gemini(prompt, gemini_key)
     if resp_gem:
-        return formatar_zeus(resp_gem)
+        return resp_gem
 
-    resp_gem_2 = chamar_gemini(prompt, gemini_key, "gemini-2.5-flash")
-    if resp_gem_2:
-        return formatar_zeus(resp_gem_2)
+    resp_grok = chamar_grok(prompt)
+    if resp_grok:
+        return resp_grok
 
-    # 3. Por ultimo tenta a outra chave configurada (Grok / Tavily)
-    resp_extra = chamar_outra_chave(prompt, texto)
-    if resp_extra:
-        return formatar_zeus(resp_extra)
+    if contexto_web:
+        return f"Achei isso na busca:\n\n{contexto_web}"
 
-    return formatar_zeus(
-        "Nao consegui responder agora porque a busca e as IAs estao com instabilidade temporaria. Tente de novo em instantes."
-    )
+    return "As IAs e a busca falharam agora. Tente novamente em instantes."
 
 
 def enviar_mensagem(token, chat_id, texto):
@@ -242,9 +240,9 @@ def enviar_mensagem(token, chat_id, texto):
 
 
 def main():
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    chat_id_autorizado = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().strip('"')
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"')
+    chat_id_autorizado = os.getenv("TELEGRAM_CHAT_ID", "").strip().strip('"')
 
     if not token:
         print("Erro: TELEGRAM_BOT_TOKEN nao configurado.")
