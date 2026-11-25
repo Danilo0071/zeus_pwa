@@ -360,5 +360,5 @@ def main():
             print(f"Erro no loop do Telegram: {e}")
             time.sleep(5)
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
