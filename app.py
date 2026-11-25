@@ -1269,34 +1269,54 @@ def sincronizar_e_responder_telegram(responder_fn=None) -> int:
     """Lê mensagens novas enviadas ao bot no Telegram e responde usando o Zeus."""
     token, chat_id_autorizado = _obter_credenciais_telegram()
     if not token:
+        st.sidebar.error("Token do Telegram não encontrado nos Secrets.")
         return 0
+
+    # Garante que não há webhook travando o getUpdates
+    try:
+        requests.get(f"https://api.telegram.org/bot{token}/deleteWebhook", timeout=10)
+    except Exception:
+        pass
 
     if "tg_last_update_id" not in st.session_state:
         st.session_state.tg_last_update_id = 0
 
     offset = int(st.session_state.tg_last_update_id) + 1
     url = f"https://api.telegram.org/bot{token}/getUpdates"
+    params = {"timeout": 2}
+    if st.session_state.tg_last_update_id > 0:
+        params["offset"] = offset
+
     try:
-        r = requests.get(url, params={"offset": offset, "timeout": 2, "allowed_updates": '["message"]'}, timeout=15)
-        data = r.json() if r.status_code == 200 else {}
-    except Exception:
+        r = requests.get(url, params=params, timeout=15)
+        dados = r.json()
+    except Exception as e:
+        st.sidebar.error(f"Erro de rede ao ler Telegram: {e}")
         return 0
 
-    if not data.get("ok"):
+    if not dados.get("ok"):
+        st.sidebar.error(f"Erro API Telegram: {dados}")
+        return 0
+
+    updates = dados.get("result", [])
+    if not updates:
         return 0
 
     respondidas = 0
-    for upd in data.get("result", []):
+    for upd in updates:
         uid = int(upd.get("update_id", 0))
-        if uid >= int(st.session_state.tg_last_update_id):
+        if uid > st.session_state.tg_last_update_id:
             st.session_state.tg_last_update_id = uid
 
-        msg = upd.get("message") or {}
+        msg = upd.get("message") or upd.get("edited_message") or {}
         texto = (msg.get("text") or "").strip()
-        cid = str((msg.get("chat") or {}).get("id", "")).strip()
+        cid = str((msg.get("chat") or {}).get("id") or "").strip()
+
         if not texto or not cid:
             continue
-        if chat_id_autorizado and cid != chat_id_autorizado:
+
+        if chat_id_autorizado and cid != str(chat_id_autorizado).strip():
+            st.sidebar.warning(f"Mensagem ignorada do chat_id {cid} (autorizado: {chat_id_autorizado})")
             continue
 
         if texto == "/start":
@@ -1306,8 +1326,11 @@ def sincronizar_e_responder_telegram(responder_fn=None) -> int:
         else:
             resposta_zeus = f"Recebido: {texto}"
 
-        zf_enviar_telegram(resposta_zeus)
-        respondidas += 1
+        retorno_envio = zf_enviar_telegram(resposta_zeus, chat_id_destino=cid)
+        if "❌" in str(retorno_envio):
+            st.sidebar.error(str(retorno_envio))
+        else:
+            respondidas += 1
 
     return respondidas
   # === FALLBACK OBRIGATÓRIO: Google -> DuckDuckGo -> Wikipédia (sem IA ou B2) ===
