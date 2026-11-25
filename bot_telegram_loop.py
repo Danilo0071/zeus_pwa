@@ -14,7 +14,7 @@ import requests
 REPO_PADRAO = os.getenv("GITHUB_REPO", "Danilo0071/zeus_pwa").strip()
 BRANCH_PADRAO = os.getenv("GITHUB_BRANCH", "main").strip()
 
-# B2 (API NATIVA - MAIS ESTÁVEL)
+# B2 (API NATIVA)
 B2_KEY_ID = os.getenv("B2_KEY_ID", "").strip().strip('"')
 B2_APP_KEY = os.getenv("B2_APPLICATION_KEY", os.getenv("B2_APP_KEY", "")).strip().strip('"')
 B2_BUCKET = os.getenv("B2_BUCKET", os.getenv("B2_BUCKET_NAME", "")).strip().strip('"')
@@ -31,6 +31,7 @@ BINANCE_SYMBOL = "BTCUSDT"
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip().strip('"')
 GROK_KEY = os.getenv("GROK_API_KEY", "").strip().strip('"')
 TAVILY_KEY = os.getenv("tavily_api_key", os.getenv("TAVILY_API_KEY", "")).strip().strip('"')
+MISTRAL_KEY = os.getenv("MISTRAL_API_KEY", "").strip().strip('"')
 
 # Telegram
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().strip('"')
@@ -46,8 +47,7 @@ def b2_authorize():
     global _b2_auth
     if _b2_auth.get("token") and _b2_auth.get("expires", 0) > time.time():
         return _b2_auth
-    if not B2_KEY_ID or not B2_APP_KEY: 
-        return None
+    if not B2_KEY_ID or not B2_APP_KEY: return None
     try:
         b64 = base64.b64encode(f"{B2_KEY_ID}:{B2_APP_KEY}".encode()).decode()
         r = requests.get("https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
@@ -56,7 +56,7 @@ def b2_authorize():
             d = r.json()
             _b2_auth = {"token": d["authorizationToken"], "api_url": d["apiUrl"],
                         "download_url": d["downloadUrl"], "expires": time.time() + 3600}
-            print("✅ B2 autorizado com sucesso (API Nativa).")
+            print("✅ B2 autorizado com sucesso.")
             return _b2_auth
     except Exception as e: print(f"B2 auth erro: {e}")
     return None
@@ -86,36 +86,24 @@ def b2_salvar(nome_arquivo, dados):
     auth = b2_authorize()
     if not auth: return False
     try:
-        # 1. Pede a URL de upload
         r = requests.post(f"{auth['api_url']}/b2api/v2/b2_get_upload_url",
             headers={"Authorization": auth["token"]},
             json={"bucketId": B2_BUCKET}, timeout=15)
         if r.status_code != 200: return False
         up = r.json()
-        
-        # 2. Prepara o corpo e o hash SHA1 (que o B2 exige)
         corpo = json.dumps(dados, ensure_ascii=False).encode('utf-8')
         sha1 = hashlib.sha1(corpo).hexdigest()
-        
-        # 3. Faz o upload
-        headers = {
-            "Authorization": up["authorizationToken"],
-            "X-Bz-File-Name": urllib.parse.quote(nome_arquivo),
-            "Content-Type": "application/json",
-            "X-Bz-Content-Sha1": sha1
-        }
+        headers = {"Authorization": up["authorizationToken"],
+                   "X-Bz-File-Name": urllib.parse.quote(nome_arquivo),
+                   "Content-Type": "application/json", "X-Bz-Content-Sha1": sha1}
         r2 = requests.post(up["uploadUrl"], headers=headers, data=corpo, timeout=20)
         if r2.status_code == 200:
             print(f"✅ Salvo no B2: {nome_arquivo}")
             return True
-        else:
-            print(f"❌ Erro B2 ({r2.status_code}): {r2.text[:200]}")
-            return False
-    except Exception as e:
-        print(f"❌ Erro B2 salvar: {e}")
-        return False
+    except Exception as e: print(f"B2 salvar erro: {e}")
+    return False
 
-# ================= BUSCA WEB E IA =================
+# ================= BUSCA WEB =================
 def buscar_web(consulta):
     if TAVILY_KEY:
         try:
@@ -145,9 +133,24 @@ def buscar_web(consulta):
     except Exception: pass
     return ""
 
+# ================= IAs =================
+def chamar_mistral(prompt):
+    if not MISTRAL_KEY: return None
+    try:
+        r = requests.post("https://api.mistral.ai/v1/chat/completions", 
+            headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
+            json={"model": "mistral-small-latest", "messages": [{"role": "user", "content": prompt}], "temperature": 0.4},
+            timeout=25)
+        if r.status_code == 200:
+            return r.json().get("choices",[{}])[0].get("message",{}).get("content","").strip()
+        else:
+            print(f"Aviso Mistral: {r.status_code}")
+    except Exception: pass
+    return None
+
 def chamar_gemini(prompt, json_mode=False):
     if not GEMINI_KEY: return None
-    for modelo in ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]:
+    for modelo in ["gemini-1.5-flash-8b", "gemini-1.5-flash"]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_KEY}"
         payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1000}}
         if json_mode: payload["generationConfig"]["responseMimeType"] = "application/json"
@@ -174,6 +177,14 @@ def chamar_grok(prompt):
     except Exception: pass
     return None
 
+def chamar_ia(prompt, json_mode=False):
+    # Ordem de preferência: Mistral (mais estável) -> Gemini -> Grok
+    resp = chamar_mistral(prompt)
+    if resp: return resp
+    resp = chamar_gemini(prompt, json_mode)
+    if resp: return resp
+    return chamar_grok(prompt)
+
 # ================= MÓDULO DE ESTUDO =================
 def estudar_e_salvar(tema):
     print(f"[Estudo] Buscando conhecimento sobre: {tema}")
@@ -184,7 +195,7 @@ def estudar_e_salvar(tema):
     )
     if contexto: prompt += f"Contexto atual:\n{contexto}\n"
     
-    resp = chamar_gemini(prompt) or chamar_grok(prompt)
+    resp = chamar_ia(prompt)
     if resp:
         dados = {"topico": tema, "resumo": resp, "criado_em": int(time.time())}
         nome = f"memoria/{tema.lower().replace(' ', '')[:30]}{int(time.time())}.json"
@@ -249,7 +260,7 @@ def analisar_e_operar():
     Preço atual do {BINANCE_SYMBOL}: {preco}
     Responda APENAS um JSON válido com: {{"acao": "BUY"|"SELL"|"WAIT", "motivo": "texto curto", "tamanho": 0.001}}"""
     
-    resp = chamar_gemini(prompt, json_mode=True)
+    resp = chamar_ia(prompt, json_mode=True)
     try:
         decisao = json.loads(resp)
     except:
@@ -304,7 +315,7 @@ def gerar_resposta(texto):
     prompt = f"VOCÊ É O ZEUS. Responda SEMPRE em português do Brasil, de forma direta e amigável.\nUsuário: {texto}\n"
     if contexto: prompt += f"Contexto da web:\n{contexto}\n"
     
-    resp = chamar_gemini(prompt) or chamar_grok(prompt)
+    resp = chamar_ia(prompt)
     return resp or "Poxa, meus servidores estão ocupados. Tente novamente em instantes!"
 
 def main():
@@ -316,7 +327,7 @@ def main():
     threading.Thread(target=rotina_trade, daemon=True).start()
 
     offset = None
-    print("Zeus online (Telegram + Estudo + Trade + B2 Nativo).")
+    print("Zeus online (Mistral + Gemini + Grok + B2).")
 
     while True:
         try:
@@ -349,5 +360,5 @@ def main():
             print(f"Erro no loop do Telegram: {e}")
             time.sleep(5)
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
