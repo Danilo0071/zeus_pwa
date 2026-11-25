@@ -262,22 +262,31 @@ def buscar_web(consulta):
 
 # ================= IAs =================
 _gemini_modelo_ativo = None
+_gemini_modelos_invalidos = set()
+_gemini_bloqueado_ate = 0.0
 
 
 def _modelo_gemini_valido_para_texto(nome):
     n = nome.lower()
-    bloqueados = ("tts", "image", "audio", "realtime", "live", "embedding", "veo", "imagen", "preview")
+    bloqueados = ("tts", "image", "audio", "realtime", "live", "embedding", "veo", "imagen")
     if any(b in n for b in bloqueados):
         return False
-    return "flash" in n or "pro" in n
+    return any(tag in n for tag in ("flash", "pro", "neon", "hydrogen", "carbon", "argon"))
 
 
 def _listar_modelos_gemini():
     global _gemini_modelo_ativo
-    if _gemini_modelo_ativo:
+    if _gemini_modelo_ativo and _gemini_modelo_ativo not in _gemini_modelos_invalidos:
         return [_gemini_modelo_ativo]
 
-    candidatos = ["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-2.0-flash"]
+    candidatos_padrao = [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-4-hydrogen",
+        "gemini-4-neon",
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
+    ]
     if GEMINI_KEY:
         try:
             r = requests.get(
@@ -289,20 +298,27 @@ def _listar_modelos_gemini():
                 for m in r.json().get("models", []):
                     metodos = m.get("supportedGenerationMethods", [])
                     nome = m.get("name", "").replace("models/", "")
-                    if "generateContent" in metodos and _modelo_gemini_valido_para_texto(nome):
+                    if (
+                        "generateContent" in metodos
+                        and nome not in _gemini_modelos_invalidos
+                        and _modelo_gemini_valido_para_texto(nome)
+                    ):
                         disponiveis.append(nome)
-                priorizados = [c for c in candidatos if c in disponiveis]
+                priorizados = [c for c in candidatos_padrao if c in disponiveis]
                 outros = [d for d in disponiveis if d not in priorizados]
-                if priorizados or outros:
-                    return priorizados + outros
+                lista_final = priorizados + outros
+                if lista_final:
+                    return lista_final
         except Exception:
             pass
-    return candidatos
+    return [c for c in candidatos_padrao if c not in _gemini_modelos_invalidos]
 
 
 def chamar_gemini(prompt, json_mode=False):
-    global _gemini_modelo_ativo
+    global _gemini_modelo_ativo, _gemini_bloqueado_ate
     if not GEMINI_KEY:
+        return None
+    if time.time() < _gemini_bloqueado_ate:
         return None
 
     for modelo in _listar_modelos_gemini():
@@ -335,8 +351,14 @@ def chamar_gemini(prompt, json_mode=False):
                     ).strip()
                     if txt:
                         return txt
+            elif r.status_code == 404:
+                print(f"Aviso Gemini ({modelo}): 404 (modelo indisponível/antigo); pulando.")
+                _gemini_modelos_invalidos.add(modelo)
+                if modelo == _gemini_modelo_ativo:
+                    _gemini_modelo_ativo = None
             elif r.status_code == 429:
                 print(f"Aviso Gemini ({modelo}): limite 429; tentando próxima IA...")
+                _gemini_bloqueado_ate = time.time() + 60
                 if modelo == _gemini_modelo_ativo:
                     _gemini_modelo_ativo = None
                 return None
@@ -353,31 +375,41 @@ def chamar_gemini(prompt, json_mode=False):
 def chamar_groq(prompt):
     if not GROQ_KEY:
         return None
-    try:
-        r = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [
-                    {"role": "system", "content": "Você é o Zeus. Responda sempre em português do Brasil."},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.4,
-            },
-            timeout=25,
-        )
-        if r.status_code == 200:
-            txt = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-            if txt:
-                return txt
-        else:
-            print(f"Aviso Groq: {r.status_code}")
-    except Exception as e:
-        print(f"Erro Groq: {e}")
+    modelos_groq = [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "llama-3.3-70b-versatile",
+    ]
+    for modelo in modelos_groq:
+        try:
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {GROQ_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": modelo,
+                    "messages": [
+                        {"role": "system", "content": "Você é o Zeus. Responda sempre em português do Brasil."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.4,
+                },
+                timeout=25,
+            )
+            if r.status_code == 200:
+                txt = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                if txt:
+                    return txt
+            elif r.status_code == 404:
+                print(f"Aviso Groq ({modelo}): 404; tentando próximo modelo Groq...")
+            else:
+                print(f"Aviso Groq ({modelo}): {r.status_code}")
+                return None
+        except Exception as e:
+            print(f"Erro Groq ({modelo}): {e}")
+            return None
     return None
 
 
