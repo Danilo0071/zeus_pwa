@@ -138,5 +138,5 @@ def main() -> None:
         _enviar_mensagem(token, cid, resposta)
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
