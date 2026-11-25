@@ -9,17 +9,15 @@ import re
 import html
 import threading
 import requests
-from datetime import datetime, timezone
 
 # ================= CONFIGURAÇÕES =================
 REPO_PADRAO = os.getenv("GITHUB_REPO", "Danilo0071/zeus_pwa").strip()
 BRANCH_PADRAO = os.getenv("GITHUB_BRANCH", "main").strip()
 
-# B2 (S3-Compatible)
+# B2 (API NATIVA - MAIS ESTÁVEL)
 B2_KEY_ID = os.getenv("B2_KEY_ID", "").strip().strip('"')
 B2_APP_KEY = os.getenv("B2_APPLICATION_KEY", os.getenv("B2_APP_KEY", "")).strip().strip('"')
 B2_BUCKET = os.getenv("B2_BUCKET", os.getenv("B2_BUCKET_NAME", "")).strip().strip('"')
-B2_ENDPOINT = os.getenv("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com").strip().strip('"')
 
 # Binance Demo
 BINANCE_KEY = os.getenv("BINANCE_API_KEY", "").strip().strip('"')
@@ -41,85 +39,81 @@ TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip().strip('"')
 TEMPO_ESTUDO = 300
 TEMPO_TRADE = 300
 
-# ================= B2 (API S3-COMPATIBLE VIA REQUESTS) =================
-def b2_s3_headers(method, filename, payload=None):
-    t = datetime.now(timezone.utc)
-    amz_date = t.strftime('%Y%m%dT%H%M%SZ')
-    date_stamp = t.strftime('%Y%m%d')
-    
-    host = B2_ENDPOINT.replace("https://", "").replace("http://", "")
-    
-    kDate = hmac.new(("AWS4" + B2_APP_KEY).encode('utf-8'), date_stamp.encode('utf-8'), hashlib.sha256).digest()
-    kRegion = hmac.new(kDate, b'us-east-005', hashlib.sha256).digest()
-    kService = hmac.new(kRegion, b's3', hashlib.sha256).digest()
-    kSigning = hmac.new(kService, b'aws4_request', hashlib.sha256).digest()
-    
-    path = f"/{B2_BUCKET}/{filename}"
-    payload_hash = hashlib.sha256(payload if payload else b'').hexdigest()
-    
-    canonical_headers = f"host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n"
-    signed_headers = "host;x-amz-content-sha256;x-amz-date"
-    
-    canonical_request = f"{method}\n{path}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
-    credential_scope = f"{date_stamp}/us-east-005/s3/aws4_request"
-    string_to_sign = f"AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
-    
-    signing_key = hmac.new(kSigning, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
-    auth_header = f"AWS4-HMAC-SHA256 Credential={B2_KEY_ID}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signing_key}"
-    
-    return {
-        "Host": host,
-        "x-amz-date": amz_date,
-        "x-amz-content-sha256": payload_hash,
-        "Authorization": auth_header,
-        "Content-Type": "application/json"
-    }
+# ================= B2 (API NATIVA) =================
+_b2_auth = {}
 
-def b2_salvar(nome_arquivo, dados):
+def b2_authorize():
+    global _b2_auth
+    if _b2_auth.get("token") and _b2_auth.get("expires", 0) > time.time():
+        return _b2_auth
+    if not B2_KEY_ID or not B2_APP_KEY: 
+        return None
     try:
-        corpo = json.dumps(dados, ensure_ascii=False).encode('utf-8')
-        headers = b2_s3_headers("PUT", nome_arquivo, corpo)
-        # A CORREÇÃO ESTÁ AQUI: Força o envio do tamanho do arquivo
-        headers["Content-Length"] = str(len(corpo))
-        
-        url = f"{B2_ENDPOINT}/{B2_BUCKET}/{nome_arquivo}"
-        
-        r = requests.put(url, headers=headers, data=corpo, timeout=15)
+        b64 = base64.b64encode(f"{B2_KEY_ID}:{B2_APP_KEY}".encode()).decode()
+        r = requests.get("https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
+                         headers={"Authorization": f"Basic {b64}"}, timeout=15)
         if r.status_code == 200:
-            print(f"✅ Salvo no B2: {nome_arquivo}")
-            return True
-        else:
-            print(f"❌ Erro ao salvar no B2 ({r.status_code}): {r.text[:200]}")
-            return False
-    except Exception as e:
-        print(f"❌ Erro B2 salvar: {e}")
-        return False
+            d = r.json()
+            _b2_auth = {"token": d["authorizationToken"], "api_url": d["apiUrl"],
+                        "download_url": d["downloadUrl"], "expires": time.time() + 3600}
+            print("✅ B2 autorizado com sucesso (API Nativa).")
+            return _b2_auth
+    except Exception as e: print(f"B2 auth erro: {e}")
+    return None
 
 def b2_listar(prefixo):
+    auth = b2_authorize()
+    if not auth: return []
     try:
-        # Para o Backblaze S3, a listagem é um GET na raiz do bucket com parâmetros
-        params = f"list-type=2&prefix={urllib.parse.quote(prefixo)}&max-keys=50"
-        # O path para assinar é apenas a barra "/" na raiz, a query vai na URL
-        headers = b2_s3_headers("GET", f"?{params}")
-        url = f"{B2_ENDPOINT}/{B2_BUCKET}?{params}"
-        
-        r = requests.get(url, headers=headers, timeout=15)
-        if r.status_code == 200:
-            # Parser simples de XML para pegar as chaves dos arquivos
-            matches = re.findall(r'<Key>(.*?)</Key>', r.text)
-            return [{"fileName": m} for m in matches]
+        r = requests.post(f"{auth['api_url']}/b2api/v2/b2_list_file_names",
+            headers={"Authorization": auth["token"]},
+            json={"bucketId": B2_BUCKET, "prefix": prefixo, "maxFileCount": 50}, timeout=15)
+        if r.status_code == 200: return r.json().get("files", [])
     except Exception: pass
     return []
 
 def b2_baixar(nome_arquivo):
+    auth = b2_authorize()
+    if not auth: return None
     try:
-        headers = b2_s3_headers("GET", nome_arquivo)
-        url = f"{B2_ENDPOINT}/{B2_BUCKET}/{nome_arquivo}"
-        r = requests.get(url, headers=headers, timeout=15)
-        if r.status_code == 200:
-            return r.json()
+        url = f"{auth['download_url']}/file/{B2_BUCKET}/{urllib.parse.quote(nome_arquivo)}"
+        r = requests.get(url, timeout=15)
+        if r.status_code == 200: return r.json()
     except Exception: pass
     return None
+
+def b2_salvar(nome_arquivo, dados):
+    auth = b2_authorize()
+    if not auth: return False
+    try:
+        # 1. Pede a URL de upload
+        r = requests.post(f"{auth['api_url']}/b2api/v2/b2_get_upload_url",
+            headers={"Authorization": auth["token"]},
+            json={"bucketId": B2_BUCKET}, timeout=15)
+        if r.status_code != 200: return False
+        up = r.json()
+        
+        # 2. Prepara o corpo e o hash SHA1 (que o B2 exige)
+        corpo = json.dumps(dados, ensure_ascii=False).encode('utf-8')
+        sha1 = hashlib.sha1(corpo).hexdigest()
+        
+        # 3. Faz o upload
+        headers = {
+            "Authorization": up["authorizationToken"],
+            "X-Bz-File-Name": urllib.parse.quote(nome_arquivo),
+            "Content-Type": "application/json",
+            "X-Bz-Content-Sha1": sha1
+        }
+        r2 = requests.post(up["uploadUrl"], headers=headers, data=corpo, timeout=20)
+        if r2.status_code == 200:
+            print(f"✅ Salvo no B2: {nome_arquivo}")
+            return True
+        else:
+            print(f"❌ Erro B2 ({r2.status_code}): {r2.text[:200]}")
+            return False
+    except Exception as e:
+        print(f"❌ Erro B2 salvar: {e}")
+        return False
 
 # ================= BUSCA WEB E IA =================
 def buscar_web(consulta):
@@ -322,7 +316,7 @@ def main():
     threading.Thread(target=rotina_trade, daemon=True).start()
 
     offset = None
-    print("Zeus online (Telegram + Estudo + Trade + B2 S3).")
+    print("Zeus online (Telegram + Estudo + Trade + B2 Nativo).")
 
     while True:
         try:
