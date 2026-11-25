@@ -272,3 +272,88 @@ def analisar_e_operar():
         b2_salvar(f"trades/log_{int(time.time())}.json", log_acao)
     
     return decisao
+
+def enviar_telegram(msg):
+    if not TG_TOKEN or not TG_CHAT_ID: return
+    try:
+        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                      json={"chat_id": TG_CHAT_ID, "text": msg}, timeout=15)
+    except Exception: pass
+
+def rotina_trade():
+    while True:
+        try:
+            print("[Trade] Iniciando ciclo de análise e operação...")
+            decisao = analisar_e_operar()
+            saldo = consultar_saldo()
+            
+            if saldo:
+                msg = (f"🤖 Relatório Zeus Trader\n"
+                       f"💰 Saldo: {saldo['saldo']:.2f} USDT\n"
+                       f"📈 PnL: {saldo['pnl']:.2f} USDT\n"
+                       f"🎯 Ação: {decisao['acao']}\n"
+                       f"🧠 Motivo: {decisao['motivo']}")
+                enviar_telegram(msg)
+        except Exception as e:
+            print(f"[Trade] Erro na rotina: {e}")
+        time.sleep(TEMPO_TRADE)
+
+# ================= TELEGRAM LOOP (MAIN) =================
+def gerar_resposta(texto):
+    arquivos = b2_listar("memoria/")
+    for arq in reversed(arquivos[-5:]):
+        dados = b2_baixar(arq["fileName"])
+        if dados and texto.lower() in dados.get("topico", "").lower():
+            return f"📚 Da minha memória:\n\n{dados['resumo']}"
+    
+    contexto = buscar_web(texto)
+    prompt = f"VOCÊ É O ZEUS. Responda SEMPRE em português do Brasil, de forma direta e amigável.\nUsuário: {texto}\n"
+    if contexto: prompt += f"Contexto da web:\n{contexto}\n"
+    
+    resp = chamar_gemini(prompt) or chamar_grok(prompt)
+    return resp or "Poxa, meus servidores estão ocupados. Tente novamente em instantes!"
+
+def main():
+    if not TG_TOKEN:
+        print("Erro: TELEGRAM_BOT_TOKEN não configurado.")
+        return
+
+    threading.Thread(target=rotina_estudo, daemon=True).start()
+    threading.Thread(target=rotina_trade, daemon=True).start()
+
+    offset = None
+    print("Zeus online (Telegram + Estudo + Trade + B2 S3).")
+
+    while True:
+        try:
+            params = {"timeout": 20}
+            if offset: params["offset"] = offset
+            
+            r = requests.get(f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates", params=params, timeout=25)
+            if r.status_code != 200:
+                time.sleep(3); continue
+            
+            for att in r.json().get("result", []):
+                offset = att["update_id"] + 1
+                msg = att.get("message") or att.get("edited_message") or {}
+                texto = (msg.get("text") or "").strip()
+                chat_id = str(msg.get("chat", {}).get("id", ""))
+                
+                if not texto or not chat_id: continue
+                if TG_CHAT_ID and chat_id != TG_CHAT_ID: continue
+                
+                texto_lower = texto.lower()
+                if texto_lower == "status trade":
+                    s = consultar_saldo()
+                    resp = f"💰 Saldo: {s['saldo']:.2f} | 📈 PnL: {s['pnl']:.2f}" if s else "❌ Erro ao acessar Binance Demo."
+                else:
+                    resp = gerar_resposta(texto)
+                
+                enviar_telegram(resp)
+                
+        except Exception as e:
+            print(f"Erro no loop do Telegram: {e}")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()
