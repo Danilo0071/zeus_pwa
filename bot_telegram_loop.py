@@ -1,5 +1,8 @@
+import html
 import os
+import re
 import time
+import urllib.parse
 import requests
 
 
@@ -34,34 +37,46 @@ def chamar_gemini(prompt, api_key, modelo):
 
 
 def buscar_na_web(consulta):
-    tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
-    if not tavily_key:
-        return None
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    # 1. Tenta resposta rapida via API publica do DuckDuckGo (sem chave)
     try:
-        r = requests.post(
-            "https://api.tavily.com/search",
-            json={
-                "api_key": tavily_key,
-                "query": consulta,
-                "max_results": 3,
-                "include_answer": True,
-            },
-            timeout=20,
+        r = requests.get(
+            "https://api.duckduckgo.com/",
+            params={"q": consulta, "format": "json", "no_html": 1, "skip_disambig": 1},
+            headers=headers,
+            timeout=15,
         )
         if r.status_code == 200:
             dados = r.json()
-            if dados.get("answer"):
-                return f"Encontrei isso na web:\n\n{dados['answer']}"
-            resultados = dados.get("results", [])
-            if resultados:
-                linhas = ["Resultados encontrados na web:"]
-                for item in resultados[:3]:
-                    titulo = item.get("title", "Sem titulo")
-                    resumo = item.get("content", "").strip()[:220]
-                    linhas.append(f"- {titulo}: {resumo}")
-                return "\n".join(linhas)
+            resumo = (dados.get("AbstractText") or dados.get("Answer") or "").strip()
+            if resumo:
+                return f"Encontrei isso na web:\n\n{resumo}"
     except Exception as e:
-        print(f"Erro na busca web: {e}")
+        print(f"Aviso DDG JSON: {e}")
+
+    # 2. Se nao vier resumo direto, busca os principais resultados na web (sem chave)
+    try:
+        q = urllib.parse.quote_plus(consulta)
+        r = requests.get(
+            f"https://html.duckduckgo.com/html/?q={q}",
+            headers=headers,
+            timeout=15,
+        )
+        if r.status_code == 200:
+            titulos = re.findall(r'class="result__a"[^>]>(.?)</a>', r.text, re.S)
+            trechos = re.findall(r'class="result__snippet"[^>]>(.?)</a>', r.text, re.S)
+            linhas = []
+            for t, s in zip(titulos[:3], trechos[:3]):
+                t_limpo = html.unescape(re.sub(r"<.*?>", "", t)).strip()
+                s_limpo = html.unescape(re.sub(r"<.*?>", "", s)).strip()
+                if t_limpo and s_limpo:
+                    linhas.append(f"- {t_limpo}: {s_limpo}")
+            if linhas:
+                return "Resultados encontrados na web:\n\n" + "\n".join(linhas)
+    except Exception as e:
+        print(f"Erro na busca web DDG: {e}")
+
     return None
 
 
