@@ -27,8 +27,10 @@ BINANCE_MAX_LEVERAGE = float(os.getenv("BINANCE_MAX_LEVERAGE", "2"))
 BINANCE_BASE_URL = "https://demo-fapi.binance.com" if BINANCE_USE_DEMO else "https://fapi.binance.com"
 BINANCE_SYMBOL = os.getenv("BINANCE_SYMBOL", "BTCUSDT").strip().strip('"')
 
-# IA
+# IAs e Busca Web
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip().strip('"')
+GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip().strip('"')
+OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "").strip().strip('"')
 GROK_KEY = os.getenv("GROK_API_KEY", "").strip().strip('"')
 TAVILY_KEY = os.getenv("tavily_api_key", os.getenv("TAVILY_API_KEY", "")).strip().strip('"')
 MISTRAL_KEY = os.getenv("MISTRAL_API_KEY", "").strip().strip('"')
@@ -262,7 +264,7 @@ _gemini_modelo_ativo = None
 
 def _modelo_gemini_valido_para_texto(nome):
     n = nome.lower()
-    bloqueados = ("tts", "image", "audio", "realtime", "live", "embedding", "veo", "imagen")
+    bloqueados = ("tts", "image", "audio", "realtime", "live", "embedding", "veo", "imagen", "preview")
     if any(b in n for b in bloqueados):
         return False
     return "flash" in n or "pro" in n
@@ -294,37 +296,6 @@ def _listar_modelos_gemini():
         except Exception:
             pass
     return candidatos
-
-
-def chamar_mistral(prompt):
-    if not MISTRAL_KEY or not USAR_MISTRAL:
-        return None
-    try:
-        r = requests.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {MISTRAL_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "mistral-small-latest",
-                "messages": [
-                    {"role": "system", "content": "Responda sempre em português do Brasil."},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.4,
-            },
-            timeout=25,
-        )
-        if r.status_code == 200:
-            return r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        elif r.status_code == 402:
-            print("❌ Mistral: Sem créditos (Erro 402). Ignorando...")
-        else:
-            print(f"Aviso Mistral: {r.status_code}")
-    except Exception:
-        pass
-    return None
 
 
 def chamar_gemini(prompt, json_mode=False):
@@ -363,10 +334,10 @@ def chamar_gemini(prompt, json_mode=False):
                     if txt:
                         return txt
             elif r.status_code == 429:
-                print(f"Aviso Gemini ({modelo}): limite/bloqueio 429.")
+                print(f"Aviso Gemini ({modelo}): limite 429; tentando próxima IA...")
                 if modelo == _gemini_modelo_ativo:
                     _gemini_modelo_ativo = None
-                time.sleep(2)
+                return None
             else:
                 print(f"Aviso Gemini ({modelo}): {r.status_code}")
                 if modelo == _gemini_modelo_ativo:
@@ -374,6 +345,68 @@ def chamar_gemini(prompt, json_mode=False):
         except Exception:
             if modelo == _gemini_modelo_ativo:
                 _gemini_modelo_ativo = None
+    return None
+
+
+def chamar_groq(prompt):
+    if not GROQ_KEY:
+        return None
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {"role": "system", "content": "Você é o Zeus. Responda sempre em português do Brasil."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.4,
+            },
+            timeout=25,
+        )
+        if r.status_code == 200:
+            txt = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if txt:
+                return txt
+        else:
+            print(f"Aviso Groq: {r.status_code}")
+    except Exception as e:
+        print(f"Erro Groq: {e}")
+    return None
+
+
+def chamar_openrouter(prompt):
+    if not OPENROUTER_KEY:
+        return None
+    try:
+        r = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "openrouter/free",
+                "messages": [
+                    {"role": "system", "content": "Você é o Zeus. Responda sempre em português do Brasil."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.4,
+            },
+            timeout=25,
+        )
+        if r.status_code == 200:
+            txt = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if txt:
+                return txt
+        else:
+            print(f"Aviso OpenRouter: {r.status_code}")
+    except Exception as e:
+        print(f"Erro OpenRouter: {e}")
     return None
 
 
@@ -397,7 +430,42 @@ def chamar_grok(prompt):
             timeout=25,
         )
         if r.status_code == 200:
+            txt = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if txt:
+                return txt
+        else:
+            print(f"Aviso Grok: {r.status_code}")
+    except Exception:
+        pass
+    return None
+
+
+def chamar_mistral(prompt):
+    if not MISTRAL_KEY or not USAR_MISTRAL:
+        return None
+    try:
+        r = requests.post(
+            "https://api.mistral.ai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {MISTRAL_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "mistral-small-latest",
+                "messages": [
+                    {"role": "system", "content": "Responda sempre em português do Brasil."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.4,
+            },
+            timeout=25,
+        )
+        if r.status_code == 200:
             return r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        elif r.status_code == 402:
+            print("❌ Mistral: Sem créditos (Erro 402). Ignorando...")
+        else:
+            print(f"Aviso Mistral: {r.status_code}")
     except Exception:
         pass
     return None
@@ -410,29 +478,22 @@ def chamar_ia(prompt, contexto_web="", json_mode=False):
         f"{prompt}"
     )
 
-    resp = chamar_gemini(prompt_pt, json_mode)
-    if resp:
-        return resp
-
-    resp = chamar_mistral(prompt_pt)
-    if resp:
-        return resp
-
-    resp = chamar_grok(prompt_pt)
-    if resp:
-        return resp
+    for provedor in (chamar_gemini, chamar_groq, chamar_openrouter, chamar_grok, chamar_mistral):
+        resp = provedor(prompt_pt, json_mode) if provedor == chamar_gemini else provedor(prompt_pt)
+        if resp:
+            return resp
 
     if json_mode:
         return json.dumps({
             "acao": "WAIT",
-            "motivo": "IA em limite temporário; aguardando próxima janela em português",
+            "motivo": "IAs em limite temporário; aguardando próxima janela em português",
             "tamanho": 0,
         })
 
     if contexto_web:
         trecho = contexto_web[:450].replace("\n", " ")
         return (
-            "As IAs estão com limite/bloqueio temporário agora, mas aqui está o resumo "
+            "As IAs estão com limite temporário agora, mas aqui está o resumo "
             f"encontrado na busca web: {trecho}"
         )
 
@@ -445,6 +506,10 @@ def resumo_provedores():
         ativos.append("B2")
     if GEMINI_KEY:
         ativos.append("Gemini")
+    if GROQ_KEY:
+        ativos.append("Groq")
+    if OPENROUTER_KEY:
+        ativos.append("OpenRouter")
     if GROK_KEY:
         ativos.append("Grok")
     if TAVILY_KEY:
@@ -908,5 +973,5 @@ def main():
             time.sleep(5)
 
 
-if __name__ == "__main__":
+if __name__ == "_main_":
     main()
