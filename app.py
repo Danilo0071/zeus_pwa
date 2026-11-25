@@ -1209,36 +1209,46 @@ def get_llm_response(session_id, prompt, model_choice, system=None, use_history=
     return False, "❌ Nenhum modelo respondeu. " + " | ".join(erros), None, erros
 
 # ============================================================
-# ZEUS TELEGRAM REAL (Sem Teatro, 100% Autônomo para Danilo)
+# ZEUS TELEGRAM REAL (Envio + Leitura e Resposta via Zeus)
 # ============================================================
-def zf_enviar_telegram(texto: str) -> str:
-    token = st.secrets.get("TELEGRAM_BOT_TOKEN") or st.secrets.get("telegram", {}).get("token", "")
-    chat_id = st.secrets.get("TELEGRAM_CHAT_ID") or st.secrets.get("telegram", {}).get("chat_id", "")
-    
-    if not token or not chat_id:
-        return "❌ ERRO CRÍTICO: Token do Telegram ou Chat ID não encontrados no secrets.toml."
-    
-    texto = (texto or "").strip()
-    if not texto:
-        texto = "Teste de telemetria e protocolo de bunker acionado por Danilo."
-        
+def _obter_credenciais_telegram() -> tuple[str, str]:
+    token = ""
+    chat_id = ""
+    try:
+        token = st.secrets.get("TELEGRAM_BOT_TOKEN") or st.secrets.get("telegram", {}).get("token", "")
+        chat_id = st.secrets.get("TELEGRAM_CHAT_ID") or st.secrets.get("telegram", {}).get("chat_id", "")
+    except Exception:
+        pass
+    token = str(token or os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or "").strip()
+    chat_id = str(chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+    return token, chat_id
+
+
+def zf_enviar_telegram(texto: str, chat_id_destino: str = "") -> str:
+    token, chat_id_padrao = _obter_credenciais_telegram()
+    destino = str(chat_id_destino or chat_id_padrao or "").strip()
+
+    if not token or not destino:
+        return "❌ ERRO CRÍTICO: Token do Telegram ou Chat ID não encontrados nos Secrets."
+
+    msg_limpa = (texto or "").strip() or "Teste de telemetria e protocolo de bunker acionado por Danilo."
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
-        "chat_id": chat_id,
-        "text": f"🚨 *[ZEUS - PROTOCOLO DE BUNKER]* 🚨\n\nCriador: *Danilo*\n\n{texto}",
-        "parse_mode": "Markdown"
+        "chat_id": destino,
+        "text": f"🚨 [ZEUS - PROTOCOLO DE BUNKER] 🚨\n\nCriador: Danilo\n\n{msg_limpa[:3800]}",
+        "parse_mode": "Markdown",
     }
-    
+
     try:
         r = requests.post(url, json=payload, timeout=30)
         if r.status_code == 200 and r.json().get("ok"):
             return "✅ SUCESSO REAL: Mensagem disparada diretamente nos servidores do Telegram para o Danilo!"
-        else:
-            return f"❌ FALHA NA API DO TELEGRAM (Status {r.status_code}): {r.text}"
+        return f"❌ FALHA NA API DO TELEGRAM (Status {r.status_code}): {r.text}"
     except Exception as e:
         return f"❌ EXCEÇÃO DE REDE NO TELEGRAM: {str(e)}"
 
-def _rt_comando_telegram(texto):
+
+def _rt_comando_telegram(texto: str) -> str:
     t = re.sub(
         r"(?i)\b(zeus[,:]?\s*)?(manda|envie|enviar|envia|toque|mande)?\s*(no\s+|pelo\s+|via\s+)?(telegram|tg)\s*[:\-]?\s*",
         "",
@@ -1248,36 +1258,59 @@ def _rt_comando_telegram(texto):
         t = "Alerta de telemetria e bunker disparado pelo criador Danilo."
     return zf_enviar_telegram(t)
 
-def interceptar_comando_autonomo_telegram(texto):
-    low = texto.lower()
-    if "telegram" in low or "tg" in low or "bunker" in low or "telemetria" in low:
+
+def interceptar_comando_autonomo_telegram(texto: str) -> tuple[bool, str]:
+    low = (texto or "").lower()
+    if any(k in low for k in ("telegram", "tg", "bunker", "telemetria")):
         return True, _rt_comando_telegram(texto)
     return False, ""
 
 
-def processar_prompt(prompt):
-    tratado, resposta = interceptar_comando_autonomo_telegram(prompt)
-    if tratado:
-        sid = st.session_state.session_id
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        add_message(sid, "user", prompt)
-        st.session_state.messages.append({"role": "assistant", "content": resposta})
-        add_message(sid, "assistant", resposta)
-        st.session_state.last_info = "⚡ Comando autônomo executado com sucesso"
-        return resposta
-    """Sempre tenta responder. Se as IAs falharem, busca na web (Google primeiro).
-    Nunca devolve mensagem de 'nenhum modelo respondeu'."""
-    sid = st.session_state.session_id
-    escolhido = st.session_state.get("model_sel", "groq")
-    st.session_state.messages.append({"role": "user", "content": prompt})
+def sincronizar_e_responder_telegram(responder_fn=None) -> int:
+    """Lê mensagens novas enviadas ao bot no Telegram e responde usando o Zeus."""
+    token, chat_id_autorizado = _obter_credenciais_telegram()
+    if not token:
+        return 0
 
-    tem_chave_ia = any(_secret(k) for k in KEYS.values())
-    if tem_chave_ia:
-        prompt_llm, fonte_web = enriquecer_com_web(prompt)
-        ok, response, prov, erros = get_llm_response(sid, prompt_llm, escolhido)
-    else:
-        fonte_web = ""
-        ok, response, prov, erros = False, "", None, ["sem chaves configuradas"]
+    if "tg_last_update_id" not in st.session_state:
+        st.session_state.tg_last_update_id = 0
+
+    offset = int(st.session_state.tg_last_update_id) + 1
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    try:
+        r = requests.get(url, params={"offset": offset, "timeout": 2, "allowed_updates": '["message"]'}, timeout=15)
+        data = r.json() if r.status_code == 200 else {}
+    except Exception:
+        return 0
+
+    if not data.get("ok"):
+        return 0
+
+    respondidas = 0
+    for upd in data.get("result", []):
+        uid = int(upd.get("update_id", 0))
+        if uid >= int(st.session_state.tg_last_update_id):
+            st.session_state.tg_last_update_id = uid
+
+        msg = upd.get("message") or {}
+        texto = (msg.get("text") or "").strip()
+        cid = str((msg.get("chat") or {}).get("id", "")).strip()
+        if not texto or not cid:
+            continue
+        if chat_id_autorizado and cid != chat_id_autorizado:
+            continue
+
+        if texto == "/start":
+            resposta_zeus = "⚡ Zeus ativo no Telegram. Mande sua mensagem ou dúvida que eu respondo por aqui."
+        elif callable(responder_fn):
+            resposta_zeus = str(responder_fn(texto) or "Sem resposta no momento.")
+        else:
+            resposta_zeus = f"Recebido: {texto}"
+
+        zf_enviar_telegram(resposta_zeus, chat_id_destino=cid)
+        respondidas += 1
+
+    return respondidas
   # === FALLBACK OBRIGATÓRIO: Google -> DuckDuckGo -> Wikipédia (sem IA ou B2) ===
     if not ok:
         ctx_web, fonte = "", ""
