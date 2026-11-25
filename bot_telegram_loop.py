@@ -28,7 +28,7 @@ def _salvar_ultimo_id(update_id: int) -> None:
 def _chamar_gemini(texto: str, gemini_key: str) -> str:
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={gemini_key}"
+        f"gemini-3.0-flash:generateContent?key={gemini_key}"
     )
     payload = {
         "systemInstruction": {
