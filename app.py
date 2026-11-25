@@ -4498,9 +4498,10 @@ except Exception as _zf_err:
 # Secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 #          SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM
 # ============================================================
-def zf_enviar_telegram(texto: str) -> str:
+def zf_enviar_telegram(texto: str, chat_id_destino: str = "") -> str:
     token = _secret("TELEGRAM_BOT_TOKEN")
-    chat_id = _secret("TELEGRAM_CHAT_ID")
+    chat_id_padrao = _secret("TELEGRAM_CHAT_ID")
+    chat_id = str(chat_id_destino or chat_id_padrao or "").strip()
     if not token or not chat_id:
         return "Telegram não configurado. Coloque TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID nos Secrets."
     texto = (texto or "").strip()
