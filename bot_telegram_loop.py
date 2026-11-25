@@ -20,12 +20,14 @@ B2_APP_KEY = os.getenv("B2_APPLICATION_KEY", os.getenv("B2_APP_KEY", "")).strip(
 B2_BUCKET = os.getenv("B2_BUCKET", os.getenv("B2_BUCKET_NAME", "")).strip().strip('"')
 
 # Binance Demo
-BINANCE_KEY = os.getenv("BINANCE_API_KEY", "").strip().strip('"')
-BINANCE_SECRET = os.getenv("BINANCE_API_SECRET", "").strip().strip('"')
+BINANCE_KEY = os.getenv("BINANCE_API_KEY", os.getenv("BINANCE_KEY", "")).strip().strip('"')
+BINANCE_SECRET = os.getenv("BINANCE_API_SECRET", os.getenv("BINANCE_SECRET", "")).strip().strip('"')
 BINANCE_USE_DEMO = os.getenv("BINANCE_USE_DEMO", "true").lower() == "true"
-BINANCE_MAX_LEVERAGE = float(os.getenv("BINANCE_MAX_LEVERAGE", "2"))
+BINANCE_MAX_LEVERAGE = min(float(os.getenv("BINANCE_MAX_LEVERAGE", "2")), 2.0)
 BINANCE_BASE_URL = "https://demo-fapi.binance.com" if BINANCE_USE_DEMO else "https://fapi.binance.com"
 BINANCE_SYMBOL = os.getenv("BINANCE_SYMBOL", "BTCUSDT").strip().strip('"')
+BINANCE_MARGEM_PCT = float(os.getenv("BINANCE_MARGEM_PCT", "0.05"))  # 5% do saldo por ordem de teste
+TESTE_AUTO_DEMO = os.getenv("TESTE_AUTO_DEMO", "true").lower() == "true"
 
 # IAs e Busca Web
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip().strip('"')
@@ -43,7 +45,7 @@ TG_MAX_IDADE = int(os.getenv("TG_MAX_IDADE", "3600"))
 ZEUS_JANELA_SEG = int(os.getenv("ZEUS_JANELA_SEG", "240"))
 ZEUS_MODO = os.getenv("ZEUS_MODO", "continuo").strip().lower()
 
-# Ciclos: estudo mais espaçado (padrão 30 min / 1800s) e trade a cada 15 min (900s) para poupar cota; relatório a cada 1h
+# Ciclos: estudo a cada 30 min (1800s), trade a cada 15 min (900s), relatório a cada 1h (3600s)
 TEMPO_ESTUDO = int(os.getenv("TEMPO_ESTUDO", "1800"))
 TEMPO_TRADE = int(os.getenv("TEMPO_TRADE", "900"))
 TEMPO_RELATORIO_HORARIO = int(os.getenv("TEMPO_RELATORIO_HORARIO", "3600"))
@@ -55,7 +57,9 @@ TIMEOUT_IA = (4, 8)
 _inicio_bot_ts = time.time()
 _ciclos_trade_rodados = 0
 _ciclos_estudo_rodados = 0
+_ordens_executadas_sessao = 0
 _ultimos_aprendizados_sessao = []
+_saldo_inicial_sessao = None
 
 
 def log(msg):
@@ -551,7 +555,7 @@ def chamar_ia(prompt, contexto_web="", json_mode=False):
     if json_mode:
         return json.dumps({
             "acao": "WAIT",
-            "motivo": "IAs em limite ou lentas; aguardando próximo ciclo com segurança",
+            "motivo": "IAs em limite ou lentas; usando critério seguro na Demo",
             "tamanho": 0,
         })
 
@@ -671,17 +675,25 @@ def binance_request(method, endpoint, params=None, assinado=True):
             r = requests.get(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=(4, 8))
         else:
             r = requests.post(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=(4, 8))
-        return r.json() if r.status_code in (200, 400) else None
-    except Exception:
+        dados = r.json()
+        if r.status_code != 200:
+            log(f"[Binance] {endpoint} retornou {r.status_code}: {dados}")
+        return dados if r.status_code in (200, 400) else None
+    except Exception as e:
+        log(f"[Binance] Erro em {endpoint}: {e}")
         return None
 
 
 def consultar_saldo():
+    global _saldo_inicial_sessao
     conta = binance_request("GET", "/fapi/v2/account")
     if not conta or "totalWalletBalance" not in conta:
         return None
+    saldo_atual = float(conta.get("totalWalletBalance", 0))
+    if _saldo_inicial_sessao is None:
+        _saldo_inicial_sessao = saldo_atual
     return {
-        "saldo": float(conta.get("totalWalletBalance", 0)),
+        "saldo": saldo_atual,
         "pnl": float(conta.get("totalUnrealizedProfit", 0)),
     }
 
@@ -738,9 +750,34 @@ def consultar_resultados_binance():
     }
 
 
+def _calcular_quantidade_demo(saldo_usdt, preco):
+    """Calcula quantidade em BTC com alavancagem controlada e margem segura na Demo."""
+    if preco <= 0 or saldo_usdt <= 0:
+        return 0.001
+    alav = max(1.0, min(BINANCE_MAX_LEVERAGE, 2.0))
+    notional_alvo = max(5.0, saldo_usdt * BINANCE_MARGEM_PCT * alav)
+    qtd = round(notional_alvo / preco, 3)
+    return max(0.001, qtd)
+
+
+def _posicao_atual_simbolo():
+    posicoes = binance_request("GET", "/fapi/v2/positionRisk", {"symbol": BINANCE_SYMBOL})
+    if isinstance(posicoes, list):
+        for p in posicoes:
+            if p.get("symbol") == BINANCE_SYMBOL:
+                return float(p.get("positionAmt", 0.0) or 0.0)
+    return 0.0
+
+
 def analisar_e_operar():
+    global _ordens_executadas_sessao
+
+    if not BINANCE_KEY or not BINANCE_SECRET:
+        log("[Trade] Binance sem chave/segredo configurados.")
+        return {"acao": "WAIT", "motivo": "Chaves da Binance não configuradas", "tamanho": 0}
+
     estudos = buscar_estudos_trade_b2(f"trade alavancagem {BINANCE_SYMBOL}", limite=3)
-    estrategia = "Estratégia acumulada: seguir tendência, usar alavancagem baixa e stop curto."
+    estrategia = "Estratégia acumulada: seguir tendência, usar alavancagem até 2x e stop curto."
     if estudos:
         estrategia = "\n".join(
             f"- {e.get('topico','')}: {e.get('resumo','')[:300]}" for e in estudos
@@ -757,10 +794,14 @@ def analisar_e_operar():
         return {"acao": "WAIT", "motivo": "Falha ao obter preço da Binance"}
     preco = float(ticker["price"])
 
+    saldo_info = consultar_saldo()
+    saldo_usdt = saldo_info["saldo"] if saldo_info else 100.0
+    pos_atual = _posicao_atual_simbolo()
+
     prompt = f"""Você é o Zeus Trader operando com alavancagem controlada na Binance Futures Demo.
 Decida se deve ABRIR (BUY/SELL) ou AGUARDAR (WAIT).
 Conhecimento acumulado em estudo_trade/: {estrategia}
-Preço atual do {BINANCE_SYMBOL}: {preco} | Alavancagem máxima permitida: {int(BINANCE_MAX_LEVERAGE)}x
+Preço atual do {BINANCE_SYMBOL}: {preco} | Saldo Demo: {saldo_usdt:.2f} USDT | Posição atual: {pos_atual} | Alavancagem máxima: {int(BINANCE_MAX_LEVERAGE)}x
 Responda APENAS um JSON válido com: {{"acao": "BUY"|"SELL"|"WAIT", "motivo": "texto curto em português", "tamanho": 0.001}}"""
 
     resp = chamar_ia(prompt, json_mode=True)
@@ -769,22 +810,51 @@ Responda APENAS um JSON válido com: {{"acao": "BUY"|"SELL"|"WAIT", "motivo": "t
     except Exception:
         decisao = {"acao": "WAIT", "motivo": "IA indisponível no momento", "tamanho": 0}
 
+    acao = str(decisao.get("acao", "WAIT")).upper().strip()
+
+    # Modo de teste prático na Demo: se a IA ficar em WAIT, alterna teste controlado para validar ordens e PnL
+    if acao == "WAIT" and TESTE_AUTO_DEMO:
+        if pos_atual > 0:
+            acao = "SELL"
+            decisao["acao"] = "SELL"
+            decisao["motivo"] = "Teste prático na Demo: realizando/fechando posição aberta para medir resultado."
+        elif pos_atual < 0:
+            acao = "BUY"
+            decisao["acao"] = "BUY"
+            decisao["motivo"] = "Teste prático na Demo: realizando/fechando posição vendida para medir resultado."
+        else:
+            acao = "BUY" if (_ciclos_trade_rodados % 2 == 1) else "SELL"
+            decisao["acao"] = acao
+            decisao["motivo"] = f"Teste prático na Demo ({int(BINANCE_MAX_LEVERAGE)}x): abrindo operação para avaliar ganho/perda."
+
+    qtd_solicitada = float(decisao.get("tamanho") or 0.0)
+    qtd_final = qtd_solicitada if qtd_solicitada >= 0.001 else _calcular_quantidade_demo(saldo_usdt, preco)
+    decisao["tamanho"] = qtd_final
+
     log_acao = {"preco": preco, "decisao": decisao, "ts": int(time.time())}
-    if decisao.get("acao") in ["BUY", "SELL"]:
-        binance_request("POST", "/fapi/v1/leverage", {"symbol": BINANCE_SYMBOL, "leverage": int(BINANCE_MAX_LEVERAGE)})
+    if acao in ("BUY", "SELL"):
+        alav_int = int(max(1, min(BINANCE_MAX_LEVERAGE, 2)))
+        binance_request(
+            "POST",
+            "/fapi/v1/leverage",
+            {"symbol": BINANCE_SYMBOL, "leverage": alav_int},
+        )
         ordem = binance_request(
             "POST",
             "/fapi/v1/order",
             {
                 "symbol": BINANCE_SYMBOL,
-                "side": decisao["acao"],
+                "side": acao,
                 "type": "MARKET",
-                "quantity": decisao.get("tamanho", 0.001),
+                "quantity": qtd_final,
             },
         )
         log_acao["ordem"] = ordem
+        _ordens_executadas_sessao += 1
         b2_salvar(f"trades/log_{int(time.time())}.json", log_acao)
-        log(f"[Trade] Ordem {decisao['acao']} enviada na Binance Demo em {preco}.")
+        log(f"[Trade] Ordem {acao} ({qtd_final} {BINANCE_SYMBOL} @ {alav_int}x) enviada na Demo em {preco}.")
+    else:
+        b2_salvar(f"trades/log_{int(time.time())}.json", log_acao)
 
     return decisao
 
@@ -815,8 +885,13 @@ def montar_relatorio_de_hora_em_hora():
             + res["taxas_e_funding"]
         )
         resultado_total_com_aberto = resultado_realizado_liquido + res["pnl_aberto"]
+        variacao_sessao = (
+            f"{res['saldo'] - _saldo_inicial_sessao:+.4f} USDT"
+            if _saldo_inicial_sessao is not None
+            else "sem base inicial"
+        )
         bloco_binance = (
-            f"💰 Saldo Demo: {res['saldo']:.2f} USDT\n"
+            f"💰 Saldo Demo: {res['saldo']:.2f} USDT (variação sessão: {variacao_sessao})\n"
             f"🟢 Lucro realizado (24h): +{res['ganhos_realizados']:.4f} USDT\n"
             f"🔴 Prejuízo realizado (24h): {res['perdas_realizadas']:.4f} USDT\n"
             f"💸 Taxas/Funding (24h): {res['taxas_e_funding']:.4f} USDT\n"
@@ -846,7 +921,7 @@ def montar_relatorio_de_hora_em_hora():
 
     desenvoltura = (
         f"⏱️ Online há {horas_ativas:.1f}h | Ciclos de trade: {_ciclos_trade_rodados} "
-        f"| Ciclos de estudo: {_ciclos_estudo_rodados}"
+        f"| Ordens enviadas: {_ordens_executadas_sessao} | Ciclos de estudo: {_ciclos_estudo_rodados}"
     )
 
     return (
@@ -884,7 +959,7 @@ def rotina_trade():
                     "🤖 Relatório Zeus Trader\n"
                     f"💰 Saldo: {saldo['saldo']:.2f} USDT\n"
                     f"📈 PnL: {saldo['pnl']:.2f} USDT\n"
-                    f"🎯 Ação: {decisao.get('acao', 'WAIT')}\n"
+                    f"🎯 Ação: {decisao.get('acao', 'WAIT')} ({decisao.get('tamanho', 0)})\n"
                     f"🧠 Motivo: {decisao.get('motivo', 'Sem detalhes')}"
                 )
                 enviar_telegram(msg)
