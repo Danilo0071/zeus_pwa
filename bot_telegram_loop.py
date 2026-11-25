@@ -103,34 +103,26 @@ def b2_salvar(nome_arquivo, dados):
     except Exception as e: print(f"B2 salvar erro: {e}")
     return False
 
-# ================= BUSCA WEB =================
+# ================= BUSCA WEB (TAVILY) =================
 def buscar_web(consulta):
     if TAVILY_KEY:
         try:
             r = requests.post("https://api.tavily.com/search", json={
                 "api_key": TAVILY_KEY, "query": consulta, "max_results": 3, "include_answer": True
-            }, timeout=12)
+            }, timeout=15)
             if r.status_code == 200:
                 d = r.json()
                 partes = []
                 if d.get("answer"): partes.append(d["answer"])
                 for item in d.get("results", [])[:2]:
                     partes.append(f"- {item.get('title','')}: {item.get('content','')[:300]}")
-                if partes: return "\n".join(partes)
-        except Exception: pass
-    try:
-        q = urllib.parse.quote_plus(consulta)
-        r = requests.get(f"https://html.duckduckgo.com/html/?q={q}", headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        if r.status_code == 200:
-            titulos = re.findall(r'class="result__a"[^>]>(.?)</a>', r.text, re.S)[:2]
-            trechos = re.findall(r'class="result__snippet"[^>]>(.?)</a>', r.text, re.S)[:2]
-            linhas = []
-            for t, s in zip(titulos, trechos):
-                tl = html.unescape(re.sub(r"<.*?>", "", t)).strip()
-                sl = html.unescape(re.sub(r"<.*?>", "", s)).strip()
-                if tl: linhas.append(f"- {tl}: {sl}")
-            return "\n".join(linhas) if linhas else ""
-    except Exception: pass
+                if partes: 
+                    print(f"[Web] Tavily encontrou resultados.")
+                    return "\n".join(partes)
+            else:
+                print(f"Aviso Tavily: {r.status_code}")
+        except Exception as e: 
+            print(f"Erro Tavily: {e}")
     return ""
 
 # ================= IAs =================
@@ -143,6 +135,8 @@ def chamar_mistral(prompt):
             timeout=25)
         if r.status_code == 200:
             return r.json().get("choices",[{}])[0].get("message",{}).get("content","").strip()
+        elif r.status_code == 402:
+            print("❌ Mistral: Sem créditos (Erro 402). Ignorando...")
         else:
             print(f"Aviso Mistral: {r.status_code}")
     except Exception: pass
@@ -150,7 +144,8 @@ def chamar_mistral(prompt):
 
 def chamar_gemini(prompt, json_mode=False):
     if not GEMINI_KEY: return None
-    for modelo in ["gemini-1.5-flash-8b", "gemini-1.5-flash"]:
+    # Modelos atualizados que aceitam contas novas
+    for modelo in ["gemini-2.0-flash", "gemini-2.5-flash"]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_KEY}"
         payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1000}}
         if json_mode: payload["generationConfig"]["responseMimeType"] = "application/json"
@@ -177,13 +172,20 @@ def chamar_grok(prompt):
     except Exception: pass
     return None
 
-def chamar_ia(prompt, json_mode=False):
-    # Ordem de preferência: Mistral (mais estável) -> Gemini -> Grok
-    resp = chamar_mistral(prompt)
-    if resp: return resp
+def chamar_ia(prompt, contexto_web="", json_mode=False):
+    # 1. Tenta Gemini
     resp = chamar_gemini(prompt, json_mode)
     if resp: return resp
-    return chamar_grok(prompt)
+    # 2. Tenta Mistral (só se tiver créditos)
+    resp = chamar_mistral(prompt)
+    if resp: return resp
+    # 3. Tenta Grok
+    resp = chamar_grok(prompt)
+    if resp: return resp
+    # 4. Se tudo falhar, usa a web bruta
+    if contexto_web:
+        return f"Baseado na minha pesquisa: {contexto_web}"
+    return None
 
 # ================= MÓDULO DE ESTUDO =================
 def estudar_e_salvar(tema):
@@ -195,7 +197,7 @@ def estudar_e_salvar(tema):
     )
     if contexto: prompt += f"Contexto atual:\n{contexto}\n"
     
-    resp = chamar_ia(prompt)
+    resp = chamar_ia(prompt, contexto)
     if resp:
         dados = {"topico": tema, "resumo": resp, "criado_em": int(time.time())}
         nome = f"memoria/{tema.lower().replace(' ', '')[:30]}{int(time.time())}.json"
@@ -315,7 +317,7 @@ def gerar_resposta(texto):
     prompt = f"VOCÊ É O ZEUS. Responda SEMPRE em português do Brasil, de forma direta e amigável.\nUsuário: {texto}\n"
     if contexto: prompt += f"Contexto da web:\n{contexto}\n"
     
-    resp = chamar_ia(prompt)
+    resp = chamar_ia(prompt, contexto)
     return resp or "Poxa, meus servidores estão ocupados. Tente novamente em instantes!"
 
 def main():
@@ -327,7 +329,7 @@ def main():
     threading.Thread(target=rotina_trade, daemon=True).start()
 
     offset = None
-    print("Zeus online (Mistral + Gemini + Grok + B2).")
+    print("Zeus online (Tavily + Gemini + Mistral + B2).")
 
     while True:
         try:
