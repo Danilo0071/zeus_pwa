@@ -4164,254 +4164,30 @@ def _zf_gerar_audio(texto, voz_id):
 
 
 def _zf_falar_resposta(texto, voz_id, chave_id=""):
-    import base64
-    import re as _re_safe
-    import streamlit.components.v1 as components
-
-    chave_limpa = re_safe.sub(r"[^a-zA-Z0-9-]", "", str(chave_id or "resp")) or "resp"
     audio_bytes, mime = _zf_gerar_audio(texto, voz_id)
-    texto_js = (
-        str(texto or "")[:700]
-        .replace("\\", "\\\\")
-        .replace("'", "\\'")
-        .replace('"', '\\"')
-        .replace("\n", " ")
-        .replace("\r", " ")
-    )
-
     if audio_bytes and mime:
-        b64 = base64.b64encode(audio_bytes).decode("ascii")
-        components.html(
-            f"""
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#0e1525;border:1px solid #1f3354;border-radius:10px;padding:6px 10px;color:#cfe6ff;font-family:sans-serif;font-size:12px;">
-              <audio id="zeus-player-{chave_limpa}" controls playsinline preload="auto" style="height:30px;flex:1;min-width:160px;">
-                <source src="data:{mime};base64,{b64}" type="{mime}">
-              </audio>
-              <button id="zeus-playbtn-{chave_limpa}" onclick="const a=document.getElementById('zeus-player-{chave_limpa}');if(a){{a.currentTime=0;a.play().catch(()=>{{}});}}"
-                      style="background:#143628;color:#80ed99;border:1px solid #2d6a4f;border-radius:6px;padding:5px 9px;cursor:pointer;font-weight:600;">
-                Falar
-              </button>
-              <button onclick="const a=document.getElementById('zeus-player-{chave_limpa}');if(a){{a.pause();a.currentTime=0;}}if('speechSynthesis' in window){{window.speechSynthesis.cancel();}}"
-                      style="background:#2b1620;color:#ff8fa3;border:1px solid #6b263c;border-radius:6px;padding:5px 8px;cursor:pointer;">
-                Parar
-              </button>
-            </div>
-            <script>
-            (function() {{
-                try {{
-                    const el = document.getElementById('zeus-player-{chave_limpa}');
-                    if (window._zeusAudioAtual && window._zeusAudioAtual !== el) {{
-                        try {{ window._zeusAudioAtual.pause(); }} catch(e){{}}
-                    }}
-                    window._zeusAudioAtual = el;
-                    if (el) {{
-                        const p = el.play();
-                        if (p && typeof p.catch === 'function') {{
-                            p.catch(() => {{
-                                const btn = document.getElementById('zeus-playbtn-{chave_limpa}');
-                                if (btn) btn.style.boxShadow = '0 0 0 2px #ffd166';
-                            }});
-                        }}
-                    }}
-                }} catch (e) {{}}
-            }})();
-            </script>
-            """,
-            height=52,
-        )
+        st.audio(audio_bytes, format=mime, autoplay=True)
         return
 
+    import streamlit.components.v1 as components
+    texto_js = str(texto or "")[:700].replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
     components.html(
         f"""
-        <div style="display:flex;align-items:center;gap:8px;background:#0e1525;border:1px solid #1f3354;border-radius:10px;padding:6px 10px;color:#cfe6ff;font-family:sans-serif;font-size:12px;">
-          <span style="flex:1;">Resposta pronta para falar</span>
-          <button onclick="if('speechSynthesis' in window){{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(\"{texto_js}\");u.lang='pt-BR';u.rate=1.0;window.speechSynthesis.speak(u);}}"
-                  style="background:#143628;color:#80ed99;border:1px solid #2d6a4f;border-radius:6px;padding:5px 9px;cursor:pointer;font-weight:600;">
-            Falar
-          </button>
-        </div>
         <script>
         (function() {{
             if (!('speechSynthesis' in window)) return;
             try {{
                 window.speechSynthesis.cancel();
-                const u = new SpeechSynthesisUtterance("{texto_js}");
+                const u = new SpeechSynthesisUtterance('{texto_js}');
                 u.lang = 'pt-BR';
-                u.rate = 1.0;
+                u.rate = 1.02;
                 window.speechSynthesis.speak(u);
             }} catch (e) {{}}
         }})();
         </script>
+        <div style="font-size:12px;color:#9ab;">Fala via navegador acionada ({str(chave_id)[-6:]}).</div>
         """,
-        height=44,
-    )
-
-
-def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
-    """Escuta continua adaptada para PC e celular (envia apos 2s de pausa e interrompe fala ao detectar voz)."""
-    import streamlit.components.v1 as components
-
-    if not ativo:
-        return
-
-    ms_silencio = int(segundos_silencio * 1000)
-    components.html(
-        f"""
-        <div id="zf-live-box" style="background:#0b1324;border:1px solid #1e3a5f;border-radius:10px;padding:10px 12px;color:#e6f1ff;font-family:sans-serif;font-size:13px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <span id="zf-live-status" style="font-weight:600;color:#4cc9f0;">Ouvindo... fale normalmente (envia apos {segundos_silencio:.0f}s de pausa)</span>
-            <span id="zf-live-timer" style="font-size:11px;color:#8da9c4;">aguardando voz</span>
-          </div>
-          <div id="zf-live-preview" style="margin-top:6px;min-height:20px;color:#b8d4f0;font-style:italic;">...</div>
-        </div>
-        <script>
-        (function() {{
-            const statusEl = document.getElementById('zf-live-status');
-            const timerEl = document.getElementById('zf-live-timer');
-            const prevEl = document.getElementById('zf-live-preview');
-            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
-
-            if (!SR) {{
-                statusEl.textContent = 'Este navegador nao suporta escuta automatica. Abra o microfone manual abaixo.';
-                statusEl.style.color = '#ffb703';
-                return;
-            }}
-
-            function interromperZeusFalando() {{
-                try {{
-                    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-                    if (window._zeusAudioAtual) {{
-                        try {{ window._zeusAudioAtual.pause(); }} catch(e){{}}
-                    }}
-                    document.querySelectorAll('audio').forEach(a => {{ try {{ a.pause(); }} catch(e){{}} }});
-                }} catch (e) {{}}
-            }}
-
-            function enviarParaStreamlit(textoFinal) {{
-                const limpo = (textoFinal || '').trim();
-                if (!limpo) return;
-                try {{
-                    const doc = (window.parent && window.parent.document) ? window.parent.document : document;
-                    const inp = doc.querySelector('input[aria-label="zf_voz_live_bridge"]');
-                    if (!inp) return;
-                    const win = (window.parent && window.parent.HTMLInputElement) ? window.parent : window;
-                    const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, 'value').set;
-                    setter.call(inp, limpo + '||' + Date.now());
-                    inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    inp.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }}));
-                }} catch (e) {{}}
-            }}
-
-            const rec = new SR();
-            rec.lang = 'pt-BR';
-            rec.continuous = !isMobile;
-            rec.interimResults = true;
-            rec.maxAlternatives = 1;
-
-            let textoFinalAcumulado = '';
-            let ultimoParcial = '';
-            let silencioTimeout = null;
-            let contadorInterval = null;
-            let enviado = false;
-
-            function montarTextoAtual() {{
-                const base = textoFinalAcumulado.trim();
-                const parc = ultimoParcial.trim();
-                if (base && parc && !base.toLowerCase().endsWith(parc.toLowerCase())) {{
-                    return (base + ' ' + parc).trim();
-                }}
-                return (base || parc).trim();
-            }}
-
-            function despacharAgora() {{
-                clearTimeout(silencioTimeout);
-                clearInterval(contadorInterval);
-                const finalTxt = montarTextoAtual();
-                if (!enviado && finalTxt.length > 0) {{
-                    enviado = true;
-                    statusEl.textContent = 'Enviando fala para o Zeus...';
-                    statusEl.style.color = '#80ed99';
-                    timerEl.textContent = 'processando';
-                    try {{ rec.stop(); }} catch(e){{}}
-                    enviarParaStreamlit(finalTxt);
-                }}
-            }}
-
-            function reiniciarTimerSilencio() {{
-                clearTimeout(silencioTimeout);
-                clearInterval(contadorInterval);
-                let restante = {ms_silencio};
-                timerEl.textContent = 'enviando em ' + (restante / 1000).toFixed(1) + 's...';
-                contadorInterval = setInterval(() => {{
-                    restante -= 200;
-                    if (restante > 0) {{
-                        timerEl.textContent = 'enviando em ' + (restante / 1000).toFixed(1) + 's...';
-                    }} else {{
-                        clearInterval(contadorInterval);
-                    }}
-                }}, 200);
-
-                silencioTimeout = setTimeout(despacharAgora, {ms_silencio});
-            }}
-
-            rec.onresult = function(ev) {{
-                interromperZeusFalando();
-                let novoFinal = '';
-                let novoParcial = '';
-                for (let i = ev.resultIndex; i < ev.results.length; i++) {{
-                    const parte = (ev.results[i][0] && ev.results[i][0].transcript) || '';
-                    if (ev.results[i].isFinal) {{
-                        novoFinal += ' ' + parte;
-                    }} else {{
-                        novoParcial += ' ' + parte;
-                    }}
-                }}
-                if (novoFinal.trim()) {{
-                    textoFinalAcumulado = (textoFinalAcumulado + ' ' + novoFinal.trim()).trim();
-                    ultimoParcial = '';
-                }} else {{
-                    ultimoParcial = novoParcial.trim();
-                }}
-
-                const exibicao = montarTextoAtual();
-                if (exibicao) {{
-                    statusEl.textContent = 'Captando sua voz...';
-                    statusEl.style.color = '#ffd166';
-                    prevEl.textContent = exibicao;
-                    reiniciarTimerSilencio();
-                }}
-            }};
-
-            rec.onerror = function(ev) {{
-                if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {{
-                    statusEl.textContent = 'Permissao de microfone bloqueada. Use o microfone manual abaixo.';
-                    statusEl.style.color = '#ff6b6b';
-                }} else if (ev.error === 'no-speech' && montarTextoAtual()) {{
-                    despacharAgora();
-                }}
-            }};
-
-            rec.onend = function() {{
-                if (enviado) return;
-                if (montarTextoAtual()) {{
-                    reiniciarTimerSilencio();
-                }}
-                setTimeout(() => {{
-                    if (!enviado) {{
-                        try {{ rec.start(); }} catch(e) {{}}
-                    }}
-                }}, isMobile ? 250 : 120);
-            }};
-
-            try {{
-                rec.start();
-            }} catch (e) {{}}
-        }})();
-        </script>
-        """,
-        height=76,
+        height=32,
     )
 
 
@@ -4426,7 +4202,7 @@ def _zf_transcrever_voz(audio_bytes, nome_arq="fala.wav"):
         oai_key = ""
 
     if not oai_key:
-        return "", "Falta OPENAI_API_KEY nos Secrets para transcrever o audio gravado."
+        return "", "Falta OPENAI_API_KEY nos Secrets para transcrever a voz."
 
     try:
         from openai import OpenAI
@@ -4580,11 +4356,8 @@ animate();
 
 
 def zf_render_painel():
-    import hashlib
-
     vozes_disp = _zf_mapa_vozes()
     st.session_state.setdefault("zf_voz_nome", list(vozes_disp.keys())[0])
-    st.session_state.setdefault("zf_modo_chamada", True)
 
     with st.container(border=True):
         col_av, col_cfg = st.columns([1, 2])
@@ -4597,7 +4370,7 @@ def zf_render_painel():
             else:
                 st.image(avatar_val, width=160)
         with col_cfg:
-            nome_avatar = st.selectbox("Preview do painel (nao controla a tela principal)", list(ZF_AVATARES.keys()), key="zf_avatar_nome")
+            nome_avatar = st.selectbox("Preview do painel (não controla a tela principal)", list(ZF_AVATARES.keys()), key="zf_avatar_nome")
             st.session_state.zeus_avatar_ativo = ZF_AVATARES[nome_avatar]
 
             filtro_voz = st.text_input("Filtrar vozes (ex: pt-BR, en-US)", key="zf_filtro_voz")
@@ -4611,71 +4384,46 @@ def zf_render_painel():
             voz_ativa = vozes_filtradas[nome_voz]
             st.session_state.zf_voz_ativa = voz_ativa
 
-            c_btn1, c_btn2 = st.columns([1, 1])
-            with c_btn1:
-                if st.button("Ouvir previa", key="zf_btn_previa", use_container_width=True):
-                    _zf_falar_resposta(
+            if st.button("Ouvir previa", key="zf_btn_previa"):
+                with st.spinner("Gerando previa..."):
+                    audio_prev, mime_prev = _zf_gerar_audio(
                         f"Ola, Danilo. Eu sou Zeus na voz {nome_voz.split(' - ')[0].strip()}.",
                         voz_ativa,
-                        "previa",
                     )
-            with c_btn2:
-                st.toggle("Modo chamada (envia em 2s e interrompe)", key="zf_modo_chamada")
-
-        _zf_widget_escuta_continua(st.session_state.get("zf_modo_chamada", True), segundos_silencio=2.0)
-
-        ponte_voz = st.text_input(
-            "zf_voz_live_bridge",
-            key="zf_voz_live_bridge",
-            label_visibility="collapsed",
-            placeholder="Captura automatica da conversa por voz...",
-        )
-        if ponte_voz and "||" in ponte_voz:
-            texto_falado, selo_tempo = ponte_voz.rsplit("||", 1)
-            texto_falado = texto_falado.strip()
-            if texto_falado and st.session_state.get("zf_last_live_ts") != selo_tempo:
-                st.session_state.zf_last_live_ts = selo_tempo
-                st.session_state.setdefault("messages", [])
-                st.session_state.messages.append({"role": "user", "content": texto_falado})
-                fn_proc = globals().get("processar_prompt")
-                if callable(fn_proc):
-                    with st.spinner("Zeus respondendo..."):
-                        resp_live = str(fn_proc(texto_falado) or "Entendido, Danilo.")
+                if audio_prev and mime_prev:
+                    st.audio(audio_prev, format=mime_prev, autoplay=True)
                 else:
-                    resp_live = f"Recebi: {texto_falado}"
-                st.session_state.messages.append({"role": "assistant", "content": resp_live})
-                st.rerun()
+                    _zf_falar_resposta("Ola, Danilo. Eu sou Zeus.", voz_ativa, "previa")
 
         if hasattr(st, "audio_input"):
-            with st.expander("Microfone manual (alternativa)", expanded=False):
-                audio_chat = st.audio_input("Gravar manualmente", key="zf_chat_voz_mic")
-                if audio_chat is not None:
-                    audio_bytes = audio_chat.getvalue()
-                    audio_hash = hashlib.sha256(audio_bytes).hexdigest()
-                    if st.session_state.get("zf_last_chat_mic_hash") != audio_hash:
-                        st.session_state.zf_last_chat_mic_hash = audio_hash
-                        with st.spinner("Ouvindo e interpretando..."):
-                            cmd_fala, erro_fala = _zf_transcrever_voz(audio_bytes, "conversa.wav")
-                        if erro_fala:
-                            st.toast(erro_fala, icon="⚠️")
+            audio_chat = st.audio_input("Falar com o Zeus (celular ou PC)", key="zf_chat_voz_mic")
+            if audio_chat is not None:
+                audio_bytes = audio_chat.getvalue()
+                audio_hash = hash(audio_bytes)
+                if st.session_state.get("zf_last_chat_mic_hash") != audio_hash:
+                    st.session_state.zf_last_chat_mic_hash = audio_hash
+                    with st.spinner("Ouvindo e interpretando..."):
+                        cmd_fala, erro_fala = _zf_transcrever_voz(audio_bytes, "conversa.wav")
+                    if erro_fala:
+                        st.toast(erro_fala, icon="⚠️")
+                    else:
+                        st.session_state.setdefault("messages", [])
+                        st.session_state.messages.append({"role": "user", "content": cmd_fala})
+                        fn_proc = globals().get("processar_prompt")
+                        if callable(fn_proc):
+                            with st.spinner("Respondendo..."):
+                                resp_fala = str(fn_proc(cmd_fala) or "Entendido, Danilo.")
                         else:
-                            st.session_state.setdefault("messages", [])
-                            st.session_state.messages.append({"role": "user", "content": cmd_fala})
-                            fn_proc = globals().get("processar_prompt")
-                            if callable(fn_proc):
-                                with st.spinner("Respondendo..."):
-                                    resp_fala = str(fn_proc(cmd_fala) or "Entendido, Danilo.")
-                            else:
-                                resp_fala = f"Recebi: {cmd_fala}"
-                            st.session_state.messages.append({"role": "assistant", "content": resp_fala})
-                            st.rerun()
+                            resp_fala = f"Recebi: {cmd_fala}"
+                        st.session_state.messages.append({"role": "assistant", "content": resp_fala})
+                        st.rerun()
 
         msgs = st.session_state.get("messages") or []
         if msgs and msgs[-1].get("role") == "assistant":
             ultimo_resp = str(msgs[-1].get("content", "")).strip()
-            if ultimo_resp:
-                digest_resp = hashlib.sha256(ultimo_resp[:240].encode("utf-8")).hexdigest()[:12]
-                chave_resp = f"msg_{len(msgs)}_{digest_resp}"
+            chave_resp = f"{len(msgs)}:{hash(ultimo_resp[:240])}"
+            if ultimo_resp and st.session_state.get("zf_ultima_fala_key") != chave_resp:
+                st.session_state.zf_ultima_fala_key = chave_resp
                 _zf_falar_resposta(ultimo_resp, st.session_state.get("zf_voz_ativa", "pt-BR-AntonioNeural"), chave_resp)
 
     with st.sidebar:
@@ -4723,7 +4471,7 @@ def zf_render_painel():
             audio_voz_sp = st.audio_input("Pedir por voz", key="zf_sp_voz_mic")
             if audio_voz_sp is not None:
                 audio_bytes = audio_voz_sp.getvalue()
-                audio_hash = hashlib.sha256(audio_bytes).hexdigest()
+                audio_hash = hash(audio_bytes)
                 if st.session_state.get("zf_sp_last_mic_hash") != audio_hash:
                     st.session_state.zf_sp_last_mic_hash = audio_hash
                     with st.spinner("Ouvindo pedido..."):
@@ -4739,7 +4487,7 @@ def zf_render_painel():
                             if _termo_voz:
                                 res_voz = zf_tocar_musica(_termo_voz)
                                 st.toast(res_voz, icon="🎵")
-                                zf_falar_resposta(res_voz, st.session_state.get("zf_voz_ativa", "pt-BR-AntonioNeural"), f"sp{audio_hash[:12]}")
+                                _zf_falar_resposta(res_voz, st.session_state.get("zf_voz_ativa", "pt-BR-AntonioNeural"), audio_hash)
                                 st.rerun()
                             else:
                                 st.toast("Nao entendi o nome da musica.", icon="⚠️")
@@ -4874,6 +4622,7 @@ def zf_render_painel():
                         st.write(chr(10).join(log_midia))
                 else:
                     st.warning("Descreva o que deseja gerar.")
+
 
 # ============================================================
 # ROTEADOR DE COMANDOS AUTÔNOMOS NO CHAT
