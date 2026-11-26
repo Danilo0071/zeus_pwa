@@ -3566,6 +3566,425 @@ function frame(now) {
     if (avatar === "eye") drawEye(t); else drawRobot(t);
   }
 }
+// --- ZEUS INTERATIVO (imagem realista + raio na mão + mouse) ---
+let zeusParallaxGroup = null;
+let zeusBoltHandGroup = null;
+let zeusStarsPoints = null;
+let zeusStrikeLight = null;
+let zeusFlashOverlay = null;
+let zeusActiveLines = [];
+let zeusActiveSparks = [];
+let zeusMouseVec = { x: 0, y: 0 };
+let zeusMouseCooldown = false;
+
+function ensureZeusFlashOverlay() {
+  if (zeusFlashOverlay) return zeusFlashOverlay;
+  const parent = (renderer && renderer.domElement && renderer.domElement.parentElement) || document.body;
+  const div = document.createElement('div');
+  div.style.position = 'absolute';
+  div.style.inset = '0';
+  div.style.background = '#ffffff';
+  div.style.opacity = '0';
+  div.style.pointerEvents = 'none';
+  div.style.zIndex = '5';
+  div.style.transition = 'opacity 0.1s ease-out';
+  parent.appendChild(div);
+  zeusFlashOverlay = div;
+  return div;
+}
+
+function bindZeusMouseEvents() {
+  if (window.__zeusMouseBound) return;
+  window.__zeusMouseBound = true;
+
+  window.addEventListener('mousemove', function (ev) {
+    const rect = (renderer && renderer.domElement && renderer.domElement.getBoundingClientRect()) || {
+      left: 0,
+      top: 0,
+      width: window.innerWidth,
+      height: window.innerHeight
+    };
+    const w = rect.width || window.innerWidth;
+    const h = rect.height || window.innerHeight;
+    zeusMouseVec.x = ((ev.clientX - rect.left) / w) * 2 - 1;
+    zeusMouseVec.y = -((ev.clientY - rect.top) / h) * 2 + 1;
+
+    if (!zeusMouseCooldown && typeof avatar !== 'undefined' && avatar === 'zeus') {
+      shootZeusLightning();
+      zeusMouseCooldown = true;
+      setTimeout(function () {
+        zeusMouseCooldown = false;
+      }, 300);
+    }
+  });
+}
+
+function buildZeusInteractive() {
+  bindZeusMouseEvents();
+  ensureZeusFlashOverlay();
+
+  if (!zeusStrikeLight) {
+    zeusStrikeLight = new THREE.PointLight(0xaaccff, 0, 20);
+    zeusStrikeLight.position.set(0, 3, 2);
+    scene.add(zeusStrikeLight);
+  }
+
+  if (!zeusParallaxGroup) {
+    zeusParallaxGroup = new THREE.Group();
+
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    const zeusImgUrl =
+      'https://image.pollinations.ai/prompt/hyperrealistic%20cinematic%20portrait%20of%20zeus%20god%20of%20thunder,%20muscular%20strong%20man,%20white%20beard,%20white%20hair,%20holding%20a%20glowing%20lightning%20bolt,%20dramatic%20lighting,%20dark%20background,%20highly%20detailed%204k?width=1024&height=1024&nologo=true';
+
+    loader.load(zeusImgUrl, function (texture) {
+      const planeGeo = new THREE.PlaneGeometry(4, 4);
+      const planeMat = new THREE.MeshStandardMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 0.95,
+        roughness: 0.5,
+        metalness: 0.2,
+        side: THREE.DoubleSide
+      });
+      const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+      planeMesh.position.y = 2;
+      zeusParallaxGroup.add(planeMesh);
+
+      const auraGeo = new THREE.PlaneGeometry(5, 5);
+      const auraMat = new THREE.MeshBasicMaterial({
+        color: 0x0044ff,
+        transparent: true,
+        opacity: 0.15,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const auraMesh = new THREE.Mesh(auraGeo, auraMat);
+      auraMesh.position.set(0, 2, -0.1);
+      zeusParallaxGroup.add(auraMesh);
+    });
+
+    scene.add(zeusParallaxGroup);
+  }
+
+  if (!zeusBoltHandGroup) {
+    zeusBoltHandGroup = new THREE.Group();
+
+    const boltShape = new THREE.Shape();
+    boltShape.moveTo(0, 1.5);
+    boltShape.lineTo(-0.5, 0.2);
+    boltShape.lineTo(0.1, 0.2);
+    boltShape.lineTo(-0.3, -1.5);
+    boltShape.lineTo(0.6, 0);
+    boltShape.lineTo(0, 0);
+    boltShape.lineTo(0.5, 1.5);
+
+    const extrudeSettings = {
+      depth: 0.1,
+      bevelEnabled: true,
+      bevelSegments: 2,
+      steps: 2,
+      bevelSize: 0.05,
+      bevelThickness: 0.05
+    };
+    const boltGeo = new THREE.ExtrudeGeometry(boltShape, extrudeSettings);
+    const boltMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0x88ccff,
+      emissiveIntensity: 5,
+      roughness: 0.1,
+      metalness: 0.8
+    });
+    const boltMesh = new THREE.Mesh(boltGeo, boltMat);
+    boltMesh.scale.set(0.3, 0.3, 0.3);
+    boltMesh.position.set(1.2, 2.2, 1);
+    boltMesh.rotation.z = -0.5;
+    boltMesh.rotation.y = 0.5;
+
+    const sparkCount = 50;
+    const sparkPos = new Float32Array(sparkCount * 3);
+    for (let i = 0; i < sparkCount * 3; i += 3) {
+      sparkPos[i] = (Math.random() - 0.5) * 1;
+      sparkPos[i + 1] = (Math.random() - 0.5) * 2;
+      sparkPos[i + 2] = (Math.random() - 0.5) * 1;
+    }
+    const sparkGeo = new THREE.BufferGeometry();
+    sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
+    const sparkMat = new THREE.PointsMaterial({
+      color: 0xaaddff,
+      size: 0.05,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false
+    });
+    const sparks = new THREE.Points(sparkGeo, sparkMat);
+
+    zeusBoltHandGroup.add(boltMesh);
+    zeusBoltHandGroup.add(sparks);
+    scene.add(zeusBoltHandGroup);
+  }
+
+  if (!zeusStarsPoints) {
+    const starsCount = 1500;
+    const starsPos = new Float32Array(starsCount * 3);
+    for (let i = 0; i < starsCount * 3; i += 3) {
+      starsPos[i] = (Math.random() - 0.5) * 50;
+      starsPos[i + 1] = (Math.random() - 0.5) * 30;
+      starsPos[i + 2] = (Math.random() - 0.5) * 50 - 10;
+    }
+    const starsGeo = new THREE.BufferGeometry();
+    starsGeo.setAttribute('position', new THREE.BufferAttribute(starsPos, 3));
+    const starsMat = new THREE.PointsMaterial({
+      color: 0x88aaff,
+      size: 0.08,
+      transparent: true,
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    zeusStarsPoints = new THREE.Points(starsGeo, starsMat);
+    scene.add(zeusStarsPoints);
+  }
+}
+
+function createZeusStrike(start, end) {
+  const points = [start];
+  const segments = 15;
+  for (let i = 1; i < segments; i++) {
+    const frac = i / segments;
+    const mid = new THREE.Vector3().lerpVectors(start, end, frac);
+    const spread = 1.5 * Math.sin(frac * Math.PI);
+    mid.x += (Math.random() - 0.5) * spread;
+    mid.y += (Math.random() - 0.5) * spread;
+    mid.z += (Math.random() - 0.5) * spread;
+    points.push(mid);
+  }
+  points.push(end);
+
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color: 0xaaddff,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending
+  });
+  const line = new THREE.Line(geometry, material);
+  scene.add(line);
+
+  const pCount = 40;
+  const pPos = new Float32Array(pCount * 3);
+  const pVels = [];
+  for (let i = 0; i < pCount; i++) {
+    pPos[i * 3] = end.x;
+    pPos[i * 3 + 1] = end.y;
+    pPos[i * 3 + 2] = end.z;
+    pVels.push({
+      x: (Math.random() - 0.5) * 6,
+      y: (Math.random() - 0.5) * 6,
+      z: (Math.random() - 0.5) * 6
+    });
+  }
+  const pGeo = new THREE.BufferGeometry();
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+  const pMat = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 0.1,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    depthWrite: false
+  });
+  const particles = new THREE.Points(pGeo, pMat);
+  particles.userData = { vels: pVels, life: 1.0 };
+  scene.add(particles);
+
+  zeusActiveLines.push({ mesh: line, life: 0.5 });
+  zeusActiveSparks.push(particles);
+}
+
+function shootZeusLightning() {
+  buildZeusInteractive();
+
+  if (zeusFlashOverlay) {
+    zeusFlashOverlay.style.opacity = '0.8';
+    setTimeout(function () {
+      if (zeusFlashOverlay) zeusFlashOverlay.style.opacity = '0';
+    }, 100);
+  }
+
+  if (zeusStrikeLight) {
+    zeusStrikeLight.intensity = 15;
+    zeusStrikeLight.position.set(
+      (Math.random() - 0.5) * 2,
+      3 + Math.random() * 2,
+      2 + Math.random() * 2
+    );
+  }
+
+  const startPoint = new THREE.Vector3(1.2, 2.2, 1);
+  const endPoint = new THREE.Vector3(
+    zeusMouseVec.x * 5,
+    zeusMouseVec.y * 5 + 2,
+    (Math.random() - 0.5) * 3 + 1
+  );
+  createZeusStrike(startPoint, endPoint);
+
+  for (let i = 0; i < 2; i++) {
+    const bgStart = new THREE.Vector3((Math.random() - 0.5) * 4, 5, -2);
+    const bgEnd = new THREE.Vector3((Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 3);
+    createZeusStrike(bgStart, bgEnd);
+  }
+}
+
+function updateZeus(t, dt) {
+  buildZeusInteractive();
+
+  if (zeusParallaxGroup) {
+    zeusParallaxGroup.visible = true;
+    zeusParallaxGroup.rotation.y += (zeusMouseVec.x * 0.2 - zeusParallaxGroup.rotation.y) * 0.05;
+    zeusParallaxGroup.rotation.x += (-zeusMouseVec.y * 0.1 - zeusParallaxGroup.rotation.x) * 0.05;
+    zeusParallaxGroup.position.x += (zeusMouseVec.x * 0.2 - zeusParallaxGroup.position.x) * 0.05;
+  }
+
+  if (zeusBoltHandGroup) {
+    zeusBoltHandGroup.visible = true;
+    zeusBoltHandGroup.rotation.y += dt * 2;
+    zeusBoltHandGroup.position.y = Math.sin(t * 3) * 0.1;
+  }
+
+  if (zeusStarsPoints) {
+    zeusStarsPoints.visible = true;
+    zeusStarsPoints.rotation.y += dt * 0.01;
+  }
+
+  if (zeusStrikeLight && zeusStrikeLight.intensity > 0) {
+    zeusStrikeLight.intensity -= dt * 20;
+    if (zeusStrikeLight.intensity < 0) zeusStrikeLight.intensity = 0;
+  }
+
+  for (let i = zeusActiveLines.length - 1; i >= 0; i--) {
+    const item = zeusActiveLines[i];
+    item.life -= dt;
+    item.mesh.material.opacity = Math.max(0, item.life * 2);
+    if (item.life <= 0) {
+      scene.remove(item.mesh);
+      item.mesh.geometry.dispose();
+      item.mesh.material.dispose();
+      zeusActiveLines.splice(i, 1);
+    }
+  }
+
+  for (let i = zeusActiveSparks.length - 1; i >= 0; i--) {
+    const p = zeusActiveSparks[i];
+    const positions = p.geometry.attributes.position.array;
+    for (let j = 0; j < p.userData.vels.length; j++) {
+      positions[j * 3] += p.userData.vels[j].x * dt;
+      positions[j * 3 + 1] += p.userData.vels[j].y * dt;
+      positions[j * 3 + 2] += p.userData.vels[j].z * dt;
+      p.userData.vels[j].y -= dt * 2;
+    }
+    p.geometry.attributes.position.needsUpdate = true;
+    p.userData.life -= dt;
+    p.material.opacity = Math.max(0, p.userData.life);
+    if (p.userData.life <= 0) {
+      scene.remove(p);
+      p.geometry.dispose();
+      p.material.dispose();
+      zeusActiveSparks.splice(i, 1);
+    }
+  }
+
+  camera.position.set(0, 2.5, 7);
+  camera.lookAt(0, 2, 0);
+}
+  const pts = [start];
+  const segments = 12;
+  for (let i = 1; i < segments; i++) {
+    const frac = i / segments;
+    const mid = new THREE.Vector3().lerpVectors(start, end, frac);
+    mid.x += (Math.random() - 0.5) * 0.7 * Math.sin(frac * Math.PI);
+    mid.y += (Math.random() - 0.5) * 0.7 * Math.sin(frac * Math.PI);
+    mid.z += (Math.random() - 0.5) * 0.7 * Math.sin(frac * Math.PI);
+    pts.push(mid);
+  }
+  pts.push(end);
+
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({
+    color: 0xaaccff,
+    transparent: true,
+    opacity: 0.95,
+    blending: THREE.AdditiveBlending
+  });
+  const line = new THREE.Line(geo, mat);
+  zeusGroup.add(line);
+
+  zeusBolts.push({ line: line, life: 0.45, maxLife: 0.45 });
+  if (zeusLight) {
+    zeusLight.intensity = 7.5;
+    zeusLight.position.set(
+      (start.x + end.x) * 0.5,
+      (start.y + end.y) * 0.5,
+      (start.z + end.z) * 0.5
+    );
+  }
+}
+
+function updateZeus(t, dt) {
+  const grp = buildZeusScene();
+  grp.visible = true;
+
+  grp.rotation.y += dt * 0.18;
+
+  if (zeusCore) {
+    const s = 1 + Math.sin(t * 3.2) * 0.06;
+    zeusCore.scale.set(s, s, s);
+  }
+  if (zeusRing1) {
+    zeusRing1.rotation.z += dt * 0.55;
+    zeusRing1.rotation.x += dt * 0.2;
+  }
+  if (zeusRing2) {
+    zeusRing2.rotation.z -= dt * 0.45;
+    zeusRing2.rotation.y += dt * 0.35;
+  }
+
+  zeusSparks.forEach(function (sp, idx) {
+    const a = sp.userData.angle + t * 0.9;
+    const r = sp.userData.radius;
+    sp.position.set(
+      Math.cos(a) * r,
+      2.1 + Math.sin(a * 2 + idx) * 0.65,
+      Math.sin(a) * r
+    );
+  });
+
+  if (Math.random() < dt * 1.4) {
+    spawnZeusBolt();
+  }
+
+  for (let i = zeusBolts.length - 1; i >= 0; i--) {
+    const b = zeusBolts[i];
+    b.life -= dt;
+    b.line.material.opacity = Math.max(0, b.life / b.maxLife);
+    if (b.life <= 0) {
+      grp.remove(b.line);
+      b.line.geometry.dispose();
+      b.line.material.dispose();
+      zeusBolts.splice(i, 1);
+    }
+  }
+
+  if (zeusLight && zeusLight.intensity > 0) {
+    zeusLight.intensity *= 0.9;
+    if (zeusLight.intensity < 0.1) zeusLight.intensity = 0;
+  }
+
+  const camCfg = zeusCameraAngles[zeusAngleIdx % zeusCameraAngles.length];
+  camera.position.x += (camCfg.pos[0] - camera.position.x) * 0.05;
+  camera.position.y += (camCfg.pos[1] - camera.position.y) * 0.05;
+  camera.position.z += (camCfg.pos[2] - camera.position.z) * 0.05;
+  camera.lookAt(camCfg.look[0], camCfg.look[1], camCfg.look[2]);
+}
 requestAnimationFrame(frame);
 </script>
 </body>
@@ -4165,24 +4584,33 @@ def _zf_gerar_audio(texto, voz_id):
 
 def _zf_falar_resposta(texto, voz_id, chave_id=""):
     import base64
+    import re as _re_safe
     import streamlit.components.v1 as components
 
+    chave_limpa = re_safe.sub(r"[^a-zA-Z0-9-]", "", str(chave_id or "resp")) or "resp"
     audio_bytes, mime = _zf_gerar_audio(texto, voz_id)
-    texto_js = str(texto or "")[:700].replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+    texto_js = (
+        str(texto or "")[:700]
+        .replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace('"', '\\"')
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )
 
     if audio_bytes and mime:
         b64 = base64.b64encode(audio_bytes).decode("ascii")
         components.html(
             f"""
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#0e1525;border:1px solid #1f3354;border-radius:10px;padding:6px 10px;color:#cfe6ff;font-family:sans-serif;font-size:12px;">
-              <audio id="zeus-player-{chave_id}" controls playsinline preload="auto" style="height:30px;flex:1;min-width:160px;">
+              <audio id="zeus-player-{chave_limpa}" controls playsinline preload="auto" style="height:30px;flex:1;min-width:160px;">
                 <source src="data:{mime};base64,{b64}" type="{mime}">
               </audio>
-              <button id="zeus-playbtn-{chave_id}" onclick="const a=document.getElementById('zeus-player-{chave_id}');if(a){{a.currentTime=0;a.play().catch(()=>{{}});}}"
+              <button id="zeus-playbtn-{chave_limpa}" onclick="const a=document.getElementById('zeus-player-{chave_limpa}');if(a){{a.currentTime=0;a.play().catch(()=>{{}});}}"
                       style="background:#143628;color:#80ed99;border:1px solid #2d6a4f;border-radius:6px;padding:5px 9px;cursor:pointer;font-weight:600;">
-                🔊 Falar
+                Falar
               </button>
-              <button onclick="const a=document.getElementById('zeus-player-{chave_id}');if(a){{a.pause();a.currentTime=0;}}if('speechSynthesis' in window){{window.speechSynthesis.cancel();}}"
+              <button onclick="const a=document.getElementById('zeus-player-{chave_limpa}');if(a){{a.pause();a.currentTime=0;}}if('speechSynthesis' in window){{window.speechSynthesis.cancel();}}"
                       style="background:#2b1620;color:#ff8fa3;border:1px solid #6b263c;border-radius:6px;padding:5px 8px;cursor:pointer;">
                 Parar
               </button>
@@ -4190,16 +4618,16 @@ def _zf_falar_resposta(texto, voz_id, chave_id=""):
             <script>
             (function() {{
                 try {{
-                    const el = document.getElementById('zeus-player-{chave_id}');
-                    if (window.parent && window.parent._zeusAudioAtual && window.parent._zeusAudioAtual !== el) {{
-                        window.parent._zeusAudioAtual.pause();
+                    const el = document.getElementById('zeus-player-{chave_limpa}');
+                    if (window._zeusAudioAtual && window._zeusAudioAtual !== el) {{
+                        try {{ window._zeusAudioAtual.pause(); }} catch(e){{}}
                     }}
-                    if (window.parent) window.parent._zeusAudioAtual = el;
+                    window._zeusAudioAtual = el;
                     if (el) {{
                         const p = el.play();
                         if (p && typeof p.catch === 'function') {{
                             p.catch(() => {{
-                                const btn = document.getElementById('zeus-playbtn-{chave_id}');
+                                const btn = document.getElementById('zeus-playbtn-{chave_limpa}');
                                 if (btn) btn.style.boxShadow = '0 0 0 2px #ffd166';
                             }});
                         }}
@@ -4215,10 +4643,10 @@ def _zf_falar_resposta(texto, voz_id, chave_id=""):
     components.html(
         f"""
         <div style="display:flex;align-items:center;gap:8px;background:#0e1525;border:1px solid #1f3354;border-radius:10px;padding:6px 10px;color:#cfe6ff;font-family:sans-serif;font-size:12px;">
-          <span style="flex:1;">🔊 Resposta pronta para falar</span>
-          <button onclick="if('speechSynthesis' in window){{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance('{texto_js}');u.lang='pt-BR';u.rate=1.0;window.speechSynthesis.speak(u);}}"
+          <span style="flex:1;">Resposta pronta para falar</span>
+          <button onclick="if('speechSynthesis' in window){{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(\"{texto_js}\");u.lang='pt-BR';u.rate=1.0;window.speechSynthesis.speak(u);}}"
                   style="background:#143628;color:#80ed99;border:1px solid #2d6a4f;border-radius:6px;padding:5px 9px;cursor:pointer;font-weight:600;">
-            🔊 Falar
+            Falar
           </button>
         </div>
         <script>
@@ -4226,7 +4654,7 @@ def _zf_falar_resposta(texto, voz_id, chave_id=""):
             if (!('speechSynthesis' in window)) return;
             try {{
                 window.speechSynthesis.cancel();
-                const u = new SpeechSynthesisUtterance('{texto_js}');
+                const u = new SpeechSynthesisUtterance("{texto_js}");
                 u.lang = 'pt-BR';
                 u.rate = 1.0;
                 window.speechSynthesis.speak(u);
@@ -4239,7 +4667,7 @@ def _zf_falar_resposta(texto, voz_id, chave_id=""):
 
 
 def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
-    """Escuta contínua adaptada para PC e celular (envia após 2s de pausa e interrompe fala ao detectar voz)."""
+    """Escuta continua adaptada para PC e celular (envia apos 2s de pausa e interrompe fala ao detectar voz)."""
     import streamlit.components.v1 as components
 
     if not ativo:
@@ -4250,7 +4678,7 @@ def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
         f"""
         <div id="zf-live-box" style="background:#0b1324;border:1px solid #1e3a5f;border-radius:10px;padding:10px 12px;color:#e6f1ff;font-family:sans-serif;font-size:13px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <span id="zf-live-status" style="font-weight:600;color:#4cc9f0;">🎙️ Ouvindo... fale normalmente (envia após {segundos_silencio:.0f}s de pausa)</span>
+            <span id="zf-live-status" style="font-weight:600;color:#4cc9f0;">Ouvindo... fale normalmente (envia apos {segundos_silencio:.0f}s de pausa)</span>
             <span id="zf-live-timer" style="font-size:11px;color:#8da9c4;">aguardando voz</span>
           </div>
           <div id="zf-live-preview" style="margin-top:6px;min-height:20px;color:#b8d4f0;font-style:italic;">...</div>
@@ -4264,7 +4692,7 @@ def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
             const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
 
             if (!SR) {{
-                statusEl.textContent = '⚠️ Este navegador não suporta escuta automática. Abra o microfone manual abaixo.';
+                statusEl.textContent = 'Este navegador nao suporta escuta automatica. Abra o microfone manual abaixo.';
                 statusEl.style.color = '#ffb703';
                 return;
             }}
@@ -4272,18 +4700,10 @@ def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
             function interromperZeusFalando() {{
                 try {{
                     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-                    if (window.parent) {{
-                        if (window.parent._zeusAudioAtual) {{
-                            window.parent._zeusAudioAtual.pause();
-                        }}
-                        window.parent.document.querySelectorAll('audio').forEach(a => {{ try {{ a.pause(); }} catch(e){{}} }});
-                        window.parent.document.querySelectorAll('iframe').forEach(ifr => {{
-                            try {{
-                                ifr.contentWindow.document.querySelectorAll('audio').forEach(a => a.pause());
-                                if (ifr.contentWindow.speechSynthesis) ifr.contentWindow.speechSynthesis.cancel();
-                            }} catch(e){{}}
-                        }});
+                    if (window._zeusAudioAtual) {{
+                        try {{ window._zeusAudioAtual.pause(); }} catch(e){{}}
                     }}
+                    document.querySelectorAll('audio').forEach(a => {{ try {{ a.pause(); }} catch(e){{}} }});
                 }} catch (e) {{}}
             }}
 
@@ -4291,10 +4711,11 @@ def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
                 const limpo = (textoFinal || '').trim();
                 if (!limpo) return;
                 try {{
-                    const doc = window.parent.document;
+                    const doc = (window.parent && window.parent.document) ? window.parent.document : document;
                     const inp = doc.querySelector('input[aria-label="zf_voz_live_bridge"]');
                     if (!inp) return;
-                    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    const win = (window.parent && window.parent.HTMLInputElement) ? window.parent : window;
+                    const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, 'value').set;
                     setter.call(inp, limpo + '||' + Date.now());
                     inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
                     inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
@@ -4329,7 +4750,7 @@ def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
                 const finalTxt = montarTextoAtual();
                 if (!enviado && finalTxt.length > 0) {{
                     enviado = true;
-                    statusEl.textContent = '✅ Enviando fala para o Zeus...';
+                    statusEl.textContent = 'Enviando fala para o Zeus...';
                     statusEl.style.color = '#80ed99';
                     timerEl.textContent = 'processando';
                     try {{ rec.stop(); }} catch(e){{}}
@@ -4375,7 +4796,7 @@ def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
 
                 const exibicao = montarTextoAtual();
                 if (exibicao) {{
-                    statusEl.textContent = '🗣️ Captando sua voz...';
+                    statusEl.textContent = 'Captando sua voz...';
                     statusEl.style.color = '#ffd166';
                     prevEl.textContent = exibicao;
                     reiniciarTimerSilencio();
@@ -4384,7 +4805,7 @@ def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
 
             rec.onerror = function(ev) {{
                 if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {{
-                    statusEl.textContent = '🚫 Permissão de microfone bloqueada. Use o microfone manual abaixo.';
+                    statusEl.textContent = 'Permissao de microfone bloqueada. Use o microfone manual abaixo.';
                     statusEl.style.color = '#ff6b6b';
                 }} else if (ev.error === 'no-speech' && montarTextoAtual()) {{
                     despacharAgora();
@@ -4578,6 +4999,8 @@ animate();
 
 
 def zf_render_painel():
+    import hashlib
+
     vozes_disp = _zf_mapa_vozes()
     st.session_state.setdefault("zf_voz_nome", list(vozes_disp.keys())[0])
     st.session_state.setdefault("zf_modo_chamada", True)
@@ -4593,7 +5016,7 @@ def zf_render_painel():
             else:
                 st.image(avatar_val, width=160)
         with col_cfg:
-            nome_avatar = st.selectbox("Preview do painel (não controla a tela principal)", list(ZF_AVATARES.keys()), key="zf_avatar_nome")
+            nome_avatar = st.selectbox("Preview do painel (nao controla a tela principal)", list(ZF_AVATARES.keys()), key="zf_avatar_nome")
             st.session_state.zeus_avatar_ativo = ZF_AVATARES[nome_avatar]
 
             filtro_voz = st.text_input("Filtrar vozes (ex: pt-BR, en-US)", key="zf_filtro_voz")
@@ -4618,7 +5041,6 @@ def zf_render_painel():
             with c_btn2:
                 st.toggle("Modo chamada (envia em 2s e interrompe)", key="zf_modo_chamada")
 
-        # --- MODO CHAMADA CONTINUA (envia sozinho apos 2s de silencio e interrompe o Zeus se voce falar) ---
         _zf_widget_escuta_continua(st.session_state.get("zf_modo_chamada", True), segundos_silencio=2.0)
 
         ponte_voz = st.text_input(
@@ -4643,13 +5065,12 @@ def zf_render_painel():
                 st.session_state.messages.append({"role": "assistant", "content": resp_live})
                 st.rerun()
 
-        # --- FALLBACK MANUAL DE MICROFONE (caso o navegador bloqueie reconhecimento continuo) ---
         if hasattr(st, "audio_input"):
             with st.expander("Microfone manual (alternativa)", expanded=False):
                 audio_chat = st.audio_input("Gravar manualmente", key="zf_chat_voz_mic")
                 if audio_chat is not None:
                     audio_bytes = audio_chat.getvalue()
-                    audio_hash = hash(audio_bytes)
+                    audio_hash = hashlib.sha256(audio_bytes).hexdigest()
                     if st.session_state.get("zf_last_chat_mic_hash") != audio_hash:
                         st.session_state.zf_last_chat_mic_hash = audio_hash
                         with st.spinner("Ouvindo e interpretando..."):
@@ -4671,9 +5092,9 @@ def zf_render_painel():
         msgs = st.session_state.get("messages") or []
         if msgs and msgs[-1].get("role") == "assistant":
             ultimo_resp = str(msgs[-1].get("content", "")).strip()
-            chave_resp = f"{len(msgs)}_{abs(hash(ultimo_resp[:240]))}"
             if ultimo_resp:
-                st.session_state.zf_ultima_fala_key = chave_resp
+                digest_resp = hashlib.sha256(ultimo_resp[:240].encode("utf-8")).hexdigest()[:12]
+                chave_resp = f"msg_{len(msgs)}_{digest_resp}"
                 _zf_falar_resposta(ultimo_resp, st.session_state.get("zf_voz_ativa", "pt-BR-AntonioNeural"), chave_resp)
 
     with st.sidebar:
@@ -4721,7 +5142,7 @@ def zf_render_painel():
             audio_voz_sp = st.audio_input("Pedir por voz", key="zf_sp_voz_mic")
             if audio_voz_sp is not None:
                 audio_bytes = audio_voz_sp.getvalue()
-                audio_hash = hash(audio_bytes)
+                audio_hash = hashlib.sha256(audio_bytes).hexdigest()
                 if st.session_state.get("zf_sp_last_mic_hash") != audio_hash:
                     st.session_state.zf_sp_last_mic_hash = audio_hash
                     with st.spinner("Ouvindo pedido..."):
@@ -4737,7 +5158,7 @@ def zf_render_painel():
                             if _termo_voz:
                                 res_voz = zf_tocar_musica(_termo_voz)
                                 st.toast(res_voz, icon="🎵")
-                                _zf_falar_resposta(res_voz, st.session_state.get("zf_voz_ativa", "pt-BR-AntonioNeural"), str(abs(audio_hash)))
+                                zf_falar_resposta(res_voz, st.session_state.get("zf_voz_ativa", "pt-BR-AntonioNeural"), f"sp{audio_hash[:12]}")
                                 st.rerun()
                             else:
                                 st.toast("Nao entendi o nome da musica.", icon="⚠️")
