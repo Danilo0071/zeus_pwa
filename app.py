@@ -3566,135 +3566,336 @@ function frame(now) {
     if (avatar === "eye") drawEye(t); else drawRobot(t);
   }
 }
-// --- ZEUS - SENHOR DO OLIMPO (formato compatível com AVATAR_HTML) ---
-let zeusGroup = null;
-let zeusCore = null;
-let zeusRing1 = null;
-let zeusRing2 = null;
-let zeusSparks = [];
-let zeusBolts = [];
-let zeusLight = null;
-let zeusAngleIdx = 0;
+// --- ZEUS INTERATIVO (imagem realista + raio na mão + mouse) ---
+let zeusParallaxGroup = null;
+let zeusBoltHandGroup = null;
+let zeusStarsPoints = null;
+let zeusStrikeLight = null;
+let zeusFlashOverlay = null;
+let zeusActiveLines = [];
+let zeusActiveSparks = [];
+let zeusMouseVec = { x: 0, y: 0 };
+let zeusMouseCooldown = false;
 
-const zeusCameraAngles = [
-  { pos: [2, 3, 7.5], look: [0, 2.0, 0] },
-  { pos: [5.5, 2.4, 4.2], look: [0, 1.9, 0] },
-  { pos: [0, 3.8, 6.8], look: [0, 2.2, 0] },
-  { pos: [-4, 2.1, 6.0], look: [0, 1.9, 0] }
-];
-
-function buildZeusScene() {
-  if (zeusGroup) return zeusGroup;
-
-  zeusGroup = new THREE.Group();
-
-  zeusLight = new THREE.PointLight(0xaaccff, 0, 18);
-  zeusLight.position.set(0, 4.5, 2.5);
-  zeusGroup.add(zeusLight);
-
-  const coreGeo = new THREE.SphereGeometry(0.75, 32, 32);
-  const coreMat = new THREE.MeshStandardMaterial({
-    color: 0xffdd99,
-    emissive: 0xaa6600,
-    emissiveIntensity: 2.0,
-    roughness: 0.2,
-    metalness: 0.1,
-    transparent: true,
-    opacity: 0.9
-  });
-  zeusCore = new THREE.Mesh(coreGeo, coreMat);
-  zeusCore.position.y = 2.1;
-  zeusGroup.add(zeusCore);
-
-  const ring1Geo = new THREE.TorusGeometry(1.15, 0.045, 24, 64);
-  const ring1Mat = new THREE.MeshStandardMaterial({
-    color: 0x88ccff,
-    emissive: 0x2266cc,
-    emissiveIntensity: 2.8,
-    transparent: true,
-    opacity: 0.75
-  });
-  zeusRing1 = new THREE.Mesh(ring1Geo, ring1Mat);
-  zeusRing1.position.y = 2.1;
-  zeusRing1.rotation.x = Math.PI / 2;
-  zeusRing1.rotation.z = 0.3;
-  zeusGroup.add(zeusRing1);
-
-  const ring2Geo = new THREE.TorusGeometry(0.95, 0.03, 20, 48);
-  const ring2Mat = new THREE.MeshStandardMaterial({
-    color: 0xffaa33,
-    emissive: 0xff8800,
-    emissiveIntensity: 2.4,
-    transparent: true,
-    opacity: 0.65
-  });
-  zeusRing2 = new THREE.Mesh(ring2Geo, ring2Mat);
-  zeusRing2.position.y = 2.1;
-  zeusRing2.rotation.x = Math.PI / 3;
-  zeusRing2.rotation.y = 0.5;
-  zeusGroup.add(zeusRing2);
-
-  const pillarGeo = new THREE.CylinderGeometry(0.28, 0.55, 3.2, 12, 1, true);
-  const pillarMat = new THREE.MeshBasicMaterial({
-    color: 0x4488ff,
-    transparent: true,
-    opacity: 0.14,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-    depthWrite: false
-  });
-  const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-  pillar.position.y = 2.1;
-  zeusGroup.add(pillar);
-
-  const baseGeo = new THREE.CylinderGeometry(1.15, 1.35, 0.2, 32);
-  const baseMat = new THREE.MeshStandardMaterial({
-    color: 0x333344,
-    roughness: 0.7,
-    metalness: 0.3
-  });
-  const base = new THREE.Mesh(baseGeo, baseMat);
-  base.position.y = 0.1;
-  zeusGroup.add(base);
-
-  zeusSparks = [];
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
-    const sparkGeo = new THREE.SphereGeometry(0.06, 8, 8);
-    const sparkMat = new THREE.MeshStandardMaterial({
-      color: 0xaaddff,
-      emissive: 0x4488ff,
-      emissiveIntensity: 3.0
-    });
-    const spark = new THREE.Mesh(sparkGeo, sparkMat);
-    spark.userData = { angle: angle, radius: 1.75 };
-    spark.position.set(
-      Math.cos(angle) * 1.75,
-      2.1 + Math.sin(angle * 2) * 0.7,
-      Math.sin(angle) * 1.75
-    );
-    zeusGroup.add(spark);
-    zeusSparks.push(spark);
-  }
-
-  scene.add(zeusGroup);
-  return zeusGroup;
+function ensureZeusFlashOverlay() {
+  if (zeusFlashOverlay) return zeusFlashOverlay;
+  const parent = (renderer && renderer.domElement && renderer.domElement.parentElement) || document.body;
+  const div = document.createElement('div');
+  div.style.position = 'absolute';
+  div.style.inset = '0';
+  div.style.background = '#ffffff';
+  div.style.opacity = '0';
+  div.style.pointerEvents = 'none';
+  div.style.zIndex = '5';
+  div.style.transition = 'opacity 0.1s ease-out';
+  parent.appendChild(div);
+  zeusFlashOverlay = div;
+  return div;
 }
 
-function spawnZeusBolt() {
-  if (!zeusGroup) return;
+function bindZeusMouseEvents() {
+  if (window.__zeusMouseBound) return;
+  window.__zeusMouseBound = true;
 
-  const start = new THREE.Vector3(
-    (Math.random() - 0.5) * 1.4,
-    2.4 + Math.random() * 1.4,
-    (Math.random() - 0.5) * 1.4
-  );
-  const end = new THREE.Vector3(
-    (Math.random() - 0.5) * 3.8,
-    Math.random() > 0.5 ? 4.8 + Math.random() * 2.5 : 0.5 + Math.random() * 1.4,
-    (Math.random() - 0.5) * 3.8
-  );
+  window.addEventListener('mousemove', function (ev) {
+    const rect = (renderer && renderer.domElement && renderer.domElement.getBoundingClientRect()) || {
+      left: 0,
+      top: 0,
+      width: window.innerWidth,
+      height: window.innerHeight
+    };
+    const w = rect.width || window.innerWidth;
+    const h = rect.height || window.innerHeight;
+    zeusMouseVec.x = ((ev.clientX - rect.left) / w) * 2 - 1;
+    zeusMouseVec.y = -((ev.clientY - rect.top) / h) * 2 + 1;
 
+    if (!zeusMouseCooldown && typeof avatar !== 'undefined' && avatar === 'zeus') {
+      shootZeusLightning();
+      zeusMouseCooldown = true;
+      setTimeout(function () {
+        zeusMouseCooldown = false;
+      }, 300);
+    }
+  });
+}
+
+function buildZeusInteractive() {
+  bindZeusMouseEvents();
+  ensureZeusFlashOverlay();
+
+  if (!zeusStrikeLight) {
+    zeusStrikeLight = new THREE.PointLight(0xaaccff, 0, 20);
+    zeusStrikeLight.position.set(0, 3, 2);
+    scene.add(zeusStrikeLight);
+  }
+
+  if (!zeusParallaxGroup) {
+    zeusParallaxGroup = new THREE.Group();
+
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    const zeusImgUrl =
+      'https://image.pollinations.ai/prompt/hyperrealistic%20cinematic%20portrait%20of%20zeus%20god%20of%20thunder,%20muscular%20strong%20man,%20white%20beard,%20white%20hair,%20holding%20a%20glowing%20lightning%20bolt,%20dramatic%20lighting,%20dark%20background,%20highly%20detailed%204k?width=1024&height=1024&nologo=true';
+
+    loader.load(zeusImgUrl, function (texture) {
+      const planeGeo = new THREE.PlaneGeometry(4, 4);
+      const planeMat = new THREE.MeshStandardMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 0.95,
+        roughness: 0.5,
+        metalness: 0.2,
+        side: THREE.DoubleSide
+      });
+      const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+      planeMesh.position.y = 2;
+      zeusParallaxGroup.add(planeMesh);
+
+      const auraGeo = new THREE.PlaneGeometry(5, 5);
+      const auraMat = new THREE.MeshBasicMaterial({
+        color: 0x0044ff,
+        transparent: true,
+        opacity: 0.15,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const auraMesh = new THREE.Mesh(auraGeo, auraMat);
+      auraMesh.position.set(0, 2, -0.1);
+      zeusParallaxGroup.add(auraMesh);
+    });
+
+    scene.add(zeusParallaxGroup);
+  }
+
+  if (!zeusBoltHandGroup) {
+    zeusBoltHandGroup = new THREE.Group();
+
+    const boltShape = new THREE.Shape();
+    boltShape.moveTo(0, 1.5);
+    boltShape.lineTo(-0.5, 0.2);
+    boltShape.lineTo(0.1, 0.2);
+    boltShape.lineTo(-0.3, -1.5);
+    boltShape.lineTo(0.6, 0);
+    boltShape.lineTo(0, 0);
+    boltShape.lineTo(0.5, 1.5);
+
+    const extrudeSettings = {
+      depth: 0.1,
+      bevelEnabled: true,
+      bevelSegments: 2,
+      steps: 2,
+      bevelSize: 0.05,
+      bevelThickness: 0.05
+    };
+    const boltGeo = new THREE.ExtrudeGeometry(boltShape, extrudeSettings);
+    const boltMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0x88ccff,
+      emissiveIntensity: 5,
+      roughness: 0.1,
+      metalness: 0.8
+    });
+    const boltMesh = new THREE.Mesh(boltGeo, boltMat);
+    boltMesh.scale.set(0.3, 0.3, 0.3);
+    boltMesh.position.set(1.2, 2.2, 1);
+    boltMesh.rotation.z = -0.5;
+    boltMesh.rotation.y = 0.5;
+
+    const sparkCount = 50;
+    const sparkPos = new Float32Array(sparkCount * 3);
+    for (let i = 0; i < sparkCount * 3; i += 3) {
+      sparkPos[i] = (Math.random() - 0.5) * 1;
+      sparkPos[i + 1] = (Math.random() - 0.5) * 2;
+      sparkPos[i + 2] = (Math.random() - 0.5) * 1;
+    }
+    const sparkGeo = new THREE.BufferGeometry();
+    sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
+    const sparkMat = new THREE.PointsMaterial({
+      color: 0xaaddff,
+      size: 0.05,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false
+    });
+    const sparks = new THREE.Points(sparkGeo, sparkMat);
+
+    zeusBoltHandGroup.add(boltMesh);
+    zeusBoltHandGroup.add(sparks);
+    scene.add(zeusBoltHandGroup);
+  }
+
+  if (!zeusStarsPoints) {
+    const starsCount = 1500;
+    const starsPos = new Float32Array(starsCount * 3);
+    for (let i = 0; i < starsCount * 3; i += 3) {
+      starsPos[i] = (Math.random() - 0.5) * 50;
+      starsPos[i + 1] = (Math.random() - 0.5) * 30;
+      starsPos[i + 2] = (Math.random() - 0.5) * 50 - 10;
+    }
+    const starsGeo = new THREE.BufferGeometry();
+    starsGeo.setAttribute('position', new THREE.BufferAttribute(starsPos, 3));
+    const starsMat = new THREE.PointsMaterial({
+      color: 0x88aaff,
+      size: 0.08,
+      transparent: true,
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    zeusStarsPoints = new THREE.Points(starsGeo, starsMat);
+    scene.add(zeusStarsPoints);
+  }
+}
+
+function createZeusStrike(start, end) {
+  const points = [start];
+  const segments = 15;
+  for (let i = 1; i < segments; i++) {
+    const frac = i / segments;
+    const mid = new THREE.Vector3().lerpVectors(start, end, frac);
+    const spread = 1.5 * Math.sin(frac * Math.PI);
+    mid.x += (Math.random() - 0.5) * spread;
+    mid.y += (Math.random() - 0.5) * spread;
+    mid.z += (Math.random() - 0.5) * spread;
+    points.push(mid);
+  }
+  points.push(end);
+
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color: 0xaaddff,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending
+  });
+  const line = new THREE.Line(geometry, material);
+  scene.add(line);
+
+  const pCount = 40;
+  const pPos = new Float32Array(pCount * 3);
+  const pVels = [];
+  for (let i = 0; i < pCount; i++) {
+    pPos[i * 3] = end.x;
+    pPos[i * 3 + 1] = end.y;
+    pPos[i * 3 + 2] = end.z;
+    pVels.push({
+      x: (Math.random() - 0.5) * 6,
+      y: (Math.random() - 0.5) * 6,
+      z: (Math.random() - 0.5) * 6
+    });
+  }
+  const pGeo = new THREE.BufferGeometry();
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+  const pMat = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 0.1,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    depthWrite: false
+  });
+  const particles = new THREE.Points(pGeo, pMat);
+  particles.userData = { vels: pVels, life: 1.0 };
+  scene.add(particles);
+
+  zeusActiveLines.push({ mesh: line, life: 0.5 });
+  zeusActiveSparks.push(particles);
+}
+
+function shootZeusLightning() {
+  buildZeusInteractive();
+
+  if (zeusFlashOverlay) {
+    zeusFlashOverlay.style.opacity = '0.8';
+    setTimeout(function () {
+      if (zeusFlashOverlay) zeusFlashOverlay.style.opacity = '0';
+    }, 100);
+  }
+
+  if (zeusStrikeLight) {
+    zeusStrikeLight.intensity = 15;
+    zeusStrikeLight.position.set(
+      (Math.random() - 0.5) * 2,
+      3 + Math.random() * 2,
+      2 + Math.random() * 2
+    );
+  }
+
+  const startPoint = new THREE.Vector3(1.2, 2.2, 1);
+  const endPoint = new THREE.Vector3(
+    zeusMouseVec.x * 5,
+    zeusMouseVec.y * 5 + 2,
+    (Math.random() - 0.5) * 3 + 1
+  );
+  createZeusStrike(startPoint, endPoint);
+
+  for (let i = 0; i < 2; i++) {
+    const bgStart = new THREE.Vector3((Math.random() - 0.5) * 4, 5, -2);
+    const bgEnd = new THREE.Vector3((Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 3);
+    createZeusStrike(bgStart, bgEnd);
+  }
+}
+
+function updateZeus(t, dt) {
+  buildZeusInteractive();
+
+  if (zeusParallaxGroup) {
+    zeusParallaxGroup.visible = true;
+    zeusParallaxGroup.rotation.y += (zeusMouseVec.x * 0.2 - zeusParallaxGroup.rotation.y) * 0.05;
+    zeusParallaxGroup.rotation.x += (-zeusMouseVec.y * 0.1 - zeusParallaxGroup.rotation.x) * 0.05;
+    zeusParallaxGroup.position.x += (zeusMouseVec.x * 0.2 - zeusParallaxGroup.position.x) * 0.05;
+  }
+
+  if (zeusBoltHandGroup) {
+    zeusBoltHandGroup.visible = true;
+    zeusBoltHandGroup.rotation.y += dt * 2;
+    zeusBoltHandGroup.position.y = Math.sin(t * 3) * 0.1;
+  }
+
+  if (zeusStarsPoints) {
+    zeusStarsPoints.visible = true;
+    zeusStarsPoints.rotation.y += dt * 0.01;
+  }
+
+  if (zeusStrikeLight && zeusStrikeLight.intensity > 0) {
+    zeusStrikeLight.intensity -= dt * 20;
+    if (zeusStrikeLight.intensity < 0) zeusStrikeLight.intensity = 0;
+  }
+
+  for (let i = zeusActiveLines.length - 1; i >= 0; i--) {
+    const item = zeusActiveLines[i];
+    item.life -= dt;
+    item.mesh.material.opacity = Math.max(0, item.life * 2);
+    if (item.life <= 0) {
+      scene.remove(item.mesh);
+      item.mesh.geometry.dispose();
+      item.mesh.material.dispose();
+      zeusActiveLines.splice(i, 1);
+    }
+  }
+
+  for (let i = zeusActiveSparks.length - 1; i >= 0; i--) {
+    const p = zeusActiveSparks[i];
+    const positions = p.geometry.attributes.position.array;
+    for (let j = 0; j < p.userData.vels.length; j++) {
+      positions[j * 3] += p.userData.vels[j].x * dt;
+      positions[j * 3 + 1] += p.userData.vels[j].y * dt;
+      positions[j * 3 + 2] += p.userData.vels[j].z * dt;
+      p.userData.vels[j].y -= dt * 2;
+    }
+    p.geometry.attributes.position.needsUpdate = true;
+    p.userData.life -= dt;
+    p.material.opacity = Math.max(0, p.userData.life);
+    if (p.userData.life <= 0) {
+      scene.remove(p);
+      p.geometry.dispose();
+      p.material.dispose();
+      zeusActiveSparks.splice(i, 1);
+    }
+  }
+
+  camera.position.set(0, 2.5, 7);
+  camera.lookAt(0, 2, 0);
+}
   const pts = [start];
   const segments = 12;
   for (let i = 1; i < segments; i++) {
