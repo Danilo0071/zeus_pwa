@@ -3566,135 +3566,223 @@ function frame(now) {
     if (avatar === "eye") drawEye(t); else drawRobot(t);
   }
 }
-// --- ZEUS APRIMORADO (dentro do #three-box junto ao chat e voz) ---
-let zeusOlimpoGroup = null, zeusLight = null, zeusBolts = [], zeusSparks = [];
+// --- ZEUS - SENHOR DO OLIMPO (formato compatível com AVATAR_HTML) ---
+let zeusGroup = null;
+let zeusCore = null;
+let zeusRing1 = null;
+let zeusRing2 = null;
+let zeusSparks = [];
+let zeusBolts = [];
+let zeusLight = null;
 let zeusAngleIdx = 0;
-const zeusAngles = [
-  { pos: [2, 2.2, 6.5], look: [0, 0.8, 0] },
-  { pos: [4.5, 1.8, 4.2], look: [0, 0.7, 0] },
-  { pos: [0, 3.2, 6.0], look: [0, 1.0, 0] },
-  { pos: [-3.5, 1.6, 5.2], look: [0, 0.7, 0] }
+
+const zeusCameraAngles = [
+  { pos: [2, 3, 7.5], look: [0, 2.0, 0] },
+  { pos: [5.5, 2.4, 4.2], look: [0, 1.9, 0] },
+  { pos: [0, 3.8, 6.8], look: [0, 2.2, 0] },
+  { pos: [-4, 2.1, 6.0], look: [0, 1.9, 0] }
 ];
 
-function buildZeusOlimpo() {
-  if (zeusOlimpoGroup || !HAS3) return;
-  zeusOlimpoGroup = new THREE.Group();
-  zeusOlimpoGroup.visible = false;
+function buildZeusScene() {
+  if (zeusGroup) return zeusGroup;
 
-  const ac = new THREE.Color(PAL[palIdx] || "#00e5ff");
-  const core = new THREE.Mesh(
-    new THREE.SphereGeometry(0.68, 32, 32),
-    new THREE.MeshStandardMaterial({ color: 0xffe6a3, emissive: ac, emissiveIntensity: 1.4, roughness: 0.25, metalness: 0.2 })
-  );
-  core.position.y = 0.9;
-  zeusOlimpoGroup.add(core);
+  zeusGroup = new THREE.Group();
 
-  const halo1 = new THREE.Mesh(
-    new THREE.TorusGeometry(1.15, 0.035, 20, 64),
-    new THREE.MeshBasicMaterial({ color: ac, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending })
-  );
-  halo1.position.y = 0.9;
-  halo1.rotation.x = Math.PI / 2.4;
-  zeusOlimpoGroup.add(halo1);
+  zeusLight = new THREE.PointLight(0xaaccff, 0, 18);
+  zeusLight.position.set(0, 4.5, 2.5);
+  zeusGroup.add(zeusLight);
 
-  const halo2 = new THREE.Mesh(
-    new THREE.TorusGeometry(0.92, 0.025, 16, 48),
-    new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.65, blending: THREE.AdditiveBlending })
-  );
-  halo2.position.y = 0.9;
-  halo2.rotation.y = Math.PI / 3;
-  zeusOlimpoGroup.add(halo2);
+  const coreGeo = new THREE.SphereGeometry(0.75, 32, 32);
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: 0xffdd99,
+    emissive: 0xaa6600,
+    emissiveIntensity: 2.0,
+    roughness: 0.2,
+    metalness: 0.1,
+    transparent: true,
+    opacity: 0.9
+  });
+  zeusCore = new THREE.Mesh(coreGeo, coreMat);
+  zeusCore.position.y = 2.1;
+  zeusGroup.add(zeusCore);
 
-  const pCount = 260, pArr = new Float32Array(pCount * 3);
-  for (let i = 0; i < pCount; i++) {
-    const r = 1.3 + Math.random() * 1.8;
-    const th = Math.random() * Math.PI * 2;
-    const ph = Math.acos(2 * Math.random() - 1);
-    pArr[i * 3] = Math.sin(ph) * Math.cos(th) * r;
-    pArr[i * 3 + 1] = Math.sin(ph) * Math.sin(th) * r + 0.9;
-    pArr[i * 3 + 2] = Math.cos(ph) * r;
+  const ring1Geo = new THREE.TorusGeometry(1.15, 0.045, 24, 64);
+  const ring1Mat = new THREE.MeshStandardMaterial({
+    color: 0x88ccff,
+    emissive: 0x2266cc,
+    emissiveIntensity: 2.8,
+    transparent: true,
+    opacity: 0.75
+  });
+  zeusRing1 = new THREE.Mesh(ring1Geo, ring1Mat);
+  zeusRing1.position.y = 2.1;
+  zeusRing1.rotation.x = Math.PI / 2;
+  zeusRing1.rotation.z = 0.3;
+  zeusGroup.add(zeusRing1);
+
+  const ring2Geo = new THREE.TorusGeometry(0.95, 0.03, 20, 48);
+  const ring2Mat = new THREE.MeshStandardMaterial({
+    color: 0xffaa33,
+    emissive: 0xff8800,
+    emissiveIntensity: 2.4,
+    transparent: true,
+    opacity: 0.65
+  });
+  zeusRing2 = new THREE.Mesh(ring2Geo, ring2Mat);
+  zeusRing2.position.y = 2.1;
+  zeusRing2.rotation.x = Math.PI / 3;
+  zeusRing2.rotation.y = 0.5;
+  zeusGroup.add(zeusRing2);
+
+  const pillarGeo = new THREE.CylinderGeometry(0.28, 0.55, 3.2, 12, 1, true);
+  const pillarMat = new THREE.MeshBasicMaterial({
+    color: 0x4488ff,
+    transparent: true,
+    opacity: 0.14,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+  pillar.position.y = 2.1;
+  zeusGroup.add(pillar);
+
+  const baseGeo = new THREE.CylinderGeometry(1.15, 1.35, 0.2, 32);
+  const baseMat = new THREE.MeshStandardMaterial({
+    color: 0x333344,
+    roughness: 0.7,
+    metalness: 0.3
+  });
+  const base = new THREE.Mesh(baseGeo, baseMat);
+  base.position.y = 0.1;
+  zeusGroup.add(base);
+
+  zeusSparks = [];
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const sparkGeo = new THREE.SphereGeometry(0.06, 8, 8);
+    const sparkMat = new THREE.MeshStandardMaterial({
+      color: 0xaaddff,
+      emissive: 0x4488ff,
+      emissiveIntensity: 3.0
+    });
+    const spark = new THREE.Mesh(sparkGeo, sparkMat);
+    spark.userData = { angle: angle, radius: 1.75 };
+    spark.position.set(
+      Math.cos(angle) * 1.75,
+      2.1 + Math.sin(angle * 2) * 0.7,
+      Math.sin(angle) * 1.75
+    );
+    zeusGroup.add(spark);
+    zeusSparks.push(spark);
   }
-  const pGeo = new THREE.BufferGeometry();
-  pGeo.setAttribute("position", new THREE.BufferAttribute(pArr, 3));
-  const cloud = new THREE.Points(pGeo, new THREE.PointsMaterial({
-    color: 0xaaddff, size: 0.06, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false
-  }));
-  zeusOlimpoGroup.add(cloud);
 
-  zeusLight = new THREE.PointLight(0xaaccff, 0, 14);
-  zeusLight.position.set(0, 2.2, 2);
-  zeusOlimpoGroup.add(zeusLight);
-
-  zeusOlimpoGroup.userData = { core, halo1, halo2, cloud };
-  scene.add(zeusOlimpoGroup);
+  scene.add(zeusGroup);
+  return zeusGroup;
 }
 
 function spawnZeusBolt() {
-  if (!HAS3 || !zeusOlimpoGroup) return;
-  const start = new THREE.Vector3((Math.random() - 0.5) * 1.2, 1.2 + Math.random() * 0.8, (Math.random() - 0.5) * 1.2);
-  const end = new THREE.Vector3((Math.random() - 0.5) * 3.2, Math.random() > 0.4 ? 3.2 + Math.random() : -0.6 + Math.random() * 0.8, (Math.random() - 0.5) * 3.2);
+  if (!zeusGroup) return;
+
+  const start = new THREE.Vector3(
+    (Math.random() - 0.5) * 1.4,
+    2.4 + Math.random() * 1.4,
+    (Math.random() - 0.5) * 1.4
+  );
+  const end = new THREE.Vector3(
+    (Math.random() - 0.5) * 3.8,
+    Math.random() > 0.5 ? 4.8 + Math.random() * 2.5 : 0.5 + Math.random() * 1.4,
+    (Math.random() - 0.5) * 3.8
+  );
+
   const pts = [start];
-  for (let i = 1; i < 10; i++) {
-    const t = i / 10;
-    const m = new THREE.Vector3().lerpVectors(start, end, t);
-    const amp = 0.55 * Math.sin(t * Math.PI);
-    m.x += (Math.random() - 0.5) * amp;
-    m.y += (Math.random() - 0.5) * amp;
-    m.z += (Math.random() - 0.5) * amp;
-    pts.push(m);
+  const segments = 12;
+  for (let i = 1; i < segments; i++) {
+    const frac = i / segments;
+    const mid = new THREE.Vector3().lerpVectors(start, end, frac);
+    mid.x += (Math.random() - 0.5) * 0.7 * Math.sin(frac * Math.PI);
+    mid.y += (Math.random() - 0.5) * 0.7 * Math.sin(frac * Math.PI);
+    mid.z += (Math.random() - 0.5) * 0.7 * Math.sin(frac * Math.PI);
+    pts.push(mid);
   }
   pts.push(end);
-  const line = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(pts),
-    new THREE.LineBasicMaterial({ color: 0xcce6ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending })
-  );
-  scene.add(line);
-  zeusBolts.push({ line, life: 0.45, maxLife: 0.45 });
-  if (zeusLight) zeusLight.intensity = 6;
-}
 
-function triggerZeusStorm() {
-  for (let i = 0; i < 4; i++) setTimeout(() => spawnZeusBolt(), i * 70);
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({
+    color: 0xaaccff,
+    transparent: true,
+    opacity: 0.95,
+    blending: THREE.AdditiveBlending
+  });
+  const line = new THREE.Line(geo, mat);
+  zeusGroup.add(line);
+
+  zeusBolts.push({ line: line, life: 0.45, maxLife: 0.45 });
+  if (zeusLight) {
+    zeusLight.intensity = 7.5;
+    zeusLight.position.set(
+      (start.x + end.x) * 0.5,
+      (start.y + end.y) * 0.5,
+      (start.z + end.z) * 0.5
+    );
+  }
 }
 
 function updateZeus(t, dt) {
-  if (!zeusOlimpoGroup) buildZeusOlimpo();
-  if (!zeusOlimpoGroup) return;
-  zeusOlimpoGroup.visible = true;
-  const ac = new THREE.Color(PAL[palIdx] || "#00e5ff");
-  const sp = state === "speaking", ls = state === "listening", th = state === "thinking";
-  const speed = th ? 1.4 : sp ? 0.8 : 0.35;
+  const grp = buildZeusScene();
+  grp.visible = true;
 
-  zeusOlimpoGroup.rotation.y += dt * speed;
-  zeusOlimpoGroup.userData.halo1.rotation.z += dt * (1.1 + (sp ? 1.5 : 0));
-  zeusOlimpoGroup.userData.halo2.rotation.x += dt * 0.9;
-  zeusOlimpoGroup.userData.cloud.rotation.y -= dt * 0.25;
-  zeusOlimpoGroup.userData.halo1.material.color.copy(ac);
-  zeusOlimpoGroup.userData.core.material.emissive.copy(ac);
+  grp.rotation.y += dt * 0.18;
 
-  const pulseScale = 1 + Math.sin(t * 4) * 0.05 + (sp ? 0.1 * Math.abs(Math.sin(t * 12)) : ls ? pulse * 0.12 : 0);
-  zeusOlimpoGroup.userData.core.scale.setScalar(pulseScale);
+  if (zeusCore) {
+    const s = 1 + Math.sin(t * 3.2) * 0.06;
+    zeusCore.scale.set(s, s, s);
+  }
+  if (zeusRing1) {
+    zeusRing1.rotation.z += dt * 0.55;
+    zeusRing1.rotation.x += dt * 0.2;
+  }
+  if (zeusRing2) {
+    zeusRing2.rotation.z -= dt * 0.45;
+    zeusRing2.rotation.y += dt * 0.35;
+  }
 
-  if (Math.random() < (sp ? 0.06 : th ? 0.04 : 0.012)) spawnZeusBolt();
-  if (zeusLight && zeusLight.intensity > 0) zeusLight.intensity = Math.max(0, zeusLight.intensity * 0.88 - 0.05);
+  zeusSparks.forEach(function (sp, idx) {
+    const a = sp.userData.angle + t * 0.9;
+    const r = sp.userData.radius;
+    sp.position.set(
+      Math.cos(a) * r,
+      2.1 + Math.sin(a * 2 + idx) * 0.65,
+      Math.sin(a) * r
+    );
+  });
+
+  if (Math.random() < dt * 1.4) {
+    spawnZeusBolt();
+  }
 
   for (let i = zeusBolts.length - 1; i >= 0; i--) {
     const b = zeusBolts[i];
     b.life -= dt;
     b.line.material.opacity = Math.max(0, b.life / b.maxLife);
     if (b.life <= 0) {
-      scene.remove(b.line);
+      grp.remove(b.line);
       b.line.geometry.dispose();
       b.line.material.dispose();
       zeusBolts.splice(i, 1);
     }
   }
 
-  const ang = zeusAngles[zeusAngleIdx];
-  camera.position.x += (ang.pos[0] + look.x * 0.8 - camera.position.x) * 0.08;
-  camera.position.y += (ang.pos[1] + look.y * 0.6 - camera.position.y) * 0.08;
-  camera.position.z += (ang.pos[2] - camera.position.z) * 0.08;
-  camera.lookAt(ang.look[0], ang.look[1], ang.look[2]);
+  if (zeusLight && zeusLight.intensity > 0) {
+    zeusLight.intensity *= 0.9;
+    if (zeusLight.intensity < 0.1) zeusLight.intensity = 0;
+  }
+
+  const camCfg = zeusCameraAngles[zeusAngleIdx % zeusCameraAngles.length];
+  camera.position.x += (camCfg.pos[0] - camera.position.x) * 0.05;
+  camera.position.y += (camCfg.pos[1] - camera.position.y) * 0.05;
+  camera.position.z += (camCfg.pos[2] - camera.position.z) * 0.05;
+  camera.lookAt(camCfg.look[0], camCfg.look[1], camCfg.look[2]);
 }
 requestAnimationFrame(frame);
 </script>
