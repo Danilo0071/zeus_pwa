@@ -27,7 +27,14 @@ BINANCE_USE_DEMO = os.getenv("BINANCE_USE_DEMO", "true").lower() == "true"
 BINANCE_MAX_LEVERAGE = min(float(os.getenv("BINANCE_MAX_LEVERAGE", "2")), 2.0)
 BINANCE_BASE_URL = "https://demo-fapi.binance.com" if BINANCE_USE_DEMO else "https://fapi.binance.com"
 BINANCE_SYMBOL = os.getenv("BINANCE_SYMBOL", "BTCUSDT").strip().strip('"')
-BINANCE_MARGEM_PCT = float(os.getenv("BINANCE_MARGEM_PCT", "0.02"))  # 2% do saldo por ordem (valores menores, mais trades)
+# Margem por operação: padrão 3% do saldo, sempre travada entre 2% e 4% (alavancagem máx. 2x => notional 4%-8% do saldo)
+MARGEM_MIN_PCT = 0.02
+MARGEM_MAX_PCT = 0.04
+BINANCE_MARGEM_PCT = min(MARGEM_MAX_PCT, max(MARGEM_MIN_PCT, float(os.getenv("BINANCE_MARGEM_PCT", "0.03"))))
+# Teto rígido absoluto de margem por operação (mesmo quando o notional mínimo da Binance força aumentar a ordem)
+MARGEM_HARD_MAX_PCT = float(os.getenv("MARGEM_HARD_MAX_PCT", "0.10"))
+# Proteção de liquidação: o stop precisa ficar a pelo menos N vezes de distância da liquidação estimada
+LIQ_BUFFER_FATOR = float(os.getenv("LIQ_BUFFER_FATOR", "3"))
 BINANCE_MIN_NOTIONAL = float(os.getenv("BINANCE_MIN_NOTIONAL", "100"))  # mínimo da Binance p/ BTCUSDT
 BINANCE_QTY_DECIMALS = int(os.getenv("BINANCE_QTY_DECIMALS", "3"))
 TESTE_AUTO_DEMO = os.getenv("TESTE_AUTO_DEMO", "false").lower() == "true"
@@ -35,16 +42,26 @@ TESTE_AUTO_DEMO = os.getenv("TESTE_AUTO_DEMO", "false").lower() == "true"
 # ---- Critérios de entrada / risco (novos, todos ajustáveis por variável de ambiente) ----
 TAXA_TAKER_PCT = float(os.getenv("TAXA_TAKER_PCT", "0.05"))        # taxa por lado (%)
 SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.02"))            # folga de slippage por lado (%)
-FATOR_TAXA_MIN = float(os.getenv("FATOR_TAXA_MIN", "3"))           # alvo precisa ser >= N x custo ida+volta
-SCORE_MIN = int(os.getenv("SCORE_MIN", "2"))                       # força mínima do sinal técnico (0..4)
-SCORE_FORTE = int(os.getenv("SCORE_FORTE", "3"))
+TAXA_MAKER_PCT = float(os.getenv("TAXA_MAKER_PCT", "0.02"))        # taxa maker por lado (%) para ordens LIMIT post-only
+FUNDING_MARGEM_PCT = float(os.getenv("FUNDING_MARGEM_PCT", "0.01"))  # margem de segurança de funding (%) embutida no custo
+FATOR_TAXA_MIN = max(2.5, float(os.getenv("FATOR_TAXA_MIN", "3")))  # alvo precisa ser >= N x custo total (mín. 2,5x)
+ENTRADA_LIMIT = os.getenv("ENTRADA_LIMIT", "true").lower() == "true"  # entradas via LIMIT post-only (maker)
+LIMIT_FALLBACK_MARKET = os.getenv("LIMIT_FALLBACK_MARKET", "false").lower() == "true"  # entrada a mercado se a limit não executar
+SAIDA_LIMIT_NAO_URGENTE = os.getenv("SAIDA_LIMIT_NAO_URGENTE", "true").lower() == "true"  # TP/trailing/tempo via limit (stop e reversão sempre a mercado)
+LIMIT_ESPERA_SEG = int(os.getenv("LIMIT_ESPERA_SEG", "20"))        # quanto esperar a limit executar antes de cancelar
+BINANCE_PRICE_DECIMALS = int(os.getenv("BINANCE_PRICE_DECIMALS", "1"))  # tick do BTCUSDT = 0.1
+SCORE_MIN = int(os.getenv("SCORE_MIN", "3"))                       # força mínima do sinal técnico (0..4)
+SCORE_FORTE = int(os.getenv("SCORE_FORTE", "4"))
+EXIGIR_TENDENCIA_ALINHADA = os.getenv("EXIGIR_TENDENCIA_ALINHADA", "true").lower() == "true"  # 15m e 1h na mesma direção
+VOL_RATIO_MIN = float(os.getenv("VOL_RATIO_MIN", "1.0"))           # volume recente (2 candles 15m) / média de 20 candles
 MIN_ATR_PCT = float(os.getenv("MIN_ATR_PCT", "0.08"))              # mercado "morto" abaixo disso
-STOP_MIN_PCT = float(os.getenv("STOP_MIN_PCT", "0.4"))
+STOP_MIN_PCT = float(os.getenv("STOP_MIN_PCT", "0.6"))
 STOP_MAX_PCT = float(os.getenv("STOP_MAX_PCT", "1.5"))
-ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "1.5"))
-ALVO_RR = float(os.getenv("ALVO_RR", "1.5"))                       # take profit = stop x RR
-RISCO_POR_TRADE_PCT = float(os.getenv("RISCO_POR_TRADE_PCT", "0.25"))  # % do saldo arriscado se o stop bater
-COOLDOWN_ORDEM_SEG = int(os.getenv("COOLDOWN_ORDEM_SEG", "300"))
+ATR_STOP_MULT = float(os.getenv("ATR_STOP_MULT", "2.0"))
+RR_MINIMO = max(1.8, float(os.getenv("RR_MINIMO", "1.8")))          # relação mínima risco:retorno (1 : 1,8)
+ALVO_RR = max(RR_MINIMO, float(os.getenv("ALVO_RR", "2.0")))       # take profit = stop x RR (nunca abaixo do mínimo)
+RISCO_POR_TRADE_PCT = float(os.getenv("RISCO_POR_TRADE_PCT", "0.5"))  # % do saldo arriscado se o stop bater
+COOLDOWN_ORDEM_SEG = int(os.getenv("COOLDOWN_ORDEM_SEG", "1800"))  # intervalo mínimo entre operações (30 min)
 MIN_HOLD_SEG = int(os.getenv("MIN_HOLD_SEG", "300"))
 MAX_HOLD_HORAS = float(os.getenv("MAX_HOLD_HORAS", "4"))
 MAX_PERDAS_SEGUIDAS = int(os.getenv("MAX_PERDAS_SEGUIDAS", "5"))
@@ -103,6 +120,8 @@ _ordens_executadas_sessao = 0
 _chamadas_llm_evitadas = 0
 _ultimos_aprendizados_sessao = []
 _saldo_inicial_sessao = None
+_contadores_restaurados = False
+_contadores_salvos = (None, None)
 _licoes_cache = {"padroes_positivos": [], "alertas_negativos": [], "total_avaliados": 0}
 _licoes_carregadas = False
 _ultimo_pnl_realizado_avaliado = None  # mantido por compatibilidade
@@ -337,12 +356,43 @@ def carregar_estado():
         return _estado
 
 
+def _restaurar_contadores():
+    """Recupera do B2 os contadores do relatório (ordens enviadas / chamadas LLM evitadas) uma única vez por processo,
+    para que não zerem quando a nuvem reinicia o bot."""
+    global _contadores_restaurados, _ordens_executadas_sessao, _chamadas_llm_evitadas, _contadores_salvos
+    if _contadores_restaurados:
+        return
+    est = carregar_estado()
+    with _lock_estado:
+        if _contadores_restaurados:
+            return
+        try:
+            _ordens_executadas_sessao += int(est.get("cont_ordens_enviadas") or 0)
+            _chamadas_llm_evitadas += int(est.get("cont_llm_evitadas") or 0)
+        except (TypeError, ValueError):
+            pass
+        _contadores_salvos = (est.get("cont_ordens_enviadas"), est.get("cont_llm_evitadas"))
+        _contadores_restaurados = True
+
+
 def salvar_estado(**mudancas):
+    global _contadores_salvos
     carregar_estado()
+    _restaurar_contadores()  # garante que o save nunca sobrescreva contadores guardados com zero
     with _lock_estado:
         _estado.update(mudancas)
+        _estado["cont_ordens_enviadas"] = _ordens_executadas_sessao
+        _estado["cont_llm_evitadas"] = _chamadas_llm_evitadas
+        _contadores_salvos = (_ordens_executadas_sessao, _chamadas_llm_evitadas)
         snap = dict(_estado)
     b2_salvar(ARQUIVO_ESTADO_B2, snap)
+
+
+def _persistir_contadores():
+    """Grava os contadores no B2 só se mudaram desde o último save (no máx. 1 escrita por ciclo)."""
+    _restaurar_contadores()
+    if (_ordens_executadas_sessao, _chamadas_llm_evitadas) != _contadores_salvos:
+        salvar_estado()
 
 
 # ================= DIÁRIO DE ACERTO E ERRO NOS TRADES (B2) =================
@@ -973,6 +1023,8 @@ def binance_request(method, endpoint, params=None, assinado=True):
     try:
         if method == "GET":
             r = requests.get(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=(4, 8))
+        elif method == "DELETE":
+            r = requests.delete(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=(4, 8))
         else:
             r = requests.post(url, headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=(4, 8))
         dados = r.json()
@@ -1224,6 +1276,14 @@ def calcular_sinal_tecnico():
     s4 = 1 if mom_2h > 0.3 else (-1 if mom_2h < -0.3 else 0)
     score = s1 + s2 + s3 + s4
 
+    # Confirmação por volume: média dos 2 últimos candles fechados vs média dos 20 anteriores
+    vols = [c[4] for c in k15]
+    vol_ratio = None
+    if len(vols) >= 22:
+        media_vol = sum(vols[-22:-2]) / 20.0
+        if media_vol > 0:
+            vol_ratio = (sum(vols[-2:]) / 2.0) / media_vol
+
     return {
         "score": score,
         "rsi": round(rsi, 1),
@@ -1231,6 +1291,9 @@ def calcular_sinal_tecnico():
         "mom_2h_pct": round(mom_2h, 3),
         "tendencia_1h": "alta" if s2 > 0 else "baixa",
         "funding_pct": _funding_atual_pct(),
+        "tend_15m": s1,
+        "tend_1h": s2,
+        "vol_ratio": round(vol_ratio, 2) if vol_ratio is not None else None,
     }
 
 
@@ -1238,6 +1301,13 @@ def _vetos_sinal(lado, sinal):
     """Condições que impedem a entrada mesmo com score alto (custo, esticado, mercado morto)."""
     if sinal["atr_pct"] < MIN_ATR_PCT:
         return f"volatilidade baixa demais (ATR {sinal['atr_pct']}% < {MIN_ATR_PCT}%): não cobre as taxas"
+    if EXIGIR_TENDENCIA_ALINHADA:
+        dirn = 1 if lado == "BUY" else -1
+        if sinal.get("tend_15m") != dirn or sinal.get("tend_1h") != dirn:
+            return "tendência 15m/1h não alinhada com a direção da entrada"
+    vr = sinal.get("vol_ratio")
+    if vr is not None and vr < VOL_RATIO_MIN:
+        return f"volume fraco (x{vr:.2f} da média < x{VOL_RATIO_MIN:.2f}): movimento sem confirmação"
     if lado == "BUY" and sinal["rsi"] >= 75:
         return f"RSI esticado ({sinal['rsi']}): evitando comprar topo"
     if lado == "SELL" and sinal["rsi"] <= 25:
@@ -1251,32 +1321,56 @@ def _vetos_sinal(lado, sinal):
     return None
 
 
-def _planejar_stop_alvo(atr_pct):
-    """Stop adaptativo à volatilidade e alvo = stop x RR. Só vale entrar se o alvo cobre N x as taxas ida+volta."""
+def _custo_total_taxas_pct(lado=None, funding_pct=None, entrada_limit=None):
+    """Custo estimado (% do notional) de abrir + fechar + margem de funding.
+    Entrada via LIMIT post-only paga maker; a saída é estimada como taker (cenário conservador: stop é a mercado)."""
+    if entrada_limit is None:
+        entrada_limit = ENTRADA_LIMIT
+    entrada = TAXA_MAKER_PCT if entrada_limit else (TAXA_TAKER_PCT + SLIPPAGE_PCT)
+    saida = TAXA_TAKER_PCT + SLIPPAGE_PCT
+    funding = FUNDING_MARGEM_PCT
+    if lado and funding_pct is not None:
+        adverso = funding_pct if lado == "BUY" else -funding_pct
+        if adverso > 0:  # funding a pagar: embute os períodos de 8h possíveis dentro do tempo máximo de posição
+            funding += adverso * max(1, math.ceil(MAX_HOLD_HORAS / 8.0))
+    return entrada + saida + funding
+
+
+def _planejar_stop_alvo(atr_pct, lado=None, funding_pct=None):
+    """Stop adaptativo à volatilidade e alvo = stop x RR (RR >= 1:1,8). Só vale entrar se o alvo cobre N x o custo total."""
     sl = min(STOP_MAX_PCT, max(STOP_MIN_PCT, ATR_STOP_MULT * atr_pct))
     tp = sl * ALVO_RR
-    custo_ida_volta = 2.0 * (TAXA_TAKER_PCT + SLIPPAGE_PCT)
-    ok = tp >= FATOR_TAXA_MIN * custo_ida_volta
-    return sl, tp, custo_ida_volta, ok
+    custo_total = _custo_total_taxas_pct(lado, funding_pct)
+    ok = tp >= FATOR_TAXA_MIN * custo_total and tp >= sl * RR_MINIMO - 1e-9
+    return sl, tp, custo_total, ok
 
 
 # ================= POSIÇÃO / ORDENS =================
 def _calcular_quantidade_demo(saldo_usdt, preco, stop_pct=None):
-    """Quantidade com alavancagem controlada (<=2x). Limita por margem %, por risco no stop e pelo teto de 2x do saldo.
-    Retorna 0.0 se não der para respeitar o notional mínimo sem estourar o limite."""
+    """Quantidade com alavancagem controlada (<=2x). Margem 2%-4% do saldo (padrão 3%), limitada pelo risco no stop,
+    pelo teto rígido de margem (MARGEM_HARD_MAX_PCT) e por uma checagem de distância de liquidação.
+    Retorna 0.0 se não der para respeitar o notional mínimo dentro desses limites."""
     if preco <= 0 or saldo_usdt <= 0:
         return 0.0
     alav = max(1.0, min(BINANCE_MAX_LEVERAGE, 2.0))
-    notional = saldo_usdt * BINANCE_MARGEM_PCT * alav
+    margem_pct = min(MARGEM_MAX_PCT, max(MARGEM_MIN_PCT, BINANCE_MARGEM_PCT))
+    notional = saldo_usdt * margem_pct * alav
     if stop_pct and stop_pct > 0:
         notional = min(notional, (saldo_usdt * RISCO_POR_TRADE_PCT / 100.0) / (stop_pct / 100.0))
-    teto = saldo_usdt * alav * 0.9
+        dist_liq_pct = 100.0 / alav - 1.0  # estimativa conservadora da distância até a liquidação (isolada)
+        if stop_pct * LIQ_BUFFER_FATOR >= dist_liq_pct:
+            return 0.0
+    teto = min(saldo_usdt * alav * 0.9, saldo_usdt * MARGEM_HARD_MAX_PCT * alav)
     notional = min(notional, teto)
     notional = max(notional, BINANCE_MIN_NOTIONAL)
     if notional > teto:
         return 0.0
     fator = 10 ** BINANCE_QTY_DECIMALS
     qtd = math.floor(notional / preco * fator) / fator
+    if qtd * preco < BINANCE_MIN_NOTIONAL:  # o arredondamento p/ baixo não pode ficar abaixo do notional mínimo da Binance
+        qtd = math.ceil(BINANCE_MIN_NOTIONAL / preco * fator) / fator
+        if qtd * preco > teto:
+            return 0.0
     return qtd if qtd > 0 else 0.0
 
 
@@ -1335,9 +1429,75 @@ def enviar_ordem(lado, qtd, reduce_only=False):
         return ordem, ok
 
 
+def _estado_ordem(order_id):
+    st = binance_request("GET", "/fapi/v1/order", {"symbol": BINANCE_SYMBOL, "orderId": order_id})
+    return st if isinstance(st, dict) and st.get("status") else None
+
+
+def enviar_ordem_limit(lado, qtd, reduce_only=False, fallback_market=False, espera_seg=None):
+    """Ordem LIMIT post-only (GTX) no melhor bid/ask para pagar taxa maker. Espera até espera_seg; o que não executar
+    é cancelado e, só se fallback_market=True, completado a mercado. Retorna (ordem, ok, qtd_executada)."""
+    global _ordens_executadas_sessao
+    espera = LIMIT_ESPERA_SEG if espera_seg is None else espera_seg
+    fator = 10 ** BINANCE_QTY_DECIMALS
+    with _lock_ordens:
+        garantir_alavancagem()
+        book = binance_request("GET", "/fapi/v1/ticker/bookTicker", {"symbol": BINANCE_SYMBOL}, assinado=False)
+        try:
+            preco_lim = float(book["bidPrice"] if lado == "BUY" else book["askPrice"])
+        except Exception:
+            preco_lim = 0.0
+
+        ordem, executado = None, 0.0
+        if preco_lim > 0:
+            params = {
+                "symbol": BINANCE_SYMBOL, "side": lado, "type": "LIMIT", "timeInForce": "GTX",
+                "quantity": f"{qtd:.{BINANCE_QTY_DECIMALS}f}", "price": f"{preco_lim:.{BINANCE_PRICE_DECIMALS}f}",
+            }
+            if reduce_only:
+                params["reduceOnly"] = "true"
+            ordem = binance_request("POST", "/fapi/v1/order", params)
+            oid = ordem.get("orderId") if isinstance(ordem, dict) else None
+            if oid:
+                finais = ("FILLED", "CANCELED", "EXPIRED", "REJECTED")
+                fim = time.time() + max(0, espera)
+                st = ordem
+                while True:
+                    st = _estado_ordem(oid) or st
+                    if str(st.get("status", "")) in finais or time.time() >= fim:
+                        break
+                    time.sleep(2)
+                if str(st.get("status", "")) not in finais:
+                    binance_request("DELETE", "/fapi/v1/order", {"symbol": BINANCE_SYMBOL, "orderId": oid})
+                    st = _estado_ordem(oid) or st
+                try:
+                    executado = float(st.get("executedQty", 0) or 0)
+                except (TypeError, ValueError):
+                    executado = 0.0
+                ordem = st
+                if executado > 0:
+                    _ordens_executadas_sessao += 1
+
+        restante = math.floor(max(0.0, qtd - executado) * fator + 1e-9) / fator
+        ok_m = False
+        if restante > 0 and fallback_market:
+            ordem_m, ok_m = enviar_ordem(lado, restante, reduce_only=reduce_only)
+            if ok_m:
+                executado += restante
+                ordem = ordem_m
+        completo = (restante <= 0) or ok_m
+        ok = completo if reduce_only else executado > 0
+        return ordem, ok, executado
+
+
 def fechar_posicao(pos, motivo):
     lado_fecha = "SELL" if pos["qtd"] > 0 else "BUY"
-    ordem, ok = enviar_ordem(lado_fecha, abs(pos["qtd"]), reduce_only=True)
+    urgente = motivo.startswith("Stop loss") or motivo.startswith("Reversão")
+    if SAIDA_LIMIT_NAO_URGENTE and not urgente:
+        # Take profit / trailing / tempo máximo: tenta maker primeiro; o resto vai a mercado para garantir o fechamento
+        ordem, ok, _q = enviar_ordem_limit(lado_fecha, abs(pos["qtd"]), reduce_only=True, fallback_market=True, espera_seg=15)
+    else:
+        ordem, ok = enviar_ordem(lado_fecha, abs(pos["qtd"]), reduce_only=True)
     if ok:
         salvar_estado(ultima_ordem_ts=time.time(), ultimo_motivo_saida=motivo, pico_pct=0.0)
         log(f"[Trade] Posição fechada ({motivo}).")
@@ -1443,6 +1603,7 @@ def _registrar_wait(log_acao, motivo, preco):
 
 def analisar_e_operar():
     global _chamadas_llm_evitadas
+    _restaurar_contadores()
 
     if not BINANCE_KEY or not BINANCE_SECRET:
         log("[Trade] Binance sem chave/segredo configurados.")
@@ -1474,6 +1635,7 @@ def analisar_e_operar():
         fechou = gerir_posicao(sinal)
         if fechou:
             return fechou
+        _chamadas_llm_evitadas += 1  # posição aberta: gestão 100% local, sem LLM
         d = {"acao": "WAIT", "motivo": f"Mantendo posição aberta ({pos_atual}); stop/alvo sob gestão local.", "tamanho": 0}
         _registrar_wait({**log_acao, "decisao": d}, d["motivo"], preco)
         return d
@@ -1487,8 +1649,10 @@ def analisar_e_operar():
         bloqueio = _bloqueio_entrada(saldo_usdt, res_detalhado)
         if bloqueio:
             decisao["motivo"] = bloqueio
+            _chamadas_llm_evitadas += 1
         elif not sinal:
             decisao["motivo"] = "Sem dados técnicos (klines) neste ciclo."
+            _chamadas_llm_evitadas += 1
         else:
             forca = abs(sinal["score"])
             lado_local = "BUY" if sinal["score"] > 0 else "SELL"
@@ -1503,7 +1667,7 @@ def analisar_e_operar():
                 None,
             )
             veto = _vetos_sinal(lado_local, sinal) if forca else None
-            sl_pct, tp_alvo, custo_rt, alvo_ok = _planejar_stop_alvo(sinal["atr_pct"])
+            sl_pct, tp_alvo, custo_rt, alvo_ok = _planejar_stop_alvo(sinal["atr_pct"], lado_local, sinal.get("funding_pct"))
 
             if forca < exigido:
                 decisao["motivo"] = (
@@ -1516,7 +1680,7 @@ def analisar_e_operar():
                 _chamadas_llm_evitadas += 1
             elif not alvo_ok:
                 decisao["motivo"] = (
-                    f"Alvo {tp_alvo:.2f}% não cobre {FATOR_TAXA_MIN:.0f}x as taxas ({custo_rt:.2f}% ida+volta)."
+                    f"Alvo {tp_alvo:.2f}% não cobre {FATOR_TAXA_MIN:g}x o custo total estimado ({custo_rt:.2f}% taxas+funding)."
                 )
                 _chamadas_llm_evitadas += 1
             elif ultimo_neg and (time.time() - int(ultimo_neg.get("ts", 0))) < REPETIR_APOS_PERDA_SEG:
@@ -1553,7 +1717,7 @@ def analisar_e_operar():
                     prompt = f"""Você é o Zeus Trader operando com alavancagem controlada na Binance Futures Demo.
 Objetivo: lucro LÍQUIDO consistente (descontando taxas, funding e perdas), sem giro desnecessário.
 O sinal técnico local sugere {lado_local} (score {sinal['score']:+d} de 4): RSI15m={sinal['rsi']}, ATR15m={sinal['atr_pct']}%, momentum 2h={sinal['mom_2h_pct']}%, tendência 1h={sinal['tendencia_1h']}, funding={sinal.get('funding_pct')}%.
-Plano: stop {sl_pct:.2f}%, alvo {tp_alvo:.2f}%, custo de taxas ida+volta ~{custo_rt:.2f}%.
+Plano: stop {sl_pct:.2f}%, alvo {tp_alvo:.2f}% (RR 1:{ALVO_RR:g}), custo total estimado (taxas+funding) ~{custo_rt:.2f}%.
 Confirme {lado_local} SOMENTE se o contexto abaixo reforça a entrada; caso contrário responda WAIT. Não proponha o lado oposto.
 Dados diretos de mercado: {dados_mercado}
 Conhecimento acumulado em estudo_trade/: {estrategia}
@@ -1609,11 +1773,29 @@ Responda APENAS um JSON válido com: {{"acao": "{lado_local}"|"WAIT", "motivo": 
         else:
             qtd_final = _calcular_quantidade_demo(saldo_usdt, preco, stop_pct)
         if qtd_final <= 0:
-            decisao.update({"acao": "WAIT", "motivo": "Saldo insuficiente para o notional mínimo dentro do limite de 2x.", "tamanho": 0})
+            decisao.update({"acao": "WAIT", "motivo": "Saldo insuficiente para o notional mínimo dentro dos limites de margem/alavancagem (2x).", "tamanho": 0})
             _registrar_wait(log_acao, decisao["motivo"], preco)
             return decisao
 
-        ordem, ok = enviar_ordem(acao, qtd_final, reduce_only=fechando)
+        # Trava final anti-taxa / risco-retorno, imediatamente antes de abrir qualquer posição nova
+        if not fechando and stop_pct and tp_pct:
+            custo_pre = _custo_total_taxas_pct(acao, sinal.get("funding_pct") if sinal else None)
+            if tp_pct < FATOR_TAXA_MIN * custo_pre or tp_pct < stop_pct * RR_MINIMO - 1e-9:
+                decisao.update({
+                    "acao": "WAIT", "tamanho": 0,
+                    "motivo": f"Trava anti-taxa: alvo {tp_pct:.2f}% < {FATOR_TAXA_MIN:g}x custo {custo_pre:.2f}% ou RR < 1:{RR_MINIMO:g}.",
+                })
+                _registrar_wait(log_acao, decisao["motivo"], preco)
+                return decisao
+
+        via_limit = False
+        if fechando or TESTE_AUTO_DEMO or not ENTRADA_LIMIT:
+            ordem, ok = enviar_ordem(acao, qtd_final, reduce_only=fechando)
+        else:
+            via_limit = True
+            ordem, ok, qtd_exec = enviar_ordem_limit(acao, qtd_final, False, fallback_market=LIMIT_FALLBACK_MARKET)
+            if ok and qtd_exec > 0:
+                qtd_final = qtd_exec
         log_acao["ordem"] = ordem
         b2_salvar(f"trades/log_{int(time.time())}.json", log_acao)
         if ok:
@@ -1637,7 +1819,11 @@ Responda APENAS um JSON válido com: {{"acao": "{lado_local}"|"WAIT", "motivo": 
             alav_int = int(max(1, min(BINANCE_MAX_LEVERAGE, 2)))
             log(f"[Trade] Ordem {acao} ({qtd_final} {BINANCE_SYMBOL} @ {alav_int}x) enviada na Demo em {preco}.")
         else:
-            decisao.update({"acao": "WAIT", "motivo": f"Ordem rejeitada pela Binance: {str(ordem)[:120]}", "tamanho": 0})
+            if via_limit:
+                motivo_falha = f"Limit post-only não executou em {LIMIT_ESPERA_SEG}s; entrada cancelada sem pagar taker ({str(ordem)[:80]})"
+            else:
+                motivo_falha = f"Ordem rejeitada pela Binance: {str(ordem)[:120]}"
+            decisao.update({"acao": "WAIT", "motivo": motivo_falha, "tamanho": 0})
             log(f"[Trade] Ordem {acao} rejeitada: {ordem}")
     else:
         decisao["tamanho"] = 0
@@ -1662,6 +1848,7 @@ def enviar_telegram(msg, chat_id=None):
 
 def montar_relatorio_de_hora_em_hora():
     """Monta o resumo horário com lucro/prejuízo, saldo, desenvoltura e aprendizados acumulados."""
+    _restaurar_contadores()
     horas_ativas = max(0.1, (time.time() - _inicio_bot_ts) / 3600.0)
     res = consultar_resultados_binance()
 
@@ -1754,6 +1941,10 @@ def rotina_trade():
             _ciclos_trade_rodados += 1
             log("[Trade] Iniciando ciclo de análise e operação...")
             decisao = analisar_e_operar()
+            try:
+                _persistir_contadores()
+            except Exception as e:
+                log(f"[Trade] Falha ao persistir contadores: {e}")
             saldo = consultar_saldo()
 
             # WAIT repetido não precisa de mensagem a cada ciclo; ações sempre são notificadas
@@ -1861,9 +2052,9 @@ def main():
 
     log(resumo_provedores())
     log(f"[Config] Binance {'DEMO' if BINANCE_USE_DEMO else 'REAL'} -> {BINANCE_BASE_URL} | TESTE_AUTO_DEMO={TESTE_AUTO_DEMO} | ciclo de trade {TEMPO_TRADE}s")
-    custo_rt = 2.0 * (TAXA_TAKER_PCT + SLIPPAGE_PCT)
+    custo_rt = _custo_total_taxas_pct()
     log(
-        f"[Config] Alavancagem máx {BINANCE_MAX_LEVERAGE}x | custo ida+volta ~{custo_rt:.2f}% | "
+        f"[Config] Alavancagem máx {BINANCE_MAX_LEVERAGE}x | margem {BINANCE_MARGEM_PCT*100:.1f}% | custo total est. ~{custo_rt:.2f}% | "
         f"stop {STOP_MIN_PCT}-{STOP_MAX_PCT}% | RR {ALVO_RR} | score mín {SCORE_MIN} | cooldown {COOLDOWN_ORDEM_SEG}s"
     )
 
