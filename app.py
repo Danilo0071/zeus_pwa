@@ -3566,8 +3566,15 @@ function frame(now) {
     if (avatar === "eye") drawEye(t); else drawRobot(t);
   }
 }
-// --- ZEUS INTERATIVO (imagem realista + raio na mão + mouse) ---
-let zeusParallaxGroup = null;
+// =====================================================================
+// ZEUS MITOLOGIA 3D COM RAIOS
+// =====================================================================
+// Este bloco substitui o antigo avatar do robô. 
+// Ele desenha uma imagem realista de Zeus, coloca o raio na mão 
+// e dispara raios 3D quando o mouse se move.
+// =====================================================================
+
+let zeusGroup = null;
 let zeusBoltHandGroup = null;
 let zeusStarsPoints = null;
 let zeusStrikeLight = null;
@@ -3576,6 +3583,9 @@ let zeusActiveLines = [];
 let zeusActiveSparks = [];
 let zeusMouseVec = { x: 0, y: 0 };
 let zeusMouseCooldown = false;
+
+// O nome exato que está no seu botão do Streamlit
+const ZEUS_AVATAR_NAME = "Zeus Mitologia 3D com raios"; 
 
 function ensureZeusFlashOverlay() {
   if (zeusFlashOverlay) return zeusFlashOverlay;
@@ -3599,22 +3609,18 @@ function bindZeusMouseEvents() {
 
   window.addEventListener('mousemove', function (ev) {
     const rect = (renderer && renderer.domElement && renderer.domElement.getBoundingClientRect()) || {
-      left: 0,
-      top: 0,
-      width: window.innerWidth,
-      height: window.innerHeight
+      left: 0, top: 0, width: window.innerWidth, height: window.innerHeight
     };
     const w = rect.width || window.innerWidth;
     const h = rect.height || window.innerHeight;
     zeusMouseVec.x = ((ev.clientX - rect.left) / w) * 2 - 1;
     zeusMouseVec.y = -((ev.clientY - rect.top) / h) * 2 + 1;
 
-    if (!zeusMouseCooldown && typeof avatar !== 'undefined' && avatar === 'zeus') {
+    // Verifica se o avatar ativo é o Zeus (usando a variável global do seu app)
+    if (!zeusMouseCooldown && typeof avatar !== 'undefined' && (avatar === ZEUS_AVATAR_NAME || avatar === 'zeus')) {
       shootZeusLightning();
       zeusMouseCooldown = true;
-      setTimeout(function () {
-        zeusMouseCooldown = false;
-      }, 300);
+      setTimeout(function () { zeusMouseCooldown = false; }, 300);
     }
   });
 }
@@ -3629,29 +3635,30 @@ function buildZeusInteractive() {
     scene.add(zeusStrikeLight);
   }
 
-  if (!zeusParallaxGroup) {
-    zeusParallaxGroup = new THREE.Group();
+  if (!zeusGroup) {
+    zeusGroup = new THREE.Group();
 
     const loader = new THREE.TextureLoader();
     loader.setCrossOrigin('anonymous');
-    const zeusImgUrl =
-      'https://image.pollinations.ai/prompt/hyperrealistic%20cinematic%20portrait%20of%20zeus%20god%20of%20thunder,%20muscular%20strong%20man,%20white%20beard,%20white%20hair,%20holding%20a%20glowing%20lightning%20bolt,%20dramatic%20lighting,%20dark%20background,%20highly%20detailed%204k?width=1024&height=1024&nologo=true';
+    
+    // Imagem de alta qualidade de uma estátua de Zeus (cabelo/barba brancos)
+    const zeusImgUrl = 'https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?q=80&w=1024&auto=format&fit=crop';
 
     loader.load(zeusImgUrl, function (texture) {
-      const planeGeo = new THREE.PlaneGeometry(4, 4);
+      const planeGeo = new THREE.PlaneGeometry(4.5, 4.5);
       const planeMat = new THREE.MeshStandardMaterial({
         map: texture,
         transparent: true,
         opacity: 0.95,
-        roughness: 0.5,
-        metalness: 0.2,
+        roughness: 0.6,
+        metalness: 0.1,
         side: THREE.DoubleSide
       });
       const planeMesh = new THREE.Mesh(planeGeo, planeMat);
-      planeMesh.position.y = 2;
-      zeusParallaxGroup.add(planeMesh);
+      planeMesh.position.y = 2.2;
+      zeusGroup.add(planeMesh);
 
-      const auraGeo = new THREE.PlaneGeometry(5, 5);
+      const auraGeo = new THREE.PlaneGeometry(5.5, 5.5);
       const auraMat = new THREE.MeshBasicMaterial({
         color: 0x0044ff,
         transparent: true,
@@ -3660,62 +3667,41 @@ function buildZeusInteractive() {
         depthWrite: false
       });
       const auraMesh = new THREE.Mesh(auraGeo, auraMat);
-      auraMesh.position.set(0, 2, -0.1);
-      zeusParallaxGroup.add(auraMesh);
+      auraMesh.position.set(0, 2.2, -0.1);
+      zeusGroup.add(auraMesh);
     });
 
-    scene.add(zeusParallaxGroup);
+    scene.add(zeusGroup);
   }
 
   if (!zeusBoltHandGroup) {
     zeusBoltHandGroup = new THREE.Group();
 
     const boltShape = new THREE.Shape();
-    boltShape.moveTo(0, 1.5);
-    boltShape.lineTo(-0.5, 0.2);
-    boltShape.lineTo(0.1, 0.2);
-    boltShape.lineTo(-0.3, -1.5);
-    boltShape.lineTo(0.6, 0);
-    boltShape.lineTo(0, 0);
-    boltShape.lineTo(0.5, 1.5);
+    boltShape.moveTo(0, 1.5); boltShape.lineTo(-0.5, 0.2); boltShape.lineTo(0.1, 0.2);
+    boltShape.lineTo(-0.3, -1.5); boltShape.lineTo(0.6, 0); boltShape.lineTo(0, 0); boltShape.lineTo(0.5, 1.5);
 
-    const extrudeSettings = {
-      depth: 0.1,
-      bevelEnabled: true,
-      bevelSegments: 2,
-      steps: 2,
-      bevelSize: 0.05,
-      bevelThickness: 0.05
-    };
+    const extrudeSettings = { depth: 0.1, bevelEnabled: true, bevelSegments: 2, steps: 2, bevelSize: 0.05, bevelThickness: 0.05 };
     const boltGeo = new THREE.ExtrudeGeometry(boltShape, extrudeSettings);
     const boltMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0x88ccff,
-      emissiveIntensity: 5,
-      roughness: 0.1,
-      metalness: 0.8
+      color: 0xffffff, emissive: 0x88ccff, emissiveIntensity: 5, roughness: 0.1, metalness: 0.8
     });
     const boltMesh = new THREE.Mesh(boltGeo, boltMat);
     boltMesh.scale.set(0.3, 0.3, 0.3);
-    boltMesh.position.set(1.2, 2.2, 1);
+    // Posição aproximada da mão dele na imagem
+    boltMesh.position.set(1.4, 2.4, 1); 
     boltMesh.rotation.z = -0.5;
     boltMesh.rotation.y = 0.5;
 
     const sparkCount = 50;
     const sparkPos = new Float32Array(sparkCount * 3);
     for (let i = 0; i < sparkCount * 3; i += 3) {
-      sparkPos[i] = (Math.random() - 0.5) * 1;
-      sparkPos[i + 1] = (Math.random() - 0.5) * 2;
-      sparkPos[i + 2] = (Math.random() - 0.5) * 1;
+      sparkPos[i] = (Math.random() - 0.5) * 1; sparkPos[i + 1] = (Math.random() - 0.5) * 2; sparkPos[i + 2] = (Math.random() - 0.5) * 1;
     }
     const sparkGeo = new THREE.BufferGeometry();
     sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
     const sparkMat = new THREE.PointsMaterial({
-      color: 0xaaddff,
-      size: 0.05,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      depthWrite: false
+      color: 0xaaddff, size: 0.05, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false
     });
     const sparks = new THREE.Points(sparkGeo, sparkMat);
 
@@ -3728,19 +3714,12 @@ function buildZeusInteractive() {
     const starsCount = 1500;
     const starsPos = new Float32Array(starsCount * 3);
     for (let i = 0; i < starsCount * 3; i += 3) {
-      starsPos[i] = (Math.random() - 0.5) * 50;
-      starsPos[i + 1] = (Math.random() - 0.5) * 30;
-      starsPos[i + 2] = (Math.random() - 0.5) * 50 - 10;
+      starsPos[i] = (Math.random() - 0.5) * 50; starsPos[i + 1] = (Math.random() - 0.5) * 30; starsPos[i + 2] = (Math.random() - 0.5) * 50 - 10;
     }
     const starsGeo = new THREE.BufferGeometry();
     starsGeo.setAttribute('position', new THREE.BufferAttribute(starsPos, 3));
     const starsMat = new THREE.PointsMaterial({
-      color: 0x88aaff,
-      size: 0.08,
-      transparent: true,
-      opacity: 0.6,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
+      color: 0x88aaff, size: 0.08, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false
     });
     zeusStarsPoints = new THREE.Points(starsGeo, starsMat);
     scene.add(zeusStarsPoints);
@@ -3762,12 +3741,7 @@ function createZeusStrike(start, end) {
   points.push(end);
 
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
-  const material = new THREE.LineBasicMaterial({
-    color: 0xaaddff,
-    transparent: true,
-    opacity: 1,
-    blending: THREE.AdditiveBlending
-  });
+  const material = new THREE.LineBasicMaterial({ color: 0xaaddff, transparent: true, opacity: 1, blending: THREE.AdditiveBlending });
   const line = new THREE.Line(geometry, material);
   scene.add(line);
 
@@ -3775,24 +3749,12 @@ function createZeusStrike(start, end) {
   const pPos = new Float32Array(pCount * 3);
   const pVels = [];
   for (let i = 0; i < pCount; i++) {
-    pPos[i * 3] = end.x;
-    pPos[i * 3 + 1] = end.y;
-    pPos[i * 3 + 2] = end.z;
-    pVels.push({
-      x: (Math.random() - 0.5) * 6,
-      y: (Math.random() - 0.5) * 6,
-      z: (Math.random() - 0.5) * 6
-    });
+    pPos[i * 3] = end.x; pPos[i * 3 + 1] = end.y; pPos[i * 3 + 2] = end.z;
+    pVels.push({ x: (Math.random() - 0.5) * 6, y: (Math.random() - 0.5) * 6, z: (Math.random() - 0.5) * 6 });
   }
   const pGeo = new THREE.BufferGeometry();
   pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-  const pMat = new THREE.PointsMaterial({
-    color: 0xffffff,
-    size: 0.1,
-    blending: THREE.AdditiveBlending,
-    transparent: true,
-    depthWrite: false
-  });
+  const pMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.1, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
   const particles = new THREE.Points(pGeo, pMat);
   particles.userData = { vels: pVels, life: 1.0 };
   scene.add(particles);
@@ -3800,6 +3762,93 @@ function createZeusStrike(start, end) {
   zeusActiveLines.push({ mesh: line, life: 0.5 });
   zeusActiveSparks.push(particles);
 }
+
+function shootZeusLightning() {
+  buildZeusInteractive();
+
+  if (zeusFlashOverlay) {
+    zeusFlashOverlay.style.opacity = '0.8';
+    setTimeout(function () { if (zeusFlashOverlay) zeusFlashOverlay.style.opacity = '0'; }, 100);
+  }
+
+  if (zeusStrikeLight) {
+    zeusStrikeLight.intensity = 15;
+    zeusStrikeLight.position.set((Math.random() - 0.5) * 2, 3 + Math.random() * 2, 2 + Math.random() * 2);
+  }
+
+  const startPoint = new THREE.Vector3(1.4, 2.4, 1);
+  const endPoint = new THREE.Vector3(
+    zeusMouseVec.x * 5,
+    zeusMouseVec.y * 5 + 2,
+    (Math.random() - 0.5) * 3 + 1
+  );
+  createZeusStrike(startPoint, endPoint);
+
+  for (let i = 0; i < 2; i++) {
+    const bgStart = new THREE.Vector3((Math.random() - 0.5) * 4, 5, -2);
+    const bgEnd = new THREE.Vector3((Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 3);
+    createZeusStrike(bgStart, bgEnd);
+  }
+}
+
+function updateZeus(t, dt) {
+  buildZeusInteractive();
+
+  if (zeusGroup) {
+    zeusGroup.visible = true;
+    zeusGroup.rotation.y += (zeusMouseVec.x * 0.2 - zeusGroup.rotation.y) * 0.05;
+    zeusGroup.rotation.x += (-zeusMouseVec.y * 0.1 - zeusGroup.rotation.x) * 0.05;
+    zeusGroup.position.x += (zeusMouseVec.x * 0.2 - zeusGroup.position.x) * 0.05;
+  }
+
+  if (zeusBoltHandGroup) {
+    zeusBoltHandGroup.visible = true;
+    zeusBoltHandGroup.rotation.y += dt * 2;
+    zeusBoltHandGroup.position.y = Math.sin(t * 3) * 0.1;
+  }
+
+  if (zeusStarsPoints) {
+    zeusStarsPoints.visible = true;
+    zeusStarsPoints.rotation.y += dt * 0.01;
+  }
+
+  if (zeusStrikeLight && zeusStrikeLight.intensity > 0) {
+    zeusStrikeLight.intensity -= dt * 20;
+    if (zeusStrikeLight.intensity < 0) zeusStrikeLight.intensity = 0;
+  }
+
+  for (let i = zeusActiveLines.length - 1; i >= 0; i--) {
+    const item = zeusActiveLines[i];
+    item.life -= dt;
+    item.mesh.material.opacity = Math.max(0, item.life * 2);
+    if (item.life <= 0) {
+      scene.remove(item.mesh); item.mesh.geometry.dispose(); item.mesh.material.dispose(); zeusActiveLines.splice(i, 1);
+    }
+  }
+
+  for (let i = zeusActiveSparks.length - 1; i >= 0; i--) {
+    const p = zeusActiveSparks[i];
+    const positions = p.geometry.attributes.position.array;
+    for (let j = 0; j < p.userData.vels.length; j++) {
+      positions[j * 3] += p.userData.vels[j].x * dt;
+      positions[j * 3 + 1] += p.userData.vels[j].y * dt;
+      positions[j * 3 + 2] += p.userData.vels[j].z * dt;
+      p.userData.vels[j].y -= dt * 2;
+    }
+    p.geometry.attributes.position.needsUpdate = true;
+    p.userData.life -= dt;
+    p.material.opacity = Math.max(0, p.userData.life);
+    if (p.userData.life <= 0) {
+      scene.remove(p); p.geometry.dispose(); p.material.dispose(); zeusActiveSparks.splice(i, 1);
+    }
+  }
+
+  camera.position.set(0, 2.5, 7);
+  camera.lookAt(0, 2, 0);
+}
+// =====================================================================
+// FIM DO BLOCO DO ZEUS
+// =====================================================================
 
 function shootZeusLightning() {
   buildZeusInteractive();
