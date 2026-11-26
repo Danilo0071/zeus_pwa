@@ -4092,137 +4092,8 @@ def zf_tocar_musica(nome_musica: str) -> str:
 # ------------------------------------------------------------
 # 5. INTERFACE (tela principal, nao escondida na sidebar)
 # ------------------------------------------------------------
-VOZES_ZEUS_AMPLIADAS = {
-    "Antonio - Masculino grave (pt-BR)": "pt-BR-AntonioNeural",
-    "Francisca - Feminina natural (pt-BR)": "pt-BR-FranciscaNeural",
-    "Thalita - Feminina jovem (pt-BR)": "pt-BR-ThalitaNeural",
-    "Donato - Masculino calmo (pt-BR)": "pt-BR-DonatoNeural",
-    "Leila - Feminina clara (pt-BR)": "pt-BR-LeilaNeural",
-    "Manuela - Feminina suave (pt-BR)": "pt-BR-ManuelaNeural",
-    "Fabio - Masculino firme (pt-BR)": "pt-BR-FabioNeural",
-    "Humberto - Masculino locutor (pt-BR)": "pt-BR-HumbertoNeural",
-    "Nicolau - Masculino sereno (pt-BR)": "pt-BR-NicolauNeural",
-    "Valerio - Masculino direto (pt-BR)": "pt-BR-ValerioNeural",
-    "Yara - Feminina expressiva (pt-BR)": "pt-BR-YaraNeural",
-    "Christopher - Masculino (en-US)": "en-US-ChristopherNeural",
-    "Guy - Masculino narrador (en-US)": "en-US-GuyNeural",
-    "Jenny - Feminina (en-US)": "en-US-JennyNeural",
-    "Aria - Feminina dinamica (en-US)": "en-US-AriaNeural",
-    "Steffan - Masculino claro (en-US)": "en-US-SteffanNeural",
-    "Alvaro - Masculino (es-ES)": "es-ES-AlvaroNeural",
-    "Elvira - Feminina (es-ES)": "es-ES-ElviraNeural",
-    "Jorge - Masculino (es-MX)": "es-MX-JorgeNeural",
-    "Dalia - Feminina (es-MX)": "es-MX-DaliaNeural",
-}
-
-
-def _zf_mapa_vozes():
-    mapa = dict(VOZES_ZEUS_AMPLIADAS)
-    fn_vozes = globals().get("listar_todas_vozes_edge") or globals().get("listar_vozes_edge")
-    if callable(fn_vozes):
-        try:
-            extras = fn_vozes()
-            if isinstance(extras, dict):
-                for rotulo, voz_id in extras.items():
-                    if rotulo and voz_id:
-                        mapa[str(rotulo)] = str(voz_id)
-        except Exception:
-            pass
-    return mapa
-
-
-def _zf_gerar_audio(texto, voz_id):
-    texto_limpo = " ".join(str(texto or "").split()).strip()
-    if not texto_limpo:
-        return None, None
-    texto_curto = texto_limpo[:900]
-
-    fn_falar = globals().get("zf_falar")
-    if callable(fn_falar):
-        for voz_tentativa in (voz_id, "pt-BR-AntonioNeural", "pt-BR-FranciscaNeural"):
-            try:
-                audio = fn_falar(texto_curto, voz_tentativa)
-                if audio:
-                    return audio, "audio/mp3"
-            except Exception:
-                continue
-
-    try:
-        from io import BytesIO
-        from gtts import gTTS
-
-        buf = BytesIO()
-        gTTS(text=texto_curto, lang="pt").write_to_fp(buf)
-        buf.seek(0)
-        dados = buf.read()
-        if dados:
-            return dados, "audio/mpeg"
-    except Exception:
-        pass
-
-    return None, None
-
-
-def _zf_falar_resposta(texto, voz_id, chave_id=""):
-    audio_bytes, mime = _zf_gerar_audio(texto, voz_id)
-    if audio_bytes and mime:
-        st.audio(audio_bytes, format=mime, autoplay=True)
-        return
-
-    import streamlit.components.v1 as components
-    texto_js = str(texto or "")[:700].replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
-    components.html(
-        f"""
-        <script>
-        (function() {{
-            if (!('speechSynthesis' in window)) return;
-            try {{
-                window.speechSynthesis.cancel();
-                const u = new SpeechSynthesisUtterance('{texto_js}');
-                u.lang = 'pt-BR';
-                u.rate = 1.02;
-                window.speechSynthesis.speak(u);
-            }} catch (e) {{}}
-        }})();
-        </script>
-        <div style="font-size:12px;color:#9ab;">Fala via navegador acionada ({str(chave_id)[-6:]}).</div>
-        """,
-        height=32,
-    )
-
-
-def _zf_transcrever_voz(audio_bytes, nome_arq="fala.wav"):
-    if not audio_bytes:
-        return "", "Audio vazio ou nao capturado. Tente falar novamente."
-
-    oai_key = ""
-    try:
-        oai_key = str(st.secrets.get("OPENAI_API_KEY") or "").strip()
-    except Exception:
-        oai_key = ""
-
-    if not oai_key:
-        return "", "Falta OPENAI_API_KEY nos Secrets para transcrever a voz."
-
-    try:
-        from openai import OpenAI
-
-        cli = OpenAI(api_key=oai_key)
-        tr = cli.audio.transcriptions.create(
-            model="whisper-1",
-            file=(nome_arq, audio_bytes, "audio/wav"),
-            language="pt",
-        )
-        txt = (getattr(tr, "text", "") or "").strip()
-        if not txt:
-            return "", "Nao entendi o que foi falado."
-        return txt, ""
-    except Exception as e:
-        return "", f"Erro na voz: {str(e)[:100]}"
-
-
 def zf_html_zeus_3d():
-    """Avatar 3D realista de Zeus mitologico com raios nas maos (Three.js)."""
+    """Avatar 3D realista de Zeus mitológico com raios nas mãos (Three.js)."""
     return """
 <!DOCTYPE html>
 <html>
@@ -4258,15 +4129,18 @@ scene.add(glow);
 const group = new THREE.Group();
 scene.add(group);
 
+// Corpo / torso
 const torsoMat = new THREE.MeshStandardMaterial({color:0xc4a574, metalness:0.15, roughness:0.55});
 const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 1.3, 16), torsoMat);
 torso.position.y = 0.9;
 group.add(torso);
 
+// Cabeça
 const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 24, 24), torsoMat);
 head.position.y = 1.85;
 group.add(head);
 
+// Cabelo / barba branca
 const hairMat = new THREE.MeshStandardMaterial({color:0xf0f0f5, metalness:0.05, roughness:0.7});
 const hair = new THREE.Mesh(new THREE.SphereGeometry(0.48, 16, 16), hairMat);
 hair.position.y = 2.05;
@@ -4277,12 +4151,14 @@ beard.position.set(0, 1.55, 0.28);
 beard.rotation.x = Math.PI;
 group.add(beard);
 
+// Olhos brilhantes
 const eyeMat = new THREE.MeshBasicMaterial({color:0x00eeff});
 const le = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), eyeMat);
 le.position.set(-0.14, 1.88, 0.36);
 const re = le.clone(); re.position.x = 0.14;
 group.add(le, re);
 
+// Braços
 const armMat = new THREE.MeshStandardMaterial({color:0xb8956a, metalness:0.1, roughness:0.6});
 const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.1, 10), armMat);
 armL.position.set(-0.85, 1.15, 0.1);
@@ -4292,18 +4168,21 @@ armR.position.set(0.85, 1.15, 0.1);
 armR.rotation.z = -0.55;
 group.add(armL, armR);
 
+// Raios (raios dourados nas mãos)
 function makeBolt(x, y, z, rotZ) {
   const boltGroup = new THREE.Group();
   const boltMat = new THREE.MeshBasicMaterial({color:0xffee55, transparent:true, opacity:0.95});
   const core = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.02, 1.3, 6), boltMat);
   core.position.y = 0.65;
   boltGroup.add(core);
+  // ramificações
   for (let i=0; i<4; i++) {
     const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.01, 0.45, 5), boltMat);
     branch.position.set((i%2===0?0.12:-0.12), 0.4 + i*0.22, 0);
     branch.rotation.z = (i%2===0?0.6:-0.6);
     boltGroup.add(branch);
   }
+  // glow
   const glowMesh = new THREE.Mesh(
     new THREE.SphereGeometry(0.25, 12, 12),
     new THREE.MeshBasicMaterial({color:0xffcc00, transparent:true, opacity:0.25})
@@ -4319,6 +4198,7 @@ const boltL = makeBolt(-1.35, 0.7, 0.2, 0.4);
 const boltR = makeBolt(1.35, 0.7, 0.2, -0.4);
 group.add(boltL, boltR);
 
+// Anel de energia
 const ring = new THREE.Mesh(
   new THREE.TorusGeometry(1.6, 0.03, 12, 64),
   new THREE.MeshBasicMaterial({color:0x00ffff, transparent:true, opacity:0.6})
@@ -4354,17 +4234,13 @@ animate();
 </html>
 """
 
-
 def zf_render_painel():
-    vozes_disp = _zf_mapa_vozes()
-    st.session_state.setdefault("zf_voz_nome", list(vozes_disp.keys())[0])
-
     with st.container(border=True):
         col_av, col_cfg = st.columns([1, 2])
         with col_av:
             nome_avatar = st.session_state.get("zf_avatar_nome", list(ZF_AVATARES.keys())[-1])
-            avatar_val = ZF_AVATARES.get(nome_avatar, ZF_AVATARES.get("3D", ZF_AVATAR_SUPREMO))
-            if avatar_val == ZF_AVATARES.get("3D"):
+            avatar_val = ZF_AVATARES.get(nome_avatar, ZF_AVATAR_SUPREMO)
+            if avatar_val == ZF_AVATAR_3D_FLAG:
                 import streamlit.components.v1 as components
                 components.html(zf_html_zeus_3d(), height=280, width=280)
             else:
@@ -4373,58 +4249,21 @@ def zf_render_painel():
             nome_avatar = st.selectbox("Preview do painel (não controla a tela principal)", list(ZF_AVATARES.keys()), key="zf_avatar_nome")
             st.session_state.zeus_avatar_ativo = ZF_AVATARES[nome_avatar]
 
+            fn_vozes = globals().get("listar_todas_vozes_edge") or globals().get("listar_vozes_edge")
+            vozes_disp = fn_vozes() if fn_vozes else globals().get("FALLBACK_VOZES", {"Francisca (pt-BR)": "pt-BR-FranciscaNeural"})
+
             filtro_voz = st.text_input("Filtrar vozes (ex: pt-BR, en-US)", key="zf_filtro_voz")
             vozes_filtradas = {k: v for k, v in vozes_disp.items() if filtro_voz.lower() in k.lower()} if filtro_voz else vozes_disp
             if not vozes_filtradas:
                 vozes_filtradas = vozes_disp
 
-            nomes_lista = list(vozes_filtradas.keys())
-            idx_atual = nomes_lista.index(st.session_state["zf_voz_nome"]) if st.session_state.get("zf_voz_nome") in nomes_lista else 0
-            nome_voz = st.selectbox("Voz do Zeus", nomes_lista, index=idx_atual, key="zf_voz_nome")
-            voz_ativa = vozes_filtradas[nome_voz]
-            st.session_state.zf_voz_ativa = voz_ativa
+            nome_voz = st.selectbox("Voz do Zeus", list(vozes_filtradas.keys()), key="zf_voz_nome")
+            st.session_state.zf_voz_ativa = vozes_filtradas[nome_voz]
 
             if st.button("Ouvir previa", key="zf_btn_previa"):
                 with st.spinner("Gerando previa..."):
-                    audio_prev, mime_prev = _zf_gerar_audio(
-                        f"Ola, Danilo. Eu sou Zeus na voz {nome_voz.split(' - ')[0].strip()}.",
-                        voz_ativa,
-                    )
-                if audio_prev and mime_prev:
-                    st.audio(audio_prev, format=mime_prev, autoplay=True)
-                else:
-                    _zf_falar_resposta("Ola, Danilo. Eu sou Zeus.", voz_ativa, "previa")
-
-        if hasattr(st, "audio_input"):
-            audio_chat = st.audio_input("Falar com o Zeus (celular ou PC)", key="zf_chat_voz_mic")
-            if audio_chat is not None:
-                audio_bytes = audio_chat.getvalue()
-                audio_hash = hash(audio_bytes)
-                if st.session_state.get("zf_last_chat_mic_hash") != audio_hash:
-                    st.session_state.zf_last_chat_mic_hash = audio_hash
-                    with st.spinner("Ouvindo e interpretando..."):
-                        cmd_fala, erro_fala = _zf_transcrever_voz(audio_bytes, "conversa.wav")
-                    if erro_fala:
-                        st.toast(erro_fala, icon="⚠️")
-                    else:
-                        st.session_state.setdefault("messages", [])
-                        st.session_state.messages.append({"role": "user", "content": cmd_fala})
-                        fn_proc = globals().get("processar_prompt")
-                        if callable(fn_proc):
-                            with st.spinner("Respondendo..."):
-                                resp_fala = str(fn_proc(cmd_fala) or "Entendido, Danilo.")
-                        else:
-                            resp_fala = f"Recebi: {cmd_fala}"
-                        st.session_state.messages.append({"role": "assistant", "content": resp_fala})
-                        st.rerun()
-
-        msgs = st.session_state.get("messages") or []
-        if msgs and msgs[-1].get("role") == "assistant":
-            ultimo_resp = str(msgs[-1].get("content", "")).strip()
-            chave_resp = f"{len(msgs)}:{hash(ultimo_resp[:240])}"
-            if ultimo_resp and st.session_state.get("zf_ultima_fala_key") != chave_resp:
-                st.session_state.zf_ultima_fala_key = chave_resp
-                _zf_falar_resposta(ultimo_resp, st.session_state.get("zf_voz_ativa", "pt-BR-AntonioNeural"), chave_resp)
+                    audio_prev = zf_falar("Ola, Danilo. Eu sou Zeus.", vozes_filtradas[nome_voz])
+                st.audio(audio_prev, format="audio/mp3") if audio_prev else st.error("Nao consegui gerar o audio.")
 
     with st.sidebar:
         st.divider()
@@ -4461,7 +4300,7 @@ def zf_render_painel():
             if imgs:
                 st.image(imgs[0]["url"], use_container_width=True)
             artistas = ", ".join(a.get("name", "") for a in item.get("artists", []))
-            st.markdown(f"*{item.get('name', '')}*")
+            st.markdown(f"**{item.get('name', '')}**")
             if artistas:
                 st.caption(artistas)
 
@@ -4475,26 +4314,36 @@ def zf_render_painel():
                 if st.session_state.get("zf_sp_last_mic_hash") != audio_hash:
                     st.session_state.zf_sp_last_mic_hash = audio_hash
                     with st.spinner("Ouvindo pedido..."):
-                        _cmd_txt, _err_sp = _zf_transcrever_voz(audio_bytes, "pedido.wav")
-                        if _err_sp:
-                            st.toast(_err_sp, icon="⚠️")
-                        else:
-                            _termo_voz = _re_zf.sub(
-                                r"\b(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)\b",
-                                "",
-                                _cmd_txt.lower(),
-                            ).strip(" .,!?:-")
-                            if _termo_voz:
-                                res_voz = zf_tocar_musica(_termo_voz)
-                                st.toast(res_voz, icon="🎵")
-                                _zf_falar_resposta(res_voz, st.session_state.get("zf_voz_ativa", "pt-BR-AntonioNeural"), audio_hash)
-                                st.rerun()
+                        try:
+                            from openai import OpenAI as _OpenAI_SP
+                            _oai_key = st.secrets.get("OPENAI_API_KEY")
+                            if _oai_key:
+                                _cli_oai = _OpenAI_SP(api_key=_oai_key)
+                                _tr = _cli_oai.audio.transcriptions.create(
+                                    model="whisper-1",
+                                    file=("pedido.wav", audio_bytes, "audio/wav"),
+                                    language="pt",
+                                )
+                                _cmd_txt = (_tr.text or "").strip()
+                                _termo_voz = _re_zf.sub(
+                                    r"\b(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)\b",
+                                    "",
+                                    _cmd_txt.lower(),
+                                ).strip(" .,!?:-")
+                                if _termo_voz:
+                                    res_voz = zf_tocar_musica(_termo_voz)
+                                    st.toast(res_voz, icon="🎵")
+                                    st.rerun()
+                                else:
+                                    st.toast("Nao entendi o nome da musica.", icon="⚠️")
                             else:
-                                st.toast("Nao entendi o nome da musica.", icon="⚠️")
+                                st.toast("Falta OPENAI_API_KEY nos Secrets.", icon="⚠️")
+                        except Exception as _e_mic:
+                            st.toast(f"Erro na voz: {str(_e_mic)[:90]}", icon="⚠️")
 
         c_sp1, c_sp2, c_sp3, c_sp4 = st.columns(4)
         with c_sp1:
-            if st.button("▶️", key="zf_btn_tocar", use_container_width=True, help="Tocar musica digitada"):
+            if st.button("▶", key="zf_btn_tocar", use_container_width=True, help="Tocar musica digitada"):
                 if musica_input.strip():
                     with st.spinner("Buscando..."):
                         res_sp = zf_tocar_musica(musica_input.strip())
@@ -4503,7 +4352,7 @@ def zf_render_painel():
                 else:
                     st.toast("Digite a musica.", icon="⚠️")
         with c_sp2:
-            if st.button("⏮️", key="zf_btn_sp_prev", use_container_width=True, help="Anterior"):
+            if st.button("⏮", key="zf_btn_sp_prev", use_container_width=True, help="Anterior"):
                 try:
                     cli = sp_now or _zf_sp_cli()
                     if cli:
@@ -4512,7 +4361,7 @@ def zf_render_painel():
                 except Exception as e:
                     st.toast(str(e)[:90], icon="⚠️")
         with c_sp3:
-            if st.button("⏯️", key="zf_btn_sp_pause", use_container_width=True, help="Play / Pausa"):
+            if st.button("⏯", key="zf_btn_sp_pause", use_container_width=True, help="Play / Pausa"):
                 try:
                     cli = sp_now or _zf_sp_cli()
                     if cli:
@@ -4525,7 +4374,7 @@ def zf_render_painel():
                 except Exception as e:
                     st.toast(str(e)[:90], icon="⚠️")
         with c_sp4:
-            if st.button("⏭️", key="zf_btn_sp_next", use_container_width=True, help="Proxima"):
+            if st.button("⏭", key="zf_btn_sp_next", use_container_width=True, help="Proxima"):
                 try:
                     cli = sp_now or _zf_sp_cli()
                     if cli:
@@ -4622,6 +4471,41 @@ def zf_render_painel():
                         st.write(chr(10).join(log_midia))
                 else:
                     st.warning("Descreva o que deseja gerar.")
+
+
+def zf_interceptar_musica():
+    msgs = st.session_state.get("messages")
+    if not msgs:
+        return
+    ultima = msgs[-1]
+    if ultima.get("role") != "user":
+        return
+    texto = str(ultima.get("content", "")).lower()
+    if not any(p in texto for p in ("toca ", "tocar ", "toque ", "spotify", "musica ")):
+        return
+    if st.session_state.get("zf_ultima_musica") == ultima["content"]:
+        return
+
+    termo = _re_zf.sub(
+        r"\b(zeus|por favor|toca|tocar|toque|a musica|musica|no spotify|spotify)\b", "", texto
+    ).strip(" .,!?:-")
+    st.session_state.zf_ultima_musica = ultima["content"]
+    if not termo:
+        return
+
+    with st.spinner(f"Buscando {termo}..."):
+        resultado = zf_tocar_musica(termo)
+    st.toast(resultado, icon="🎵")
+    st.session_state.messages.append({"role": "assistant", "content": resultado})
+    st.rerun()
+
+
+try:
+    zf_render_painel()
+    zf_interceptar_musica()
+except Exception as _zf_err:
+    st.caption("Zeus Final desativado por erro: " + str(_zf_err)[:200])
+
 
 
 # ============================================================
