@@ -3566,6 +3566,136 @@ function frame(now) {
     if (avatar === "eye") drawEye(t); else drawRobot(t);
   }
 }
+// --- ZEUS APRIMORADO (dentro do #three-box junto ao chat e voz) ---
+let zeusOlimpoGroup = null, zeusLight = null, zeusBolts = [], zeusSparks = [];
+let zeusAngleIdx = 0;
+const zeusAngles = [
+  { pos: [2, 2.2, 6.5], look: [0, 0.8, 0] },
+  { pos: [4.5, 1.8, 4.2], look: [0, 0.7, 0] },
+  { pos: [0, 3.2, 6.0], look: [0, 1.0, 0] },
+  { pos: [-3.5, 1.6, 5.2], look: [0, 0.7, 0] }
+];
+
+function buildZeusOlimpo() {
+  if (zeusOlimpoGroup || !HAS3) return;
+  zeusOlimpoGroup = new THREE.Group();
+  zeusOlimpoGroup.visible = false;
+
+  const ac = new THREE.Color(PAL[palIdx] || "#00e5ff");
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.68, 32, 32),
+    new THREE.MeshStandardMaterial({ color: 0xffe6a3, emissive: ac, emissiveIntensity: 1.4, roughness: 0.25, metalness: 0.2 })
+  );
+  core.position.y = 0.9;
+  zeusOlimpoGroup.add(core);
+
+  const halo1 = new THREE.Mesh(
+    new THREE.TorusGeometry(1.15, 0.035, 20, 64),
+    new THREE.MeshBasicMaterial({ color: ac, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending })
+  );
+  halo1.position.y = 0.9;
+  halo1.rotation.x = Math.PI / 2.4;
+  zeusOlimpoGroup.add(halo1);
+
+  const halo2 = new THREE.Mesh(
+    new THREE.TorusGeometry(0.92, 0.025, 16, 48),
+    new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.65, blending: THREE.AdditiveBlending })
+  );
+  halo2.position.y = 0.9;
+  halo2.rotation.y = Math.PI / 3;
+  zeusOlimpoGroup.add(halo2);
+
+  const pCount = 260, pArr = new Float32Array(pCount * 3);
+  for (let i = 0; i < pCount; i++) {
+    const r = 1.3 + Math.random() * 1.8;
+    const th = Math.random() * Math.PI * 2;
+    const ph = Math.acos(2 * Math.random() - 1);
+    pArr[i * 3] = Math.sin(ph) * Math.cos(th) * r;
+    pArr[i * 3 + 1] = Math.sin(ph) * Math.sin(th) * r + 0.9;
+    pArr[i * 3 + 2] = Math.cos(ph) * r;
+  }
+  const pGeo = new THREE.BufferGeometry();
+  pGeo.setAttribute("position", new THREE.BufferAttribute(pArr, 3));
+  const cloud = new THREE.Points(pGeo, new THREE.PointsMaterial({
+    color: 0xaaddff, size: 0.06, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false
+  }));
+  zeusOlimpoGroup.add(cloud);
+
+  zeusLight = new THREE.PointLight(0xaaccff, 0, 14);
+  zeusLight.position.set(0, 2.2, 2);
+  zeusOlimpoGroup.add(zeusLight);
+
+  zeusOlimpoGroup.userData = { core, halo1, halo2, cloud };
+  scene.add(zeusOlimpoGroup);
+}
+
+function spawnZeusBolt() {
+  if (!HAS3 || !zeusOlimpoGroup) return;
+  const start = new THREE.Vector3((Math.random() - 0.5) * 1.2, 1.2 + Math.random() * 0.8, (Math.random() - 0.5) * 1.2);
+  const end = new THREE.Vector3((Math.random() - 0.5) * 3.2, Math.random() > 0.4 ? 3.2 + Math.random() : -0.6 + Math.random() * 0.8, (Math.random() - 0.5) * 3.2);
+  const pts = [start];
+  for (let i = 1; i < 10; i++) {
+    const t = i / 10;
+    const m = new THREE.Vector3().lerpVectors(start, end, t);
+    const amp = 0.55 * Math.sin(t * Math.PI);
+    m.x += (Math.random() - 0.5) * amp;
+    m.y += (Math.random() - 0.5) * amp;
+    m.z += (Math.random() - 0.5) * amp;
+    pts.push(m);
+  }
+  pts.push(end);
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: 0xcce6ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending })
+  );
+  scene.add(line);
+  zeusBolts.push({ line, life: 0.45, maxLife: 0.45 });
+  if (zeusLight) zeusLight.intensity = 6;
+}
+
+function triggerZeusStorm() {
+  for (let i = 0; i < 4; i++) setTimeout(() => spawnZeusBolt(), i * 70);
+}
+
+function updateZeus(t, dt) {
+  if (!zeusOlimpoGroup) buildZeusOlimpo();
+  if (!zeusOlimpoGroup) return;
+  zeusOlimpoGroup.visible = true;
+  const ac = new THREE.Color(PAL[palIdx] || "#00e5ff");
+  const sp = state === "speaking", ls = state === "listening", th = state === "thinking";
+  const speed = th ? 1.4 : sp ? 0.8 : 0.35;
+
+  zeusOlimpoGroup.rotation.y += dt * speed;
+  zeusOlimpoGroup.userData.halo1.rotation.z += dt * (1.1 + (sp ? 1.5 : 0));
+  zeusOlimpoGroup.userData.halo2.rotation.x += dt * 0.9;
+  zeusOlimpoGroup.userData.cloud.rotation.y -= dt * 0.25;
+  zeusOlimpoGroup.userData.halo1.material.color.copy(ac);
+  zeusOlimpoGroup.userData.core.material.emissive.copy(ac);
+
+  const pulseScale = 1 + Math.sin(t * 4) * 0.05 + (sp ? 0.1 * Math.abs(Math.sin(t * 12)) : ls ? pulse * 0.12 : 0);
+  zeusOlimpoGroup.userData.core.scale.setScalar(pulseScale);
+
+  if (Math.random() < (sp ? 0.06 : th ? 0.04 : 0.012)) spawnZeusBolt();
+  if (zeusLight && zeusLight.intensity > 0) zeusLight.intensity = Math.max(0, zeusLight.intensity * 0.88 - 0.05);
+
+  for (let i = zeusBolts.length - 1; i >= 0; i--) {
+    const b = zeusBolts[i];
+    b.life -= dt;
+    b.line.material.opacity = Math.max(0, b.life / b.maxLife);
+    if (b.life <= 0) {
+      scene.remove(b.line);
+      b.line.geometry.dispose();
+      b.line.material.dispose();
+      zeusBolts.splice(i, 1);
+    }
+  }
+
+  const ang = zeusAngles[zeusAngleIdx];
+  camera.position.x += (ang.pos[0] + look.x * 0.8 - camera.position.x) * 0.08;
+  camera.position.y += (ang.pos[1] + look.y * 0.6 - camera.position.y) * 0.08;
+  camera.position.z += (ang.pos[2] - camera.position.z) * 0.08;
+  camera.lookAt(ang.look[0], ang.look[1], ang.look[2]);
+}
 requestAnimationFrame(frame);
 </script>
 </body>
