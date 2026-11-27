@@ -1388,7 +1388,7 @@ def main():
             else:
                 st.error("Falhou.")
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
 
 # >>> FIM DA PARTE 4 (fim do arquivo) <<<
