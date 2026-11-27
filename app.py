@@ -1055,89 +1055,187 @@ def render_pipeline_ui():
 # >>> FIM DA PARTE 3 <<<
 # >>> INÍCIO DA PARTE 4 <<<
 # ============================================================
-# 4 AVATARES THREE.JS (Olho, Esfera, Robô, Zeus)
+# 4 AVATARES THREE.JS (Olho, Esfera, Robô, Zeus) - CYBERPUNK
 # ============================================================
 _AVATAR_BASE = r"""
 <!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
-<style>html,body{margin:0;height:100%;background:#0b0f19;overflow:hidden;font-family:monospace}
-#c{width:100%;height:100%;display:block}
-.fb{color:#00ffcc;text-align:center;padding-top:35%;font-size:13px;display:none}</style>
-</head><body><canvas id="c"></canvas><div class="fb" id="fb">⚡ Avatar carregando...</div>
-<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<style>
+html,body{margin:0;height:100%;background:#0b0f19;overflow:hidden;font-family:monospace;display:flex;justify-content:center;align-items:center;color:#00ffcc;}
+#c{width:100%;height:100%;display:block;position:absolute;top:0;left:0;}
+.fb{position:relative;z-index:10;text-align:center;font-size:14px;text-shadow:0 0 10px #00ffcc;display:none;}
+</style>
+</head><body>
+<div class="fb" id="fb">⚡ Renderizando Avatar 3D...</div>
+<canvas id="c"></canvas>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function(){
   try{
-    if(typeof THREE==='undefined') throw new Error('THREE não carregou');
+    document.getElementById('fb').style.display='block';
+    if(typeof THREE==='undefined') throw new Error('Falha ao carregar Three.js');
+    
     const canvas=document.getElementById('c');
     const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
     renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
     const scene=new THREE.Scene();
     const camera=new THREE.PerspectiveCamera(45,1,0.1,100);
     camera.position.set(0,0,4.5);
-    scene.add(new THREE.AmbientLight(0x223344,1.4));
-    const key=new THREE.DirectionalLight(0x00ffcc,1.5); key.position.set(2,3,4); scene.add(key);
-    const rim=new THREE.DirectionalLight(0x0077ff,1.1); rim.position.set(-3,-1,2); scene.add(rim);
-    const MODE = "MODE";
-    let obj;
+    
+    scene.add(new THREE.AmbientLight(0x111122, 2));
+    const light1=new THREE.PointLight(0x00ffcc, 2, 10); light1.position.set(2,3,4); scene.add(light1);
+    const light2=new THREE.PointLight(0xff00ff, 2, 10); light2.position.set(-3,-1,2); scene.add(light2);
+    const light3=new THREE.DirectionalLight(0x0077ff, 1.5); light3.position.set(0,-3,-2); scene.add(light3);
+
+    const MODE = "_MODE_";
+    let obj = new THREE.Group();
+
     if(MODE==='eye'){
-      const g=new THREE.SphereGeometry(1.0,64,64);
-      const m=new THREE.MeshStandardMaterial({color:0xe8f0ff,roughness:0.3,metalness:0.2});
-      obj=new THREE.Mesh(g,m); scene.add(obj);
-      const iris=new THREE.Mesh(new THREE.CircleGeometry(0.45,64),
-        new THREE.MeshBasicMaterial({color:0x00ffcc})); iris.position.z=1.001; obj.add(iris);
-      const pup=new THREE.Mesh(new THREE.CircleGeometry(0.18,64),
-        new THREE.MeshBasicMaterial({color:0x000000})); pup.position.z=1.002; obj.add(pup);
+      const eyeBase = new THREE.Mesh(
+        new THREE.SphereGeometry(1.2, 64, 64),
+        new THREE.MeshStandardMaterial({color:0x222222, roughness:0.1, metalness:0.9})
+      );
+      obj.add(eyeBase);
+      const iris = new THREE.Mesh(
+        new THREE.TorusGeometry(0.5, 0.15, 32, 64),
+        new THREE.MeshStandardMaterial({color:0x00ffcc, emissive:0x00ffcc, emissiveIntensity:2})
+      );
+      iris.position.z = 1.1;
+      obj.add(iris);
+      const pupil = new THREE.Mesh(
+        new THREE.SphereGeometry(0.25, 32, 32),
+        new THREE.MeshBasicMaterial({color:0xffffff})
+      );
+      pupil.position.z = 1.15;
+      obj.add(pupil);
+      for(let i=0; i<8; i++){
+        const nerve = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.02, 0.02, 1.5, 8),
+          new THREE.MeshBasicMaterial({color:0x00ffcc})
+        );
+        nerve.position.set(Math.cos(i*Math.PI/4)*1.2, Math.sin(i*Math.PI/4)*1.2, 0);
+        nerve.rotation.z = i*Math.PI/4;
+        nerve.rotation.x = Math.PI/2;
+        obj.add(nerve);
+      }
     } else if(MODE==='sphere'){
-      const g=new THREE.SphereGeometry(1.2,64,64);
-      const m=new THREE.MeshStandardMaterial({color:0x00ffcc,wireframe:true,emissive:0x00ffcc,emissiveIntensity:0.6});
-      obj=new THREE.Mesh(g,m); scene.add(obj);
+      const globe = new THREE.Mesh(
+        new THREE.SphereGeometry(1.2, 32, 32),
+        new THREE.MeshBasicMaterial({color:0x0077ff, wireframe:true, transparent:true, opacity:0.3})
+      );
+      obj.add(globe);
+      for(let i=0; i<3; i++){
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(1.5 + i*0.3, 0.02, 16, 100),
+          new THREE.MeshBasicMaterial({color:0x00ffcc, transparent:true, opacity:0.8 - i*0.2})
+        );
+        ring.rotation.x = Math.PI/2 + i*0.4;
+        ring.rotation.y = i*0.5;
+        obj.add(ring);
+      }
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(0.3, 32, 32),
+        new THREE.MeshBasicMaterial({color:0xffffff})
+      );
+      obj.add(core);
     } else if(MODE==='robot'){
-      const grp=new THREE.Group();
-      const mat=new THREE.MeshStandardMaterial({color:0xc8d4e0,metalness:0.7,roughness:0.3});
-      const head=new THREE.Mesh(new THREE.BoxGeometry(1.4,1.2,1.2),mat); grp.add(head);
-      const eyeMat=new THREE.MeshBasicMaterial({color:0x00ffcc});
-      const eL=new THREE.Mesh(new THREE.SphereGeometry(0.13,20,20),eyeMat); eL.position.set(-0.32,0.15,0.62); grp.add(eL);
-      const eR=eL.clone(); eR.position.x=0.32; grp.add(eR);
-      const ant=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,0.5),mat); ant.position.y=0.85; grp.add(ant);
-      const tip=new THREE.Mesh(new THREE.SphereGeometry(0.09,20,20),eyeMat); tip.position.y=1.15; grp.add(tip);
-      obj=grp; scene.add(obj);
+      const matMetal = new THREE.MeshStandardMaterial({color:0x333344, metalness:0.9, roughness:0.2});
+      const matGlow = new THREE.MeshBasicMaterial({color:0x00ffcc});
+      const matRed = new THREE.MeshBasicMaterial({color:0xff0055});
+      
+      const head = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.4, 1.2), matMetal);
+      obj.add(head);
+      
+      const visor = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.4, 0.1), matGlow);
+      visor.position.set(0, 0.2, 0.61);
+      obj.add(visor);
+      
+      const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), matRed);
+      eyeL.position.set(-0.4, 0.2, 0.62);
+      obj.add(eyeL);
+      
+      const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), matRed);
+      eyeR.position.set(0.4, 0.2, 0.62);
+      obj.add(eyeR);
+      
+      const antL = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6), matMetal);
+      antL.position.set(-0.6, 1.0, 0); antL.rotation.z = 0.3; obj.add(antL);
+      const antR = antL.clone(); antR.position.x = 0.6; antR.rotation.z = -0.3; obj.add(antR);
+      
+      const tipL = new THREE.Mesh(new THREE.SphereGeometry(0.1), matGlow);
+      tipL.position.set(-0.75, 1.3, 0); obj.add(tipL);
+      const tipR = tipL.clone(); tipR.position.x = 0.75; obj.add(tipR);
     } else {
-      const g=new THREE.SphereGeometry(1.15,64,64);
-      const m=new THREE.MeshStandardMaterial({color:0xd8dde3,roughness:0.55,metalness:0.08});
-      obj=new THREE.Mesh(g,m); scene.add(obj);
-      const eyeMat=new THREE.MeshBasicMaterial({color:0xffffff});
-      const eL=new THREE.Mesh(new THREE.SphereGeometry(0.085,20,20),eyeMat); eL.position.set(-0.32,0.15,1.02); obj.add(eL);
-      const eR=eL.clone(); eR.position.x=0.32; obj.add(eR);
-      const gl=new THREE.PointLight(0x00ffcc,1.2,1.2); gl.position.copy(eL.position); obj.add(gl);
-      const gr=gl.clone(); gr.position.copy(eR.position); obj.add(gr);
+      const marble = new THREE.MeshStandardMaterial({color:0xdddddd, roughness:0.6, metalness:0.1});
+      const head = new THREE.Mesh(new THREE.SphereGeometry(1.1, 64, 64), marble);
+      obj.add(head);
+      
+      const eyeGlow = new THREE.MeshBasicMaterial({color:0xffffff});
+      const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), eyeGlow);
+      eyeL.position.set(-0.35, 0.2, 1.0); obj.add(eyeL);
+      const eyeR = eyeL.clone(); eyeR.position.x = 0.35; obj.add(eyeR);
+      
+      const lightEyeL = new THREE.PointLight(0x00ffff, 3, 2); lightEyeL.position.copy(eyeL.position); obj.add(lightEyeL);
+      const lightEyeR = new THREE.PointLight(0x00ffff, 3, 2); lightEyeR.position.copy(eyeR.position); obj.add(lightEyeR);
+      
+      const crown = new THREE.Mesh(new THREE.TorusGeometry(1.15, 0.05, 16, 64), new THREE.MeshStandardMaterial({color:0x00ffcc, emissive:0x00ffcc, emissiveIntensity:1}));
+      crown.position.y = 0.6; crown.rotation.x = 0.2; obj.add(crown);
     }
-    const N=160,pos=new Float32Array(N*3);
-    for(let i=0;i<N;i++){pos[i*3]=(Math.random()-.5)*6;pos[i*3+1]=(Math.random()-.5)*6;pos[i*3+2]=(Math.random()-.5)*4;}
-    const pg=new THREE.BufferGeometry(); pg.setAttribute('position',new THREE.BufferAttribute(pos,3));
-    const poeira=new THREE.Points(pg,new THREE.PointsMaterial({color:0x00ffcc,size:0.025,transparent:true,opacity:0.6}));
+
+    scene.add(obj);
+
+    const N=300, pos=new Float32Array(N*3);
+    for(let i=0;i<N;i++){
+      pos[i*3]=(Math.random()-.5)*10;
+      pos[i*3+1]=(Math.random()-.5)*10;
+      pos[i*3+2]=(Math.random()-.5)*6;
+    }
+    const pg=new THREE.BufferGeometry();
+    pg.setAttribute('position',new THREE.BufferAttribute(pos,3));
+    const poeira=new THREE.Points(pg,new THREE.PointsMaterial({color:0x00ffcc,size:0.03,transparent:true,opacity:0.6}));
     scene.add(poeira);
-    function resize(){const w=canvas.clientWidth||canvas.parentElement.clientWidth||300;
+
+    function resize(){
+      const w=canvas.clientWidth||canvas.parentElement.clientWidth||300;
       const h=canvas.clientHeight||canvas.parentElement.clientHeight||220;
-      renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix();}
-    window.addEventListener('resize',resize); resize();
+      renderer.setSize(w,h,false);
+      camera.aspect=w/h;
+      camera.updateProjectionMatrix();
+    }
+    window.addEventListener('resize',resize);
+    resize();
+
+    document.getElementById('fb').style.display='none';
+
     let t=0;
-    (function loop(){t+=0.01;
-      obj.rotation.y=Math.sin(t*0.6)*0.4;
-      obj.rotation.x=Math.sin(t*0.4)*0.08;
-      poeira.rotation.y=t*0.05;
-      renderer.render(scene,camera); requestAnimationFrame(loop);})();
-  }catch(e){
+    (function loop(){
+      t+=0.01;
+      if(MODE==='sphere'){
+        obj.children[0].rotation.y = t*0.5;
+        obj.children[1].rotation.y = t*0.8;
+        obj.children[2].rotation.y = -t*0.4;
+        obj.children[3].rotation.z = t*0.3;
+      } else {
+        obj.rotation.y = Math.sin(t*0.5)*0.5;
+        obj.rotation.x = Math.sin(t*0.3)*0.1;
+      }
+      poeira.rotation.y = t*0.05;
+      renderer.render(scene,camera);
+      requestAnimationFrame(loop);
+    })();
+  } catch(e) {
     document.getElementById('c').style.display='none';
-    const fb=document.getElementById('fb'); fb.style.display='block';
-    fb.textContent='⚡ Avatar 3D indisponível ('+e.message+')';
+    const fb=document.getElementById('fb');
+    fb.style.display='block';
+    fb.innerHTML='⚡ Erro ao renderizar: ' + e.message;
   }
 })();
 </script></body></html>
 """
 
 def render_avatar(modo: str = "zeus", altura: int = 240):
-    html = _AVATAR_BASE.replace("__MODE__", modo)
+    html = AVATAR_BASE.replace("MODE_", modo)
     components.html(html, height=altura, scrolling=False)
+
 def render_avatares_sidebar():
     st.sidebar.markdown("### ⚡ Avatar")
     modo = st.sidebar.radio(
