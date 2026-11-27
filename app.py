@@ -1135,7 +1135,21 @@ _AVATAR_BASE = r"""
 </script></body></html>
 """
 
-def render_avatar(modo: str
+def render_avatar(modo: str = "zeus", altura: int = 240):
+    html = AVATAR_BASE.replace("_MODE", modo).replace('"MODE"', f'"{modo}"')
+    components.html(html, height=altura, scrolling=False)
+
+def render_avatares_sidebar():
+    st.sidebar.markdown("### ⚡ Avatar")
+    modo = st.sidebar.radio(
+        "Escolha",
+        ["👁️ Olho", "🌐 Esfera 3D", "🤖 Robô", "⚡ Zeus"],
+        key="avatar_modo",
+        horizontal=False,
+        label_visibility="collapsed",
+    )
+    mapa = {"👁️ Olho": "eye", "🌐 Esfera 3D": "sphere", "🤖 Robô": "robot", "⚡ Zeus": "zeus"}
+    render_avatar(mapa.get(modo, "zeus"), 220)
 
 # ============================================================
 # SPOTIFY LATERAL
@@ -1159,9 +1173,12 @@ def sp_get_token():
     if _cache_tok["tok"] and time.time() < _cache_tok["exp"] - 30:
         return _cache_tok["tok"]
     try:
-        r = requests.post(TOKEN_URL_SP,
+        r = requests.post(
+            TOKEN_URL_SP,
             data={"grant_type": "refresh_token", "refresh_token": rt},
-            auth=(cid, cs), timeout=20)
+            auth=(cid, cs),
+            timeout=20,
+        )
         if r.status_code != 200:
             return None
         d = r.json()
@@ -1182,18 +1199,30 @@ def sp_status():
     try:
         r = requests.get(f"{API_SP}/me/player", headers=h, timeout=10)
         if r.status_code == 204:
-            return {"ok": True, "tocando": False, "nome": "—", "artista": "—", "capa": "", "progresso_ms": 0, "duracao_ms": 0, "volume": 50}
+            return {
+                "ok": True,
+                "tocando": False,
+                "nome": "—",
+                "artista": "—",
+                "capa": "",
+                "progresso_ms": 0,
+                "duracao_ms": 0,
+                "volume": 50,
+            }
         if r.status_code != 200:
             return {"ok": False, "msg": f"HTTP {r.status_code}"}
         d = r.json()
         item = d.get("item") or {}
-        return {"ok": True, "tocando": bool(d.get("is_playing")),
+        return {
+            "ok": True,
+            "tocando": bool(d.get("is_playing")),
             "nome": item.get("name", "—"),
             "artista": ", ".join(a["name"] for a in item.get("artists", [])) or "—",
             "capa": (item.get("album", {}).get("images") or [{}])[0].get("url", ""),
             "progresso_ms": d.get("progress_ms", 0),
             "duracao_ms": item.get("duration_ms", 0),
-            "volume": (d.get("device") or {}).get("volume_percent", 50)}
+            "volume": (d.get("device") or {}).get("volume_percent", 50),
+        }
     except Exception as e:
         return {"ok": False, "msg": str(e)[:120]}
 
@@ -1211,28 +1240,48 @@ def sp_acao(cmd, **params):
         elif cmd == "prev":
             r = requests.post(f"{API_SP}/me/player/previous", headers=h, timeout=10)
         elif cmd == "volume":
-            r = requests.put(f"{API_SP}/me/player/volume", headers=h,
-                params={"volume_percent": params["pct"]}, timeout=10)
+            r = requests.put(
+                f"{API_SP}/me/player/volume",
+                headers=h,
+                params={"volume_percent": params["pct"]},
+                timeout=10,
+            )
         elif cmd == "tocar":
             q = params["q"]
-            r1 = requests.get(f"{API_SP}/search", headers=h,
-                params={"q": q, "type": "track", "limit": 1}, timeout=15)
+            r1 = requests.get(
+                f"{API_SP}/search",
+                headers=h,
+                params={"q": q, "type": "track", "limit": 1},
+                timeout=15,
+            )
             tr = r1.json().get("tracks", {}).get("items", []) if r1.status_code == 200 else []
             if not tr:
                 return False, "Nada encontrado"
-            requests.put(f"{API_SP}/me/player/play", headers=h,
-                json={"uris": [tr[0]["uri"]]}, timeout=10)
+            requests.put(
+                f"{API_SP}/me/player/play",
+                headers=h,
+                json={"uris": [tr[0]["uri"]]},
+                timeout=10,
+            )
             return True, f"Tocando: {tr[0]['name']}"
         elif cmd == "artista":
             nome = params["nome"]
-            r1 = requests.get(f"{API_SP}/search", headers=h,
-                params={"q": nome, "type": "artist", "limit": 1}, timeout=15)
+            r1 = requests.get(
+                f"{API_SP}/search",
+                headers=h,
+                params={"q": nome, "type": "artist", "limit": 1},
+                timeout=15,
+            )
             arts = r1.json().get("artists", {}).get("items", []) if r1.status_code == 200 else []
             if not arts:
                 return False, f"Artista não encontrado: {nome}"
             aid = arts[0]["id"]
-            r2 = requests.get(f"{API_SP}/artists/{aid}/top-tracks", headers=h,
-                params={"market": "BR"}, timeout=15)
+            r2 = requests.get(
+                f"{API_SP}/artists/{aid}/top-tracks",
+                headers=h,
+                params={"market": "BR"},
+                timeout=15,
+            )
             uris = [t["uri"] for t in r2.json().get("tracks", [])[:20]] if r2.status_code == 200 else []
             if not uris:
                 return False, "Sem faixas"
@@ -1257,7 +1306,7 @@ def render_spotify_sidebar():
         return
     if s.get("capa"):
         st.sidebar.image(s["capa"], width=170)
-    st.sidebar.caption(f"*{s.get('nome','—')}*\n\n{s.get('artista','—')}")
+    st.sidebar.caption(f"{s.get('nome','—')}\n\n{s.get('artista','—')}")
     if s.get("duracao_ms"):
         st.sidebar.progress(min(max(s["progresso_ms"] / s["duracao_ms"], 0.0), 1.0))
     c1, c2, c3 = st.sidebar.columns(3)
@@ -1274,7 +1323,7 @@ def render_spotify_sidebar():
     c5.write(f"🔊 {vol}%")
     if c6.button("🔊+", key="sp_vp"):
         sp_acao("volume", pct=min(100, vol + 1))
-    st.sidebar.markdown("*Pedir música*")
+    st.sidebar.markdown("Pedir música")
     pedido = st.sidebar.text_input("Ex.: tocar Legião Urbana", key="sp_pedido")
     a, b = st.sidebar.columns(2)
     if a.button("🎵 Tocar", key="sp_tocar") and pedido.strip():
