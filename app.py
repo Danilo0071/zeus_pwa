@@ -3457,17 +3457,17 @@ if (HAS3) {
   arcLines = new THREE.LineSegments(arcGeo, arcMat); sphereGroup.add(arcLines);
   for (let i = 0; i < 5; i++) { const sm = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 16), new THREE.MeshBasicMaterial({ color: PAL[i] })); scene.add(sm); sats.push({ m: sm, r: 3.1 + i * 0.35, sp: 0.5 + i * 0.17, inc: i * 0.6, ph: i * 1.3 }); }
 
-  // ---- ZEUS 3D (torso, cabeca, barba, olhos, raio) ----
+ // ---- ZEUS 3D (Mármore, Coroa e Olhos Neon) ----
   zeusGroup = new THREE.Group(); zeusGroup.visible = false; scene.add(zeusGroup);
 
-  const peleMat = new THREE.MeshStandardMaterial({ color: 0xc9966a, roughness: 0.6, metalness: 0.05 });
-  const mantoMat = new THREE.MeshStandardMaterial({ color: 0xb08d57, roughness: 0.5, metalness: 0.3 });
-  const barbaMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6, roughness: 0.8, metalness: 0.0 });
+  const marbleMat = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.4, metalness: 0.1 });
+  const goldMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, metalness: 0.9, roughness: 0.2, emissive: 0xffaa00, emissiveIntensity: 0.2 });
+  const barbaMat = new THREE.MeshStandardMaterial({ color: 0xd0d0d0, roughness: 0.8, metalness: 0.0 });
 
-  const zCorpo = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.35, 2.6, 24), mantoMat);
+  const zCorpo = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.35, 2.6, 24), marbleMat);
   zCorpo.position.y = -0.1; zeusGroup.add(zCorpo);
 
-  const zCabeca = new THREE.Mesh(new THREE.SphereGeometry(0.62, 32, 32), peleMat);
+  const zCabeca = new THREE.Mesh(new THREE.SphereGeometry(0.62, 32, 32), marbleMat);
   zCabeca.position.y = 1.55; zeusGroup.add(zCabeca);
 
   const zBarba = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.05, 20), barbaMat);
@@ -3476,25 +3476,33 @@ if (HAS3) {
   const zCabelo = new THREE.Mesh(new THREE.SphereGeometry(0.68, 20, 20, 0, Math.PI * 2, 0, Math.PI * 0.62), barbaMat);
   zCabelo.position.y = 1.62; zeusGroup.add(zCabelo);
 
+  // Coroa de Ouro
+  const zCoroa = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.04, 16, 64), goldMat);
+  zCoroa.position.y = 1.8; zCoroa.rotation.x = Math.PI / 2 - 0.2; zeusGroup.add(zCoroa);
+
+  // Olhos Neon
   const olhoGeo = new THREE.SphereGeometry(0.075, 12, 12);
   const zOlhoEsq = new THREE.Mesh(olhoGeo, new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 2 }));
   zOlhoEsq.position.set(-0.2, 1.6, 0.52); zeusGroup.add(zOlhoEsq);
   const zOlhoDir = zOlhoEsq.clone(); zOlhoDir.position.x = 0.2; zeusGroup.add(zOlhoDir);
   const zLuzOlhos = new THREE.PointLight(0x00e5ff, 1.2, 3); zLuzOlhos.position.set(0, 1.6, 0.6); zeusGroup.add(zLuzOlhos);
 
+  // Braços
   const bracoGeo = new THREE.CylinderGeometry(0.16, 0.13, 1.25, 14);
-  const zBracoEsq = new THREE.Mesh(bracoGeo, peleMat);
+  const zBracoEsq = new THREE.Mesh(bracoGeo, marbleMat);
   zBracoEsq.position.set(-1.05, 0.55, 0); zBracoEsq.rotation.z = Math.PI * 0.18; zeusGroup.add(zBracoEsq);
-  const zBracoDir = new THREE.Mesh(bracoGeo, peleMat);
+  const zBracoDir = new THREE.Mesh(bracoGeo, marbleMat);
   zBracoDir.position.set(1.0, 1.15, 0); zBracoDir.rotation.z = -Math.PI * 0.62; zeusGroup.add(zBracoDir);
 
-  // raio: forma em zigue-zague extrudada, com brilho aditivo
+  // Raio (Corrigido com const)
   const raioShape = new THREE.Shape();
   raioShape.moveTo(0, 0.55); raioShape.lineTo(-0.16, 0.1); raioShape.lineTo(-0.02, 0.1);
   raioShape.lineTo(-0.2, -0.5); raioShape.lineTo(0.2, 0.0); raioShape.lineTo(0.04, 0.0); raioShape.lineTo(0, 0.55);
   const raioGeo = new THREE.ExtrudeGeometry(raioShape, { depth: 0.04, bevelEnabled: false });
-  raioMat = new THREE.MeshBasicMaterial({ color: 0xfff2a0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending });
-  zRaio = new THREE.Mesh(raioGeo, raioMat);
+  
+  const raioMat = new THREE.MeshBasicMaterial({ color: 0xfff2a0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending });
+  const zRaio = new THREE.Mesh(raioGeo, raioMat);
+  
   zRaio.scale.set(1.3, 1.3, 1.3); zRaio.position.set(1.55, 1.85, 0.05); zRaio.rotation.z = -0.3;
   zeusGroup.add(zRaio);
 
