@@ -4201,39 +4201,22 @@ def _zf_gerar_audio(texto, voz_id):
             except Exception:
                 continue
 
-    try:
-        from io import BytesIO
-        from gtts import gTTS
-
-        buf = BytesIO()
-        gTTS(text=texto_curto, lang="pt").write_to_fp(buf)
-        buf.seek(0)
-        dados = buf.read()
-        if dados:
-            return dados, "audio/mpeg"
-    except Exception:
-        pass
-
-    return None, None
-
-
-def _zf_falar_resposta(texto, voz_id, chave_id=""):
+ def _zf_falar_resposta(texto, voz_id, chave_id=""):
     import base64
+    import json
     import re as _re_safe
     import streamlit.components.v1 as components
 
-    chave_limpa = re_safe.sub(r"[^a-zA-Z0-9-]", "", str(chave_id or "resp")) or "resp"
+    chave_limpa = _re_safe.sub(r"[^a-zA-Z0-9-]", "", str(chave_id or "resp")) or "resp"
     audio_bytes, mime = _zf_gerar_audio(texto, voz_id)
-    texto_js = (
-        str(texto or "")[:700]
-        .replace("\\", "\\\\")
-        .replace("'", "\\'")
-        .replace('"', '\\"')
-        .replace("\n", " ")
-        .replace("\r", " ")
-    )
 
-   if audio_bytes and mime:
+    # CORREÇÃO: transforma o texto em uma string JavaScript segura
+    texto_js = json.dumps(
+        str(texto or "")[:700],
+        ensure_ascii=False
+    ).replace("</", "<\\/")
+
+    if audio_bytes and mime:
         b64 = base64.b64encode(audio_bytes).decode("ascii")
         components.html(
             f"""
@@ -4279,7 +4262,7 @@ def _zf_falar_resposta(texto, voz_id, chave_id=""):
         f"""
         <div style="display:flex;align-items:center;gap:8px;background:#0e1525;border:1px solid #1f3354;border-radius:10px;padding:6px 10px;color:#cfe6ff;font-family:sans-serif;font-size:12px;">
           <span style="flex:1;">Resposta pronta para falar</span>
-          <button onclick="if('speechSynthesis' in window){{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(\"{texto_js}\");u.lang='pt-BR';u.rate=1.0;window.speechSynthesis.speak(u);}}"
+          <button onclick="if('speechSynthesis' in window){{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance({texto_js});u.lang='pt-BR';u.rate=1.0;window.speechSynthesis.speak(u);}}"
                   style="background:#143628;color:#80ed99;border:1px solid #2d6a4f;border-radius:6px;padding:5px 9px;cursor:pointer;font-weight:600;">
             Falar
           </button>
@@ -4289,7 +4272,7 @@ def _zf_falar_resposta(texto, voz_id, chave_id=""):
             if (!('speechSynthesis' in window)) return;
             try {{
                 window.speechSynthesis.cancel();
-                const u = new SpeechSynthesisUtterance("{texto_js}");
+                const u = new SpeechSynthesisUtterance({texto_js});
                 u.lang = 'pt-BR';
                 u.rate = 1.0;
                 window.speechSynthesis.speak(u);
@@ -4468,7 +4451,6 @@ def _zf_widget_escuta_continua(ativo: bool, segundos_silencio: float = 2.0):
         height=76,
     )
 
-
 def _zf_transcrever_voz(audio_bytes, nome_arq="fala.wav"):
     if not audio_bytes:
         return "", "Audio vazio ou nao capturado. Tente falar novamente."
@@ -4500,139 +4482,7 @@ def _zf_transcrever_voz(audio_bytes, nome_arq="fala.wav"):
 
 
 
-   def avatar_zeus_3d_html():
-    """Avatar 3D realista de Zeus mitologico com raios nas maos (Three.js)."""
-    return """
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  body, html { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#05070f; }
-  #c { width:100%; height:100%; display:block; }
-</style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-</head>
-<body>
-<canvas id="c"></canvas>
-<script>
-const canvas = document.getElementById("c");
-const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-camera.position.set(0, 1.4, 4.2);
-
-scene.add(new THREE.AmbientLight(0x334466, 0.7));
-const key = new THREE.DirectionalLight(0xfff0d0, 1.1);
-key.position.set(3, 5, 4);
-scene.add(key);
-const rim = new THREE.PointLight(0x00ccff, 1.4, 12);
-rim.position.set(-3, 2, 2);
-scene.add(rim);
-const glow = new THREE.PointLight(0xffaa00, 2.2, 8);
-glow.position.set(0, 2.5, 0);
-scene.add(glow);
-
-const group = new THREE.Group();
-scene.add(group);
-
-const torsoMat = new THREE.MeshStandardMaterial({color:0xc4a574, metalness:0.15, roughness:0.55});
-const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 1.3, 16), torsoMat);
-torso.position.y = 0.9;
-group.add(torso);
-
-const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 24, 24), torsoMat);
-head.position.y = 1.85;
-group.add(head);
-
-const hairMat = new THREE.MeshStandardMaterial({color:0xf0f0f5, metalness:0.05, roughness:0.7});
-const hair = new THREE.Mesh(new THREE.SphereGeometry(0.48, 16, 16), hairMat);
-hair.position.y = 2.05;
-hair.scale.y = 0.7;
-group.add(hair);
-const beard = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.55, 12), hairMat);
-beard.position.set(0, 1.55, 0.28);
-beard.rotation.x = Math.PI;
-group.add(beard);
-
-const eyeMat = new THREE.MeshBasicMaterial({color:0x00eeff});
-const le = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), eyeMat);
-le.position.set(-0.14, 1.88, 0.36);
-const re = le.clone(); re.position.x = 0.14;
-group.add(le, re);
-
-const armMat = new THREE.MeshStandardMaterial({color:0xb8956a, metalness:0.1, roughness:0.6});
-const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 1.1, 10), armMat);
-armL.position.set(-0.85, 1.15, 0.1);
-armL.rotation.z = 0.55;
-const armR = armL.clone();
-armR.position.set(0.85, 1.15, 0.1);
-armR.rotation.z = -0.55;
-group.add(armL, armR);
-
-function makeBolt(x, y, z, rotZ) {
-  const boltGroup = new THREE.Group();
-  const boltMat = new THREE.MeshBasicMaterial({color:0xffee55, transparent:true, opacity:0.95});
-  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.02, 1.3, 6), boltMat);
-  core.position.y = 0.65;
-  boltGroup.add(core);
-  for (let i=0; i<4; i++) {
-    const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.01, 0.45, 5), boltMat);
-    branch.position.set((i%2===0?0.12:-0.12), 0.4 + i*0.22, 0);
-    branch.rotation.z = (i%2===0?0.6:-0.6);
-    boltGroup.add(branch);
-  }
-  const glowMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.25, 12, 12),
-    new THREE.MeshBasicMaterial({color:0xffcc00, transparent:true, opacity:0.25})
-  );
-  glowMesh.position.y = 0.3;
-  boltGroup.add(glowMesh);
-
-  boltGroup.position.set(x, y, z);
-  boltGroup.rotation.z = rotZ;
-  return boltGroup;
-}
-const boltL = makeBolt(-1.35, 0.7, 0.2, 0.4);
-const boltR = makeBolt(1.35, 0.7, 0.2, -0.4);
-group.add(boltL, boltR);
-
-const ring = new THREE.Mesh(
-  new THREE.TorusGeometry(1.6, 0.03, 12, 64),
-  new THREE.MeshBasicMaterial({color:0x00ffff, transparent:true, opacity:0.6})
-);
-ring.rotation.x = Math.PI/2.4;
-ring.position.y = 0.9;
-group.add(ring);
-
-function resize() {
-  const w = canvas.clientWidth || 280;
-  const h = canvas.clientHeight || 280;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-}
-window.addEventListener("resize", resize);
-resize();
-
-let t = 0;
-function animate() {
-  requestAnimationFrame(animate);
-  t += 0.016;
-  group.rotation.y = Math.sin(t * 0.4) * 0.25;
-  boltL.rotation.z = 0.4 + Math.sin(t * 6) * 0.08;
-  boltR.rotation.z = -0.4 + Math.sin(t * 6 + 1) * 0.08;
-  ring.rotation.z += 0.012;
-  glow.intensity = 1.8 + Math.sin(t * 5) * 0.6;
-  renderer.render(scene, camera);
-}
-animate();
-</script>
-</body>
-</html>
-"""
-
+   
 def zf_render_painel():
     import hashlib
 
