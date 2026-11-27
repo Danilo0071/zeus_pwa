@@ -3531,7 +3531,8 @@ function updateZeus(t, dt) {
   raioMat.opacity = Math.min(1, cintilar);
   const escalaRaio = 1.3 + (sp || ls ? 0.08 * Math.abs(Math.sin(t * 10)) : 0);
   zRaio.scale.set(escalaRaio, escalaRaio, escalaRaio);
-  camera.lookAt(0, 0.6, 0);
+  camera.position.set(0, 1.5, 4.5);
+  camera.lookAt(0, 0.5, 0);
 }
 
 function frame(now) {
