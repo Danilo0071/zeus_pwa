@@ -4233,7 +4233,7 @@ def _zf_falar_resposta(texto, voz_id, chave_id=""):
         .replace("\r", " ")
     )
 
-    if audio_bytes and mime:
+   if audio_bytes and mime:
         b64 = base64.b64encode(audio_bytes).decode("ascii")
         components.html(
             f"""
