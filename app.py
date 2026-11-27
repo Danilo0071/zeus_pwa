@@ -3457,61 +3457,83 @@ if (HAS3) {
   arcLines = new THREE.LineSegments(arcGeo, arcMat); sphereGroup.add(arcLines);
   for (let i = 0; i < 5; i++) { const sm = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 16), new THREE.MeshBasicMaterial({ color: PAL[i] })); scene.add(sm); sats.push({ m: sm, r: 3.1 + i * 0.35, sp: 0.5 + i * 0.17, inc: i * 0.6, ph: i * 1.3 }); }
 
-  // ---- ZEUS 3D (torso, cabeca, barba, olhos, raio) ----
-  zeusGroup = new THREE.Group(); zeusGroup.visible = false; scene.add(zeusGroup);
+// ---- ZEUS 3D (torso, cabeca, barba, olhos, raio) ----
+let zOlhoEsq, zOlhoDir, zLuzOlhos, raioMat, zRaio;
+
+function initZeus() {
+  zeusGroup = new THREE.Group();
+  zeusGroup.visible = false;
+  scene.add(zeusGroup);
 
   const peleMat = new THREE.MeshStandardMaterial({ color: 0xc9966a, roughness: 0.6, metalness: 0.05 });
   const mantoMat = new THREE.MeshStandardMaterial({ color: 0xb08d57, roughness: 0.5, metalness: 0.3 });
   const barbaMat = new THREE.MeshStandardMaterial({ color: 0xe6e6e6, roughness: 0.8, metalness: 0.0 });
 
   const zCorpo = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.35, 2.6, 24), mantoMat);
-  zCorpo.position.y = -0.1; zeusGroup.add(zCorpo);
+  zCorpo.position.y = -0.1;
+  zeusGroup.add(zCorpo);
 
   const zCabeca = new THREE.Mesh(new THREE.SphereGeometry(0.62, 32, 32), peleMat);
-  zCabeca.position.y = 1.55; zeusGroup.add(zCabeca);
+  zCabeca.position.y = 1.55;
+  zeusGroup.add(zCabeca);
 
   const zBarba = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.05, 20), barbaMat);
-  zBarba.position.set(0, 0.95, 0.08); zBarba.rotation.x = Math.PI; zeusGroup.add(zBarba);
+  zBarba.position.set(0, 0.95, 0.08);
+  zBarba.rotation.x = Math.PI;
+  zeusGroup.add(zBarba);
 
   const zCabelo = new THREE.Mesh(new THREE.SphereGeometry(0.68, 20, 20, 0, Math.PI * 2, 0, Math.PI * 0.62), barbaMat);
-  zCabelo.position.y = 1.62; zeusGroup.add(zCabelo);
+  zCabelo.position.y = 1.62;
+  zeusGroup.add(zCabelo);
 
   const olhoGeo = new THREE.SphereGeometry(0.075, 12, 12);
-  const zOlhoEsq = new THREE.Mesh(olhoGeo, new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 2 }));
-  zOlhoEsq.position.set(-0.2, 1.6, 0.52); zeusGroup.add(zOlhoEsq);
-  const zOlhoDir = zOlhoEsq.clone(); zOlhoDir.position.x = 0.2; zeusGroup.add(zOlhoDir);
-  const zLuzOlhos = new THREE.PointLight(0x00e5ff, 1.2, 3); zLuzOlhos.position.set(0, 1.6, 0.6); zeusGroup.add(zLuzOlhos);
+  zOlhoEsq = new THREE.Mesh(olhoGeo, new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x00e5ff, emissiveIntensity: 2 }));
+  zOlhoEsq.position.set(-0.2, 1.6, 0.52);
+  zeusGroup.add(zOlhoEsq);
+
+  zOlhoDir = zOlhoEsq.clone();
+  zOlhoDir.position.x = 0.2;
+  zeusGroup.add(zOlhoDir);
+
+  zLuzOlhos = new THREE.PointLight(0x00e5ff, 1.2, 3);
+  zLuzOlhos.position.set(0, 1.6, 0.6);
+  zeusGroup.add(zLuzOlhos);
 
   const bracoGeo = new THREE.CylinderGeometry(0.16, 0.13, 1.25, 14);
   const zBracoEsq = new THREE.Mesh(bracoGeo, peleMat);
-  zBracoEsq.position.set(-1.05, 0.55, 0); zBracoEsq.rotation.z = Math.PI * 0.18; zeusGroup.add(zBracoEsq);
+  zBracoEsq.position.set(-1.05, 0.55, 0);
+  zBracoEsq.rotation.z = Math.PI * 0.18;
+  zeusGroup.add(zBracoEsq);
+
   const zBracoDir = new THREE.Mesh(bracoGeo, peleMat);
-  zBracoDir.position.set(1.0, 1.15, 0); zBracoDir.rotation.z = -Math.PI * 0.62; zeusGroup.add(zBracoDir);
+  zBracoDir.position.set(1.0, 1.15, 0);
+  zBracoDir.rotation.z = -Math.PI * 0.62;
+  zeusGroup.add(zBracoDir);
 
   // raio: forma em zigue-zague extrudada, com brilho aditivo
   const raioShape = new THREE.Shape();
-  raioShape.moveTo(0, 0.55); raioShape.lineTo(-0.16, 0.1); raioShape.lineTo(-0.02, 0.1);
-  raioShape.lineTo(-0.2, -0.5); raioShape.lineTo(0.2, 0.0); raioShape.lineTo(0.04, 0.0); raioShape.lineTo(0, 0.55);
+  raioShape.moveTo(0, 0.55);
+  raioShape.lineTo(-0.16, 0.1);
+  raioShape.lineTo(-0.02, 0.1);
+  raioShape.lineTo(-0.2, -0.5);
+  raioShape.lineTo(0.2, 0.0);
+  raioShape.lineTo(0.04, 0.0);
+  raioShape.lineTo(0, 0.55);
+
   const raioGeo = new THREE.ExtrudeGeometry(raioShape, { depth: 0.04, bevelEnabled: false });
   raioMat = new THREE.MeshBasicMaterial({ color: 0xfff2a0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending });
   zRaio = new THREE.Mesh(raioGeo, raioMat);
-  zRaio.scale.set(1.3, 1.3, 1.3); zRaio.position.set(1.55, 1.85, 0.05); zRaio.rotation.z = -0.3;
+  zRaio.scale.set(1.3, 1.3, 1.3);
+  zRaio.position.set(1.55, 1.85, 0.05);
+  zRaio.rotation.z = -0.3;
   zeusGroup.add(zRaio);
 
   zeusGroup.position.y = -0.4;
 }
-function applyAvatar() {
-  document.getElementById("title").textContent = TITLES[avatar] || TITLES.sphere;
-  box.style.display = (avatar === "sphere" || avatar === "zeus") ? "block" : "none";
-  cv.style.display = (avatar === "sphere" || avatar === "zeus") ? "none" : "block";
-  if (sphereGroup) sphereGroup.visible = (avatar === "sphere");
-  if (zeusGroup) zeusGroup.visible = (avatar === "zeus");
-  onResize(); setTimeout(onResize, 300);
-}
-window.addEventListener("resize", onResize); onResize(); setTimeout(onResize, 300); setTimeout(onResize, 1000);
+initZeus();
 
-let last = performance.now(); const t0 = last;
 function updateZeus(t, dt) {
+  if (!zeusGroup || !zOlhoEsq || !zOlhoDir || !zLuzOlhos || !raioMat || !zRaio) return;
   const th = state === "thinking", sp = state === "speaking", ls = state === "listening";
   zeusGroup.rotation.y = look.x * 0.25;
   zeusGroup.position.y = -0.4 + Math.sin(t * 1.3) * 0.03;
@@ -3526,9 +3548,28 @@ function updateZeus(t, dt) {
   camera.lookAt(0, 0.6, 0);
 }
 
+function applyAvatar() {
+  document.getElementById("title").textContent = TITLES[avatar] || TITLES.sphere;
+  box.style.display = (avatar === "sphere" || avatar === "zeus") ? "block" : "none";
+  cv.style.display = (avatar === "sphere" || avatar === "zeus") ? "none" : "block";
+  if (sphereGroup) sphereGroup.visible = (avatar === "sphere");
+  if (zeusGroup) zeusGroup.visible = (avatar === "zeus");
+  onResize();
+  setTimeout(onResize, 300);
+}
+window.addEventListener("resize", onResize);
+onResize();
+setTimeout(onResize, 300);
+setTimeout(onResize, 1000);
+
+let last = performance.now();
+const t0 = last;
+
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.1, (now - last) / 1000); last = now; const t = (now - t0) / 1000;
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  const t = (now - t0) / 1000;
   updateCommon(now, dt, t);
   if (avatar === "zeus") {
     if (!HAS3) return;
@@ -3538,11 +3579,14 @@ function frame(now) {
   } else if (avatar === "sphere") {
     if (!HAS3) return;
     const th = state === "thinking", sp = state === "speaking", ls = state === "listening";
-    sphereGroup.rotation.y += th ? 0.04 : 0.005; sphereGroup.rotation.x += 0.002;
-    const sc = 1 + (sp ? 0.04 * Math.sin(t * 12) : 0) + (ls ? pulse * 0.08 : 0); sphereGroup.scale.set(sc, sc, sc);
+    sphereGroup.rotation.y += th ? 0.04 : 0.005;
+    sphereGroup.rotation.x += 0.002;
+    const sc = 1 + (sp ? 0.04 * Math.sin(t * 12) : 0) + (ls ? pulse * 0.08 : 0);
+    sphereGroup.scale.set(sc, sc, sc);
     rings.forEach(function (r) { r.mesh.rotation.z += r.sx * (th ? 6 : 1); r.mesh.rotation.x += r.sy * (th ? 6 : 1); });
     wireMaterial.opacity = 0.2 + Math.sin(t * (ls ? 8 : 3)) * 0.15 + (ls ? pulse * 0.3 : 0);
-    pointLight1.intensity = 2 + Math.sin(t * 4); pointLight2.intensity = 2 + Math.cos(t * 4);
+    pointLight1.intensity = 2 + Math.sin(t * 4);
+    pointLight2.intensity = 2 + Math.cos(t * 4);
     particlesMesh.rotation.y = t * 0.05;
     startle = Math.max(0, startle - 0.025);
     if (ptr.active && performance.now() - ptr.last > 4000) ptr.active = false;
@@ -3552,26 +3596,36 @@ function frame(now) {
     coreMesh.material.color.copy(col3);
     const cs = 0.9 + 0.1 * Math.sin(t * 3) + (sp ? 0.12 * Math.abs(Math.sin(t * 12)) : 0) + startle * 0.5 + (hov3 ? 0.1 : 0);
     coreMesh.scale.set(cs, cs, cs);
-    glowShell.material.uniforms.c.value.copy(col3); glowShell.scale.setScalar(1 + (hov3 ? 0.04 : 0) + startle * 0.08);
-    wireMaterial.color.copy(col3); arcMat.color.copy(col3); pointLight1.color.copy(col3);
+    glowShell.material.uniforms.c.value.copy(col3);
+    glowShell.scale.setScalar(1 + (hov3 ? 0.04 : 0) + startle * 0.08);
+    wireMaterial.color.copy(col3);
+    arcMat.color.copy(col3);
+    pointLight1.color.copy(col3);
     if ((frameN++ % 3) === 0) updateArcs();
     if (hov3) sphereGroup.rotation.y += 0.02;
-    sats.forEach(function (s) { const a = t * s.sp + s.ph; s.m.position.set(Math.cos(a) * s.r, Math.sin(a) * Math.sin(s.inc) * s.r, Math.sin(a) * Math.cos(s.inc) * s.r); });
-    if (ptr.active) { camera.position.x += ((ptr.x / bw3 - 0.5) * 2.4 - camera.position.x) * 0.06; camera.position.y += ((0.5 - ptr.y / bh3) * 1.6 - camera.position.y) * 0.06; }
-    else { camera.position.x *= 0.95; camera.position.y *= 0.95; }
+    sats.forEach(function (s) {
+      const a = t * s.sp + s.ph;
+      s.m.position.set(Math.cos(a) * s.r, Math.sin(a) * Math.sin(s.inc) * s.r, Math.sin(a) * Math.cos(s.inc) * s.r);
+    });
+    if (ptr.active) {
+      camera.position.x += ((ptr.x / bw3 - 0.5) * 2.4 - camera.position.x) * 0.06;
+      camera.position.y += ((0.5 - ptr.y / bh3) * 1.6 - camera.position.y) * 0.06;
+    } else {
+      camera.position.x *= 0.95;
+      camera.position.y *= 0.95;
+    }
     camera.lookAt(0, 0, 0);
     renderer.render(scene, camera);
   } else {
     drawBg(t, dt);
-    if (avatar === "eye") drawEye(t); else drawRobot(t);
+    if (avatar === "eye") drawEye(t);
+    else drawRobot(t);
   }
 }
 requestAnimationFrame(frame);
 </script>
 </body>
 </html>
-"""
-
 
 @st.cache_resource
 def _avatar_component(_html_hash: str):
