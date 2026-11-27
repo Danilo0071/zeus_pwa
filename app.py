@@ -1136,9 +1136,8 @@ _AVATAR_BASE = r"""
 """
 
 def render_avatar(modo: str = "zeus", altura: int = 240):
-    html = AVATAR_BASE.replace("_MODE", modo).replace('"MODE"', f'"{modo}"')
+    html = _AVATAR_BASE.replace("__MODE__", modo)
     components.html(html, height=altura, scrolling=False)
-
 def render_avatares_sidebar():
     st.sidebar.markdown("### ⚡ Avatar")
     modo = st.sidebar.radio(
