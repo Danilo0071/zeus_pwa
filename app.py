@@ -4499,7 +4499,8 @@ def _zf_transcrever_voz(audio_bytes, nome_arq="fala.wav"):
         return "", f"Erro na voz: {str(e)[:100]}"
 
 
-def zf_html_zeus_3d():
+
+   def avatar_zeus_3d_html():
     """Avatar 3D realista de Zeus mitologico com raios nas maos (Three.js)."""
     return """
 <!DOCTYPE html>
@@ -4631,7 +4632,6 @@ animate();
 </body>
 </html>
 """
-
 
 def zf_render_painel():
     import hashlib
