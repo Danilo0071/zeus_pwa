@@ -1189,4 +1189,4 @@ ACOES = ["Descrever","Editar foto","Criar vídeo","Editar foto + vídeo"]
 ESTILOS_FOTO = {"Automático":"","Realista HD":"ultra realistic, sharp details, professional photography",
     "Cyberpunk neon":"cyberpunk neon lights, magenta and cyan rim light","Anime":"anime style, vibrant colors, clean line art",
     "Pintura a óleo":"classic oil painting, visible brush strokes","Preto e branco cinematográfico":"cinematic black and white, high contrast, film grain",
-    "Fantasia épica":"epic fantasy art, dramatic lighting","Cartoon 3D":"3D cartoon render
+    "Fantasia épica":"epic fantasy art, dramatic lighting","Cartoon 3D":"3D cartoon render"}
