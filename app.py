@@ -1233,7 +1233,7 @@ html,body{margin:0;height:100%;background:#0b0f19;overflow:hidden;font-family:mo
 """
 
 def render_avatar(modo: str = "zeus", altura: int = 240):
-    html = AVATAR_BASE.replace("MODE_", modo)
+    html = _AVATAR_BASE.replace("__MODE__", modo)
     components.html(html, height=altura, scrolling=False)
 
 def render_avatares_sidebar():
