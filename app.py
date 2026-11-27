@@ -3541,6 +3541,12 @@ function frame(now) {
   updateCommon(now, dt, t);
   if (avatar === "zeus") {
     if (!HAS3) return;
+    
+    // RESET TOTAL DA CÂMERA (Para não ficar perdida)
+    camera.position.set(0, 1, 5);
+    camera.lookAt(0, 0.8, 0);
+    scene.rotation.set(0, 0, 0);
+    
     trackPointer(W / 2 || 150, H * 0.4 || 150, 220);
     updateZeus(t, dt);
     renderer.render(scene, camera);
