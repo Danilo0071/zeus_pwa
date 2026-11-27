@@ -1077,7 +1077,7 @@ _AVATAR_BASE = r"""
     scene.add(new THREE.AmbientLight(0x223344,1.4));
     const key=new THREE.DirectionalLight(0x00ffcc,1.5); key.position.set(2,3,4); scene.add(key);
     const rim=new THREE.DirectionalLight(0x0077ff,1.1); rim.position.set(-3,-1,2); scene.add(rim);
-    const MODE = "_MODE_";
+    const MODE = "MODE";
     let obj;
     if(MODE==='eye'){
       const g=new THREE.SphereGeometry(1.0,64,64);
@@ -1135,16 +1135,7 @@ _AVATAR_BASE = r"""
 </script></body></html>
 """
 
-def render_avatar(modo: str = "zeus", altura: int = 240):
-    html = AVATAR_BASE.replace("MODE_", modo)
-    components.html(html, height=altura, scrolling=False)
-
-def render_avatares_sidebar():
-    st.sidebar.markdown("### ⚡ Avatar")
-    modo = st.sidebar.radio("Escolha", ["👁️ Olho", "🌐 Esfera 3D", "🤖 Robô", "⚡ Zeus"],
-        key="avatar_modo", horizontal=False, label_visibility="collapsed")
-    mapa = {"👁️ Olho": "eye", "🌐 Esfera 3D": "sphere", "🤖 Robô": "robot", "⚡ Zeus": "zeus"}
-    render_avatar(mapa.get(modo, "zeus"), 220)
+def render_avatar(modo: str
 
 # ============================================================
 # SPOTIFY LATERAL
@@ -1294,21 +1285,28 @@ def render_spotify_sidebar():
         (st.sidebar.success if ok else st.sidebar.error)(msg)
 
 # ============================================================
+# ============================================================
 # MAIN
 # ============================================================
 def processar_chat(prompt: str) -> str:
     interceptado, resp_tg = interceptar_comando_autonomo_telegram(prompt)
     if interceptado:
-        return resp_tg
+        return resp_tg or ""
+
     prompt_enriquecido, fonte = enriquecer_com_web(prompt)
     ok, texto, prov, erros = get_llm_response(
-        st.session_state.session_id, prompt_enriquecido,
-        st.session_state.get("model_sel", "groq"))
+        st.session_state.session_id,
+        prompt_enriquecido,
+        st.session_state.get("model_sel", "groq"),
+    )
     if ok:
         st.session_state.last_info = f"✅ {prov}" + (f" · 🌐 {fonte}" if fonte else "")
-        return texto
-    st.session_state.last_info = "❌ " + texto[:200]
-    return texto
+        return texto or ""
+
+    err_msg = (texto or ", ".join(erros or []) or "Erro desconhecido")[:200]
+    st.session_state.last_info = "❌ " + err_msg
+    return texto or err_msg
+
 
 def main():
     inject_theme("Cyberpunk")
@@ -1327,26 +1325,60 @@ def main():
     st.sidebar.title("⚡ Zeus 3.0")
     render_avatares_sidebar()
     st.sidebar.markdown("---")
-    st.session_state.model_sel = st.sidebar.selectbox("Modelo", PROVIDERS,
-        index=PROVIDERS.index(st.session_state.model_sel) if st.session_state.model_sel in PROVIDERS else 0,
-        key="sel_modelo")
-    st.session_state.web_mode = st.sidebar.selectbox("Busca web",
-        ["Automática", "Sempre", "Desligada"], key="sel_web")
+
+    provedores_disp = PROVIDERS if PROVIDERS else ["groq"]
+    idx_modelo = (
+        provedores_disp.index(st.session_state.model_sel)
+        if st.session_state.model_sel in provedores_disp
+        else 0
+    )
+    st.session_state.model_sel = st.sidebar.selectbox(
+        "Modelo",
+        provedores_disp,
+        index=idx_modelo,
+        key="sel_modelo",
+    )
+
+    opcoes_web = ["Automática", "Sempre", "Desligada"]
+    idx_web = (
+        opcoes_web.index(st.session_state.web_mode)
+        if st.session_state.web_mode in opcoes_web
+        else 0
+    )
+    st.session_state.web_mode = st.sidebar.selectbox(
+        "Busca web",
+        opcoes_web,
+        index=idx_web,
+        key="sel_web",
+    )
+
     st.sidebar.markdown("---")
     render_spotify_sidebar()
     st.sidebar.markdown("---")
-    s = estatisticas_aprendizado()
+
+    s = estatisticas_aprendizado() or {"total": 0, "top": []}
     st.sidebar.markdown("### 🧠 Aprendizado local")
-    st.sidebar.metric("Pares memorizados", s["total"])
-    for p, n in s["top"]:
-        st.sidebar.caption(f"• {p[:50]}… ({n}x)")
+    st.sidebar.metric("Pares memorizados", s.get("total", 0))
+    for p, n in s.get("top", []):
+        st.sidebar.caption(f"• {str(p)[:50]}… ({n}x)")
+
     if st.sidebar.button("🔄 Sincronizar B2", key="btn_sync_b2"):
-        ok = sincronizar_db_cofre(forcar=True)
-        (st.sidebar.success if ok else st.sidebar.error)("Sincronizado" if ok else "Falhou")
+        try:
+            ok = sincronizar_db_cofre(forcar=True)
+            (st.sidebar.success if ok else st.sidebar.error)(
+                "Sincronizado" if ok else "Falhou"
+            )
+        except Exception as e:
+            st.sidebar.error(f"Erro ao sincronizar B2: {e}")
+
     st.sidebar.markdown("---")
     if st.sidebar.button("📨 Ler Telegram", key="btn_tg"):
-        n = sincronizar_e_responder_telegram(responder_fn=processar_chat)
-        st.sidebar.info(f"{n} mensagem(ns) respondida(s)")
+        try:
+            n = sincronizar_e_responder_telegram(responder_fn=processar_chat)
+            st.sidebar.info(f"{n} mensagem(ns) respondida(s)")
+        except Exception as e:
+            st.sidebar.error(f"Erro ao ler Telegram: {e}")
+
     mostrar_diagnostico_cofre()
 
     # Cabeçalho
@@ -1387,6 +1419,7 @@ def main():
                 st.success("Ensinado!")
             else:
                 st.error("Falhou.")
+
 
 if __name__ == "__main__":
     main()
