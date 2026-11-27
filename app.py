@@ -1,15 +1,12 @@
 # ============================================================
-# ZEUS 3.0 - app.py
-# CHAVES: nunca coloque no código. Use .streamlit/secrets.toml (e adicione ao .gitignore)
-# ou Settings > Secrets no Streamlit Cloud:
-#   GROQ_API_KEY = "..."          GEMINI_API_KEY = "..."
-#   ANTHROPIC_API_KEY = "..."     HUGGINGFACE_API_KEY = "..."
-#   GITHUB_API_KEY = "..."        (token com acesso ao GitHub Models)
-#   DEEPINFRA_API_KEY = "..."     (deepinfra.com/dash/api_keys: Dolphin, imagem e edição de foto)
-#   OPENROUTER_API_KEY = "..."    (openrouter.ai/keys)
-#   GITHUB_USER = "..."  GITHUB_REPO = "..."   (auto-evolução: token com Contents: Read and write)
-# Opcionais (busca Google oficial): GOOGLE_API_KEY e GOOGLE_CSE_ID
-# Dependências: streamlit requests edge-tts duckduckgo-search huggingface_hub openai
+# ZEUS 3.0 - app.py  (versão consolidada + correções 2026-11-27)
+# Correções aplicadas nesta build:
+#   • E-mail: fallback 587/STARTTLS + 465/SSL (App Password Gmail)
+#   • Avatar 3D: CDN Three.js (unpkg), altura mínima, fallback visual
+#   • Aprendizado: memória local + B2 injetadas no chat; auto-registro
+#   • Comando de ensino no chat: "zeus aprenda: pergunta | resposta"
+#   • Mantém personalidade, B2, Telegram, Spotify, trader, ciclos
+# CHAVES: nunca no código. Use .streamlit/secrets.toml
 # ============================================================
 import ast
 import asyncio
@@ -538,6 +535,11 @@ def sincronizar_db_cofre(forcar: bool = False) -> bool:
 # API USADA PELO RESTO DO APP (mesmos nomes de antes)
 # ------------------------------------------------------------
 def init_db():
+    try:
+        if "zeus_init_memoria" in globals():
+            zeus_init_memoria()
+    except Exception:
+        pass
     try:
         _conectar().close()
         ctx = _cofre_ctx()
@@ -2836,8 +2838,13 @@ AVATAR_HTML = r"""
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style id="zeus-avatar-height-fix">
+  html, body, #three-box, #c2 { min-height: 480px !important; height: 100% !important; }
+  #three-box canvas { width: 100% !important; height: 100% !important; display: block; }
+</style>
 <style>
-  body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #030308; font-family: 'Courier New', Courier, monospace; color: #00ffff; }
+  body, html { margin: 0; padding: 0; width: 100%; height: 100%; min-height: 480px; overflow: hidden; background-color: #030308; font-family: 'Courier New', Courier, monospace; color: #00ffff; }
   #three-box, #c2 { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
   #voiceSel { position: absolute; top: 14px; right: 14px; z-index: 11; background: #030308; color: #00ffff; border: 1px solid #00ffff; border-radius: 4px; padding: 4px; max-width: 45%; font-family: inherit; font-size: 0.75rem; }
   .ui-overlay { position: absolute; top: 16px; left: 16px; z-index: 10; pointer-events: none; }
@@ -2855,7 +2862,7 @@ AVATAR_HTML = r"""
   .mic-btn.on { background: #ff0000; animation: pulse 1s infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,0,0,0.7); } 70% { box-shadow: 0 0 0 10px rgba(255,0,0,0); } 100% { box-shadow: 0 0 0 0 rgba(255,0,0,0); } }
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 </head>
 <body>
 <div id="three-box"></div>
@@ -3591,22 +3598,33 @@ AVATAR_MAP = {
 
 
 def render_avatar_voice(avatar_key, silence_s, stt_engine, tts_engine, voz, tts_rate):
-    comp = _avatar_component(hashlib.md5(AVATAR_HTML.encode("utf-8")).hexdigest()[:10])
-    ev = comp(
-        avatar=avatar_key,
-        reply=st.session_state.get("avatar_reply"),
-        reply_id=st.session_state.get("avatar_reply_id", 0),
-        history=st.session_state.messages[-10:],
-        silence_s=silence_s,
-        stt_engine=stt_engine,
-        tts_engine=tts_engine,
-        tts_rate=tts_rate,
-        audio_b64=st.session_state.get("avatar_audio"),
-        audio_mime="audio/mpeg",
-        transcript=st.session_state.get("avatar_transcript"),
-        key="zeus_avatar",
-        default=None,
-    )
+    """Renderiza o avatar 3D com fallback para components.html se o declare_component falhar."""
+    ev = None
+    try:
+        comp = _avatar_component(hashlib.md5(AVATAR_HTML.encode("utf-8")).hexdigest()[:10])
+        ev = comp(
+            avatar=avatar_key,
+            reply=st.session_state.get("avatar_reply"),
+            reply_id=st.session_state.get("avatar_reply_id", 0),
+            history=st.session_state.get("messages", [])[-10:],
+            silence_s=silence_s,
+            stt_engine=stt_engine,
+            tts_engine=tts_engine,
+            tts_rate=tts_rate,
+            audio_b64=st.session_state.get("avatar_audio"),
+            audio_mime="audio/mpeg",
+            transcript=st.session_state.get("avatar_transcript"),
+            key="zeus_avatar",
+            default=None,
+        )
+    except Exception as e_av:
+        # Fallback visual: mostra o HTML direto com altura fixa (sem interação de voz bidirecional)
+        st.caption(f"⚠️ Avatar em modo fallback (componente): {type(e_av).__name__}")
+        try:
+            components.html(AVATAR_HTML, height=520, scrolling=False)
+        except Exception as e2:
+            st.error(f"Avatar 3D indisponível: {e2}")
+        return
     if ev and ev.get("id") != st.session_state.get("last_event_id"):
         st.session_state.last_event_id = ev["id"]
         texto, resposta, veio_de_audio = ev.get("text"), "", bool(ev.get("audio"))
@@ -4452,11 +4470,16 @@ def zf_html_zeus_3d():
 <html>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style id="zeus-avatar-height-fix">
+  html, body, #three-box, #c2 { min-height: 480px !important; height: 100% !important; }
+  #three-box canvas { width: 100% !important; height: 100% !important; display: block; }
+</style>
 <style>
   body, html { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#05070f; }
   #c { width:100%; height:100%; display:block; }
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -4911,30 +4934,58 @@ def zf_enviar_telegram(texto: str, chat_id_destino: str = "") -> str:
 
 
 def zf_enviar_email(para: str, assunto: str, corpo: str) -> str:
+    """Envia e-mail com fallback 587/STARTTLS e 465/SSL. Usa App Password no Gmail."""
     import smtplib
     from email.mime.text import MIMEText
-    host = _secret("SMTP_HOST") or "smtp.gmail.com"
-    port = int(_secret("SMTP_PORT") or "587")
-    user = _secret("SMTP_USER")
-    password = _secret("SMTP_PASS")
-    remetente = _secret("EMAIL_FROM") or user
+    from email.mime.multipart import MIMEMultipart
+
+    host = (_secret("SMTP_HOST") or "smtp.gmail.com").strip()
+    user = (_secret("SMTP_USER") or "").strip()
+    password = (_secret("SMTP_PASS") or "").strip()
+    remetente = (_secret("EMAIL_FROM") or user or "").strip()
+
     if not user or not password:
-        return "E-mail não configurado. Coloque SMTP_USER, SMTP_PASS (e opcionalmente SMTP_HOST, SMTP_PORT, EMAIL_FROM) nos Secrets."
+        return (
+            "E-mail não configurado. Nos Secrets coloque:\n"
+            "SMTP_USER, SMTP_PASS (App Password de 16 caracteres no Gmail),\n"
+            "e opcionalmente SMTP_HOST=smtp.gmail.com e EMAIL_FROM."
+        )
+
     para = (para or "").strip()
     if not para or "@" not in para:
-        return "Destinatário inválido. Use: envia email para alguém@dominio.com assunto ... corpo ..."
+        return "Destinatário inválido. Ex: envia email para alguem@dominio.com assunto Título corpo Texto"
+
+    msg = MIMEMultipart()
+    msg["Subject"] = (assunto or "Mensagem do Zeus").strip()
+    msg["From"] = remetente
+    msg["To"] = para
+    msg.attach(MIMEText(corpo or "", "plain", "utf-8"))
+    raw = msg.as_string()
+
+    erros = []
+
+    # 1) STARTTLS 587 (padrão Gmail)
     try:
-        msg = MIMEText(corpo or "", "plain", "utf-8")
-        msg["Subject"] = assunto or "Mensagem do Zeus"
-        msg["From"] = remetente
-        msg["To"] = para
-        with smtplib.SMTP(host, port, timeout=30) as s:
+        with smtplib.SMTP(host, 587, timeout=25) as s:
+            s.ehlo()
             s.starttls()
+            s.ehlo()
             s.login(user, password)
-            s.sendmail(remetente, [para], msg.as_string())
+            s.sendmail(remetente, [para], raw)
         return f"✅ E-mail enviado para {para}."
     except Exception as e:
-        return f"❌ Erro ao enviar e-mail: {str(e)[:180]}"
+        erros.append(f"587/STARTTLS → {type(e).__name__}: {e}")
+
+    # 2) SSL 465
+    try:
+        with smtplib.SMTP_SSL(host, 465, timeout=25) as s:
+            s.login(user, password)
+            s.sendmail(remetente, [para], raw)
+        return f"✅ E-mail enviado para {para} (via SSL 465)."
+    except Exception as e:
+        erros.append(f"465/SSL → {type(e).__name__}: {e}")
+
+    return "❌ Falha no e-mail:\n- " + "\n- ".join(erros)
 
 
 def _rt_comando_telegram(texto):
@@ -5026,12 +5077,47 @@ def _rt_comando_publicar_github(texto):
     return "✅ A última habilidade já foi salva automaticamente no GitHub durante a criação (veja o link na resposta anterior)."
 
 
+
+def _rt_comando_ensinar(texto):
+    """Formato: zeus aprenda: pergunta | resposta   OU   ensine que X é Y"""
+    t = (texto or "").strip()
+    # Formato com pipe: aprenda: pergunta | resposta
+    m = re.search(r"(?i)(?:aprenda|ensine|guarde|memorize)\s*:?\s*(.+?)\s*\|\s*(.+)$", t)
+    if m:
+        pergunta, resposta = m.group(1).strip(), m.group(2).strip()
+    else:
+        # Formato: ensine que ... é/ significa ...
+        m2 = re.search(r"(?i)(?:aprenda|ensine|guarde|memorize)\s+(?:que\s+)?(.+?)\s+(?:é|eh|significa|=)\s+(.+)$", t)
+        if m2:
+            pergunta, resposta = m2.group(1).strip(), m2.group(2).strip()
+        else:
+            return (
+                "Para me ensinar use:\n"
+                "• `zeus aprenda: pergunta | resposta`\n"
+                "• ou `ensine que minha regra de stop é 1.5%`\n"
+                "O conhecimento fica no cofre B2 e na memória local."
+            )
+    msgs = []
+    try:
+        if "zf_mem_ensinar" in globals() and callable(zf_mem_ensinar):
+            msgs.append(zf_mem_ensinar(pergunta, resposta))
+    except Exception as e:
+        msgs.append(f"B2: {e}")
+    try:
+        if "zeus_ensinar" in globals() and callable(zeus_ensinar):
+            zeus_ensinar(pergunta, resposta)
+            msgs.append("Memória local atualizada.")
+    except Exception as e:
+        msgs.append(f"Local: {e}")
+    return "🧠 Aprendizado registrado.\n" + "\n".join(msgs)
+
 _RT_REGRAS = [
     (r"\b(cria|criar|faça|faca)\b.*\b(habilidade|fun[cç][aã]o|script)\b", _rt_comando_criar_habilidade),
     (r"\b(cria|criar|gera|gerar)\b.*\b(imagem|avatar|foto|ilustra[cç][aã]o)\b", _rt_comando_criar_imagem),
     (r"\b(salva|publica|comita)\b.*\bgithub\b", _rt_comando_publicar_github),
     (r"\b(telegram|tg)\b", _rt_comando_telegram),
     (r"\b(e-?mail|email)\b", _rt_comando_email),
+    (r"\b(aprenda|ensine|guarde|memorize)\b", _rt_comando_ensinar),
 ]
 
 
@@ -5044,18 +5130,95 @@ def interceptar_comando_autonomo(texto):
 
 
 def processar_prompt(prompt):
-    """Substitui a versão original: primeiro verifica se é um comando de
-    ação reconhecido; se não for, cai no comportamento normal de chat."""
+    """Roteador principal: comandos autônomos → memória → LLM original.
+    Auto-registra interações para evolução contínua do Zeus."""
     tratado, resposta = interceptar_comando_autonomo(prompt)
     if tratado:
-        sid = st.session_state.session_id
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        add_message(sid, "user", prompt)
+        sid = st.session_state.get("session_id", "default")
+        st.session_state.setdefault("messages", []).append({"role": "user", "content": prompt})
+        try:
+            add_message(sid, "user", prompt)
+        except Exception:
+            pass
         st.session_state.messages.append({"role": "assistant", "content": resposta})
-        add_message(sid, "assistant", resposta)
+        try:
+            add_message(sid, "assistant", resposta)
+        except Exception:
+            pass
         st.session_state.last_info = "⚡ Comando autônomo executado"
+        # registra para aprendizado
+        try:
+            if "zeus_registrar_interacao" in globals():
+                iid = zeus_registrar_interacao(prompt, resposta, origem="comando")
+                st.session_state["ultima_interacao_id"] = iid
+        except Exception:
+            pass
         return resposta
-    return _processar_prompt_original(prompt)
+
+    # ---- Memória B2 + local (sem chamar LLM duas vezes) ----
+    resposta = None
+    try:
+        # Só consulta memória local de alta confiança (sem gerar via API aqui)
+        if "zeus_buscar_conhecimento" in globals() and callable(zeus_buscar_conhecimento):
+            conhecido, sim = zeus_buscar_conhecimento(prompt)
+            if conhecido and conhecido.get("confianca", 0) >= 0.55 and sim >= 0.82:
+                resposta = conhecido.get("resposta") or ""
+                if "zeus_refletir" in globals():
+                    try:
+                        resposta, _ = zeus_refletir(resposta, prompt)
+                    except Exception:
+                        pass
+                try:
+                    if "zeus_registrar_interacao" in globals():
+                        iid = zeus_registrar_interacao(prompt, resposta, origem="memoria_local")
+                        st.session_state["ultima_interacao_id"] = iid
+                except Exception:
+                    pass
+                st.session_state.last_info = f"🧠 Memória local (sim={sim:.2f})"
+    except Exception:
+        pass
+
+    if not resposta:
+        # Enriquece com contexto de memória e chama o pipeline original uma vez
+        prompt_enriquecido = prompt
+        try:
+            ctx_parts = []
+            if "zf_mem_contexto" in globals() and callable(zf_mem_contexto):
+                c = zf_mem_contexto(prompt, n=4)
+                if c:
+                    ctx_parts.append(c)
+            if "zeus_contexto_para_prompt" in globals() and callable(zeus_contexto_para_prompt):
+                c2 = zeus_contexto_para_prompt(prompt)
+                if c2:
+                    ctx_parts.append(c2)
+            if ctx_parts:
+                prompt_enriquecido = (
+                    "\n".join(ctx_parts)
+                    + "\n\n[PERGUNTA DO USUÁRIO]\n"
+                    + prompt
+                )
+        except Exception:
+            prompt_enriquecido = prompt
+
+        resposta = _processar_prompt_original(prompt_enriquecido)
+
+        try:
+            if "zeus_registrar_interacao" in globals():
+                iid = zeus_registrar_interacao(prompt, resposta or "", origem="api")
+                st.session_state["ultima_interacao_id"] = iid
+        except Exception:
+            pass
+
+        try:
+            if "zeus_refletir" in globals() and callable(zeus_refletir) and resposta:
+                resp2, _ = zeus_refletir(resposta, prompt)
+                if resp2:
+                    resposta = resp2
+        except Exception:
+            pass
+
+    return resposta or ""
+
 
 
 try:
